@@ -2753,12 +2753,14 @@ export default function App() {
         candidateId: checkInCandidateId || undefined,
       };
 
-      setCheckIns((prev) => [newCheckIn, ...prev]);
       if (isSupabaseConfigured) {
-        SupabaseService.upsertCheckIn(newCheckIn).then((res) => {
-          if (!res.success)
-            triggerNotification(`Supabase Check-In: ${res.error}`, "error");
-        });
+        const res = await SupabaseService.upsertCheckIn(newCheckIn);
+        if (!res.success) {
+          console.error("Erro ao salvar check-in no Supabase:", res.error);
+          triggerNotification(`Erro ao Salvar no Banco: ${res.error || "Erro desconhecido"}. Verifique se a tabela check_ins foi criada corretamente em seu Supabase.`, "error");
+          setIsSubmittingCheckIn(false);
+          return; // Block success screen so user knows it failed to persist in backend database
+        }
 
         if (authenticatedSupporter) {
           const supporterPayload = {
@@ -2769,28 +2771,29 @@ export default function App() {
             image:
               uploadedPhotoUrl || authenticatedSupporter.image || undefined,
           };
-          SupabaseService.upsertSupporter(supporterPayload).then((res) => {
-            if (res.success) {
-              const updatedAuth = {
-                ...authenticatedSupporter,
-                full_name: checkInName,
-                name: checkInName,
-                image: uploadedPhotoUrl || authenticatedSupporter.image || "",
-              };
-              setAuthenticatedSupporter(updatedAuth);
-              localStorage.setItem(
-                "checkin_supporter",
-                JSON.stringify(updatedAuth),
-              );
-            } else {
-              console.error(
-                "Erro ao atualizar dados na tabela time_delta:",
-                res.error,
-              );
-            }
-          });
+          const supRes = await SupabaseService.upsertSupporter(supporterPayload);
+          if (supRes.success) {
+            const updatedAuth = {
+              ...authenticatedSupporter,
+              full_name: checkInName,
+              name: checkInName,
+              image: uploadedPhotoUrl || authenticatedSupporter.image || "",
+            };
+            setAuthenticatedSupporter(updatedAuth);
+            localStorage.setItem(
+              "checkin_supporter",
+              JSON.stringify(updatedAuth),
+            );
+          } else {
+            console.error(
+              "Erro ao atualizar dados na tabela time_delta:",
+              supRes.error,
+            );
+          }
         }
       }
+
+      setCheckIns((prev) => [newCheckIn, ...prev]);
       setCheckInSuccess(true);
       setIsSubmittingCheckIn(false);
       triggerNotification("Check-in registrado com sucesso!", "success");
@@ -3350,6 +3353,48 @@ export default function App() {
                     </div>
                   )}
                 </div>
+
+                {/* Status da Conexão com o Banco de Dados */}
+                {isSupabaseConfigured ? (
+                  supabaseError ? (
+                    <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-left">
+                      <div className="flex gap-2.5 items-start">
+                        <span className="text-xl">⚠️</span>
+                        <div className="font-sans select-none">
+                          <h4 className="text-xs font-black text-rose-800 uppercase tracking-widest">Erro de Banco de Dados</h4>
+                          <p className="text-[10px] text-rose-600 font-bold mt-1 leading-relaxed">
+                            O Supabase está configurado, mas houve um erro ao sincronizar os dados: <code className="bg-rose-100 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">{supabaseError}</code>. 
+                            Verifique se a tabela <code className="bg-rose-100 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">check_ins</code> e as demais tabelas foram criadas corretamente com o script SQL de instalação disponível no Painel Administrativo.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3 text-left shadow-3xs">
+                      <div className="flex gap-2 items-center">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                        <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider font-sans select-none">
+                          Sincronização em Tempo Real Ativa (Supabase Conectado)
+                        </span>
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-left">
+                    <div className="flex gap-2.5 items-start">
+                      <span className="text-xl">⚠️</span>
+                      <div className="font-sans select-none">
+                        <h4 className="text-xs font-black text-amber-850 uppercase tracking-widest">Aviso: Modo de Teste / Local Ativo</h4>
+                        <p className="text-[10px] text-amber-700 font-bold mt-1 leading-relaxed">
+                          As variáveis de ambiente do <strong className="text-amber-900 font-black">Supabase</strong> não foram configuradas nas Secrets da hospedagem deste site (estão faltando <code className="bg-amber-100 text-amber-900 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">VITE_SUPABASE_URL</code> e <code className="bg-amber-100 text-amber-900 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">VITE_SUPABASE_ANON_KEY</code>).
+                        </p>
+                        <p className="text-[10px] text-amber-700 font-bold mt-1 leading-relaxed">
+                          O check-in ficará registrado <strong className="text-amber-900 font-black">apenas localmente</strong> na memória deste navegador e não será enviado para o painel consolidado do comitê de campanha.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* GPS Status Indicator */}
                 <div className="bg-emerald-50/40 border border-emerald-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-left">

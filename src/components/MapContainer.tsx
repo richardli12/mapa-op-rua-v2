@@ -388,6 +388,34 @@ export default function MapContainer({
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
+  const [reverseGeocodedAddress, setReverseGeocodedAddress] = useState<string | null>(null);
+  const [isReverseGeocoding, setIsReverseGeocoding] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (selectedCheckInForModal && selectedCheckInForModal.userLatitude && selectedCheckInForModal.userLongitude) {
+      setReverseGeocodedAddress(null);
+      setIsReverseGeocoding(true);
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${selectedCheckInForModal.userLatitude}&lon=${selectedCheckInForModal.userLongitude}&accept-language=pt-BR`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.display_name) {
+            setReverseGeocodedAddress(data.display_name);
+          } else {
+            setReverseGeocodedAddress(null);
+          }
+        })
+        .catch((err) => {
+          console.error("Erro na geocodificação reversa do GPS físico:", err);
+          setReverseGeocodedAddress(null);
+        })
+        .finally(() => {
+          setIsReverseGeocoding(false);
+        });
+    } else {
+      setReverseGeocodedAddress(null);
+      setIsReverseGeocoding(false);
+    }
+  }, [selectedCheckInForModal]);
 
   // Controle de visibilidade do painel de navegação cascata
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -1856,7 +1884,7 @@ export default function MapContainer({
               <div className="space-y-2 mt-4 pt-4 border-t border-slate-100">
                 <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">📍 Localização Física Real (Dispositivo via GPS)</p>
                 {selectedCheckInForModal.userLatitude && selectedCheckInForModal.userLongitude ? (
-                  <div className="bg-amber-50/60 border border-amber-200/80 p-3.5 rounded-xl space-y-2.5">
+                  <div className="bg-amber-50/60 border border-amber-200/80 p-3.5 rounded-xl space-y-2.5 animate-in fade-in duration-200">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
@@ -1873,12 +1901,53 @@ export default function MapContainer({
                         Ver no Google Maps →
                       </a>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs font-mono text-slate-600 bg-white/75 p-2 rounded-lg border border-slate-100">
+                    
+                    <div className="bg-white/90 p-3.5 rounded-xl border border-slate-100 space-y-3 shadow-3xs text-xs font-sans text-slate-700">
                       <div>
-                        <span className="text-[9px] font-semibold text-slate-400 uppercase font-sans">Lat:</span> {selectedCheckInForModal.userLatitude.toFixed(6)}
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block select-none">Endereço Completo (Resolvido via GPS)</span>
+                        {isReverseGeocoding ? (
+                          <div className="flex items-center gap-1.5 text-indigo-600 font-semibold mt-1">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0"/>
+                            <span>Buscando endereço exato por coordenadas no banco cartográfico...</span>
+                          </div>
+                        ) : reverseGeocodedAddress ? (
+                          <p className="font-semibold text-slate-800 leading-relaxed mt-0.5">{reverseGeocodedAddress}</p>
+                        ) : (
+                          <p className="font-semibold text-slate-700 mt-0.5 leading-relaxed italic">
+                            {selectedCheckInForModal.rua ? `Rua ${selectedCheckInForModal.rua}` : 'Rua não selecionada'}, {selectedCheckInForModal.bairro}, {selectedCheckInForModal.municipio || 'Maceió'} — {selectedCheckInForModal.estado || 'AL'}
+                          </p>
+                        )}
                       </div>
-                      <div>
-                        <span className="text-[9px] font-semibold text-slate-400 uppercase font-sans">Lng:</span> {selectedCheckInForModal.userLongitude.toFixed(6)}
+
+                      <div className="grid grid-cols-2 gap-2.5 pt-2.5 border-t border-slate-150/60 text-[11px]">
+                        <div>
+                          <span className="text-[9px] font-black text-slate-400 uppercase block select-none mb-0.5">Estado</span>
+                          <span className="font-extrabold text-slate-800 bg-slate-50 border border-slate-150 px-2 py-0.5 rounded-md inline-block">
+                            {selectedCheckInForModal.estado || 'Alagoas (AL)'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] font-black text-slate-400 uppercase block select-none mb-0.5">Município</span>
+                          <span className="font-extrabold text-slate-800 bg-slate-50 border border-slate-150 px-2 py-0.5 rounded-md inline-block">
+                            {selectedCheckInForModal.municipio || 'Maceió'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] font-black text-slate-400 uppercase block select-none mb-0.5">Bairro</span>
+                          <span className="font-extrabold text-slate-800 bg-slate-50 border border-slate-150 px-2 py-0.5 rounded-md inline-block">
+                            {selectedCheckInForModal.bairro || 'Não especificado'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] font-black text-slate-400 uppercase block select-none mb-0.5">Rua</span>
+                          <span className="font-extrabold text-slate-800 bg-slate-50 border border-slate-150 px-2 py-0.5 rounded-md inline-block truncate max-w-full">
+                            {selectedCheckInForModal.rua || 'Não especificada'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[9px] font-mono text-slate-400">
+                        <span>Lat/Lng exata do dispositivo: {selectedCheckInForModal.userLatitude.toFixed(6)}, {selectedCheckInForModal.userLongitude.toFixed(6)}</span>
                       </div>
                     </div>
                   </div>
