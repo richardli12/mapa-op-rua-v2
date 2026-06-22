@@ -1,0 +1,11 @@
+{
+  "name": "Sistema de Mapa de Campanha- últimos ajustes",
+  "description": "Sistema de gestão de equipes de panfletagem e pontos estratégicos em Maceió, Alagoas com áreas de raio personalizadas.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
