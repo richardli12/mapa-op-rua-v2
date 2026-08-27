@@ -3241,27 +3241,48 @@ export default function App() {
             animate={{ opacity: 1, scale: 1 }}
             className="flex flex-col items-center mb-6 text-center select-none"
           >
-            {partyInfo ? (
+            {activeCandidate ? (
               <>
-                <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-slate-100 mb-3">
-                  {partyInfo.logo ? (
+                {/* A tela de check-in é do candidato, então quem aparece é ele.
+                    O partido fica na linha de baixo, junto do pleito. */}
+                <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-slate-100 mb-3 overflow-hidden relative">
+                  {activeCandidate.image && (
                     <img
-                      src={partyInfo.logo}
-                      alt={`Logo ${partyInfo.name}`}
-                      className="w-full h-full object-contain rounded-full"
+                      src={activeCandidate.image}
+                      alt={activeCandidate.name}
+                      className="w-full h-full object-cover rounded-full"
                       referrerPolicy="no-referrer"
+                      // Foto fora do ar cai nas iniciais, em vez de deixar o
+                      // texto alternativo aparecendo dentro do círculo.
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        const fallback = e.currentTarget
+                          .nextElementSibling as HTMLElement | null;
+                        fallback?.classList.remove("hidden");
+                      }}
                     />
-                  ) : (
-                    <div className="w-full h-full rounded-full bg-[#0D233A] flex items-center justify-center text-white font-extrabold text-xl">
-                      {partyInfo.name}
-                    </div>
                   )}
+                  <div
+                    className={`w-full h-full rounded-full bg-[#0D233A] flex items-center justify-center text-white font-extrabold text-2xl ${
+                      activeCandidate.image ? "hidden" : ""
+                    }`}
+                  >
+                    {activeCandidate.name
+                      .split(" ")
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((part) => part[0])
+                      .join("")
+                      .toUpperCase()}
+                  </div>
                 </div>
                 <h1 className="font-extrabold text-[#0D233A] text-[32px] tracking-tight leading-none font-sans">
-                  {partyInfo.fullName || partyInfo.name}
+                  {activeCandidate.name}
                 </h1>
                 <p className="text-[11px] font-black tracking-[0.22em] text-[#5A6E85] uppercase mt-2.5 font-sans">
-                  Eleições 2026
+                  {partyInfo?.name
+                    ? `${partyInfo.name} • Eleições 2026`
+                    : "Eleições 2026"}
                 </p>
               </>
             ) : (
