@@ -46,12 +46,13 @@ export interface NexusData {
   parties: Party[];
 }
 
-const fetchPage = async (
+const fetchPage = async <T>(
+  path: string,
   page: number,
   signal?: AbortSignal,
-): Promise<{ data: NexusCandidate[]; totalPages: number }> => {
+): Promise<{ data: T[]; totalPages: number }> => {
   const response = await fetch(
-    `${BRIDGE_URL}?path=candidatos&page=${page}&page_size=${PAGE_SIZE}`,
+    `${BRIDGE_URL}?path=${encodeURIComponent(path)}&page=${page}&page_size=${PAGE_SIZE}`,
     { signal },
   );
 
@@ -115,15 +116,7 @@ const toParty = (raw: NexusParty): Party | null => {
 export const fetchNexusData = async (
   signal?: AbortSignal,
 ): Promise<NexusData> => {
-  const first = await fetchPage(1, signal);
-  const rows = [...first.data];
-
-  const totalPages = Math.min(first.totalPages, MAX_PAGES);
-  for (let page = 2; page <= totalPages; page++) {
-    const next = await fetchPage(page, signal);
-    rows.push(...next.data);
-    if (next.data.length === 0) break;
-  }
+  const rows = await fetchAllPages<NexusCandidate>("candidatos", signal);
 
   const candidates: Candidate[] = [];
   const partiesById = new Map<string, Party>();
@@ -144,4 +137,102 @@ export const fetchNexusData = async (
       a.name.localeCompare(b.name, "pt-BR"),
     ),
   };
+};
+
+/** Percorre todas as páginas de um caminho paginado da API. */
+const fetchAllPages = async <T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T[]> => {
+  const first = await fetchPage<T>(path, 1, signal);
+  const rows = [...first.data];
+
+  const totalPages = Math.min(first.totalPages, MAX_PAGES);
+  for (let page = 2; page <= totalPages; page++) {
+    const next = await fetchPage<T>(path, page, signal);
+    rows.push(...next.data);
+    if (next.data.length === 0) break;
+  }
+
+  return rows;
+};
+
+interface NexusTeamMember {
+  id?: string;
+  nome?: string;
+  foto_url?: string | null;
+  whatsapp?: string;
+  email?: string;
+  instagram?: string;
+  data_nascimento?: string;
+  genero?: string;
+  estado?: string;
+  cidade?: string;
+  bairro?: string;
+  rua?: string;
+  latitude?: number;
+  longitude?: number;
+  grau_proximidade?: string;
+  nucleo_delta?: string;
+  cadastrado_em?: string;
+}
+
+/**
+ * Integrante da Equipe no formato que o sistema já usa.
+ *
+ * Os nomes de campo (full_name, candidate_id) são os que o restante do código
+ * espera desde a época em que a lista vinha do Supabase, então a conversão
+ * acontece aqui e nada mais precisa mudar.
+ */
+export interface TeamMember {
+  id: string;
+  full_name: string;
+  whatsapp: string;
+  candidate_id: string;
+  image: string;
+  email: string;
+  instagram: string;
+  estado: string;
+  cidade: string;
+  bairro: string;
+  rua: string;
+  latitude?: number;
+  longitude?: number;
+  grau_proximidade: string;
+  nucleo: string;
+  cadastrado_em: string;
+}
+
+/** Equipe de um candidato. */
+export const fetchNexusTeam = async (
+  candidateId: string,
+  signal?: AbortSignal,
+): Promise<TeamMember[]> => {
+  if (!candidateId) return [];
+
+  const rows = await fetchAllPages<NexusTeamMember>(
+    `candidatos/${candidateId}/lideres-delta`,
+    signal,
+  );
+
+  return rows
+    .filter((row) => row?.id && row?.nome)
+    .map((row) => ({
+      id: String(row.id),
+      full_name: String(row.nome),
+      whatsapp: row.whatsapp || "",
+      candidate_id: candidateId,
+      image: row.foto_url || "",
+      email: row.email || "",
+      instagram: row.instagram || "",
+      estado: row.estado || "",
+      cidade: row.cidade || "",
+      bairro: row.bairro || "",
+      rua: row.rua || "",
+      latitude: typeof row.latitude === "number" ? row.latitude : undefined,
+      longitude: typeof row.longitude === "number" ? row.longitude : undefined,
+      grau_proximidade: row.grau_proximidade || "",
+      nucleo: row.nucleo_delta || "",
+      cadastrado_em: row.cadastrado_em || "",
+    }));
 };

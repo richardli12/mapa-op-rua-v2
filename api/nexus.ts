@@ -9,8 +9,18 @@
 
 const NEXUS_BASE = "https://nexus-v3-1-gules.vercel.app/api/public-api/v1";
 
-/** Só estes caminhos são repassados, para a ponte não virar um proxy aberto. */
-const ALLOWED_PATHS = new Set(["candidatos", "partidos"]);
+/**
+ * Só estes caminhos são repassados, para a ponte não virar um proxy aberto que
+ * qualquer um poderia usar com a chave do projeto.
+ */
+const ALLOWED_PATHS = [
+  /^candidatos$/,
+  /^partidos$/,
+  /^candidatos\/[A-Za-z0-9-]+\/lideres-delta$/,
+];
+
+const isAllowed = (path: string) =>
+  ALLOWED_PATHS.some((pattern) => pattern.test(path));
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {
@@ -30,7 +40,7 @@ export default async function handler(req: any, res: any) {
   const url = new URL(req.url || "", "http://localhost");
   const path = String(url.searchParams.get("path") || "candidatos");
 
-  if (!ALLOWED_PATHS.has(path)) {
+  if (!isAllowed(path)) {
     res.status(400).json({ error: `Caminho não permitido: ${path}` });
     return;
   }

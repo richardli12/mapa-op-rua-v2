@@ -11,7 +11,7 @@ import {
   CandidateLocation,
   resolveCandidateLocation,
 } from "./services/candidateLocation";
-import { fetchNexusData } from "./services/nexusApi";
+import { fetchNexusData, fetchNexusTeam } from "./services/nexusApi";
 import {
   MapPin,
   Users,
@@ -230,6 +230,20 @@ const INITIAL_CANDIDATES: Candidate[] = [
     status_active: true,
   },
 ];
+
+/**
+ * Compara dois telefones ignorando máscara e código do país.
+ *
+ * O cadastro pode ter "82988887777" e a pessoa digitar com o 55 na frente, ou
+ * o contrário. Comparar pelo final resolve os dois casos sem confundir números
+ * diferentes, já que exige pelo menos 8 dígitos em comum.
+ */
+const samePhoneNumber = (a?: string | null, b?: string | null) => {
+  const digitsA = (a || "").replace(/\D/g, "");
+  const digitsB = (b || "").replace(/\D/g, "");
+  if (digitsA.length < 8 || digitsB.length < 8) return false;
+  return digitsA.endsWith(digitsB) || digitsB.endsWith(digitsA);
+};
 
 /** Compara nomes de município ignorando acento e caixa. */
 const normalizeCityName = (value: string) =>
@@ -918,18 +932,7 @@ export default function App() {
         // Candidatos e partidos não vêm mais do Supabase: a fonte é o Nexus,
         // carregado no efeito logo abaixo.
 
-        // Also fetch supporters
-        try {
-          const supRes = await SupabaseService.fetchSupporters();
-          if (supRes.success && supRes.data) {
-            setSupporters(supRes.data);
-          }
-        } catch (error) {
-          console.warn(
-            "Erro ao carregar apoiadores do Supabase no mount:",
-            error,
-          );
-        }
+        // A Equipe também vem do Nexus, no efeito mais abaixo.
       } else if (res.error) {
         setSupabaseError(res.error);
         triggerNotification(res.error, "error");
@@ -2033,6 +2036,72 @@ export default function App() {
     };
   }, []);
 
+  // Equipes dos candidatos, também do Nexus.
+  //
+  // A equipe é consultada por candidato, então na tela de check-in só a do
+  // candidato daquele link é buscada — a página é pública e não faz sentido
+  // baixar a equipe de todo mundo ali.
+  useEffect(() => {
+    const targets =
+      currentUrlView === "checkin"
+        ? candidates.filter((c) => c.id === checkInCandidateId)
+        : candidates;
+
+    if (targets.length === 0) return;
+
+    let active = true;
+    const controller = new AbortController();
+
+    (async () => {
+      const collected: any[] = [];
+      const loadedIds = new Set<string>();
+
+      // Em lotes pequenos para não disparar dezenas de requisições de uma vez.
+      const BATCH = 4;
+      for (let i = 0; i < targets.length; i += BATCH) {
+        if (!active) return;
+        const batch = targets.slice(i, i + BATCH);
+        const results = await Promise.all(
+          batch.map(async (candidate) => {
+            try {
+              const team = await fetchNexusTeam(
+                candidate.id,
+                controller.signal,
+              );
+              return { id: candidate.id, team };
+            } catch (err) {
+              console.warn(
+                `Não foi possível carregar a Equipe de ${candidate.name}:`,
+                err,
+              );
+              return null;
+            }
+          }),
+        );
+
+        for (const result of results) {
+          if (!result) continue;
+          loadedIds.add(result.id);
+          collected.push(...result.team);
+        }
+      }
+
+      if (!active || loadedIds.size === 0) return;
+
+      // Só os candidatos consultados com sucesso são substituídos; os demais
+      // mantêm o que já estava carregado.
+      setSupporters((previous) => [
+        ...previous.filter((s: any) => !loadedIds.has(s.candidate_id)),
+        ...collected,
+      ]);
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [candidates, currentUrlView, checkInCandidateId]);
+
   // Save to localstorage on change
   useEffect(() => {
     localStorage.setItem("campaign_map_areas", JSON.stringify(areas));
@@ -3122,6 +3191,50 @@ export default function App() {
         if (!contactInput) {
           triggerNotification(
             "Por favor, informe seu número de WhatsApp.",
+            "error",
+          );
+          return;
+        }
+
+        // A Equipe vem do Nexus, então é nela que o número é procurado
+        // primeiro. Só se não houver correspondência o fluxo antigo entra.
+        const teamMatch = supporters.find(
+          (member: any) =>
+            samePhoneNumber(member?.whatsapp, contactInput) &&
+            (!checkInCandidateId ||
+              String(member?.candidate_id) === String(checkInCandidateId)),
+        );
+
+        if (teamMatch) {
+          const authObj = {
+            id: teamMatch.id,
+            name: teamMatch.full_name,
+            full_name: teamMatch.full_name,
+            whatsapp: teamMatch.whatsapp,
+            image: teamMatch.image || "",
+            candidate_id: teamMatch.candidate_id,
+          };
+          setAuthenticatedSupporter(authObj);
+          localStorage.setItem("checkin_supporter", JSON.stringify(authObj));
+          setCheckInName(teamMatch.full_name);
+          if (teamMatch.candidate_id) {
+            setCheckInCandidateId(teamMatch.candidate_id);
+          }
+          triggerNotification(`Bem-vindo, ${teamMatch.full_name}!`, "success");
+          return;
+        }
+
+        // Número existe, mas na Equipe de outro candidato: dizer isso é mais
+        // útil do que um "não localizado" genérico.
+        const otherTeamMatch = supporters.find((member: any) =>
+          samePhoneNumber(member?.whatsapp, contactInput),
+        );
+        if (otherTeamMatch && checkInCandidateId) {
+          const currentCandidate = candidates.find(
+            (c) => c.id === checkInCandidateId,
+          );
+          triggerNotification(
+            `Este número não faz parte da Equipe de ${currentCandidate?.name || "este candidato"}.`,
             "error",
           );
           return;
