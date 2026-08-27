@@ -123,6 +123,24 @@ export const parseCandidateLocation = (
   };
 };
 
+/**
+ * Texto de localização do candidato, juntando os dois campos do cadastro.
+ *
+ * O Nexus entrega município e estado separados ("Maceió" + "AL"); cadastros
+ * antigos gravavam a mesma string nos dois campos. Juntar só quando são
+ * diferentes cobre os dois casos sem repetir o nome.
+ */
+export const candidateLocationText = (
+  candidate?: { city?: string | null; estado?: string | null } | null,
+): string => {
+  const city = candidate?.city?.trim() || "";
+  const state = candidate?.estado?.trim() || "";
+  if (city && state && normalize(city) !== normalize(state)) {
+    return `${city} - ${state}`;
+  }
+  return state || city;
+};
+
 const resolvedCache = new Map<string, CandidateLocation | null>();
 
 /**

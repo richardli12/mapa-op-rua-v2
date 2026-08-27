@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
+import { candidateLocationText } from '../services/candidateLocation';
 import {
   expandBox,
   fetchCepStreets,
@@ -1126,7 +1127,7 @@ export default function MapContainer({
     }
 
     // Phase 2: If there's no mapped elements yet, geocode the candidate's city / state
-    const candidateLocation = cand.estado || cand.city;
+    const candidateLocation = candidateLocationText(cand);
     if (candidateLocation) {
       const cityQuery = candidateLocation.trim();
       

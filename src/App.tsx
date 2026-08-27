@@ -7,9 +7,11 @@ import {
   StreetOption,
 } from "./services/streetSources";
 import {
+  candidateLocationText,
   CandidateLocation,
   resolveCandidateLocation,
 } from "./services/candidateLocation";
+import { fetchNexusData } from "./services/nexusApi";
 import {
   MapPin,
   Users,
@@ -302,6 +304,18 @@ export default function App() {
   });
 
   // Helper to get Partido Badge, now accessible across the entire App component
+  /** Cor da tarja conforme a sigla, com um azul padrão para as demais. */
+  const partyBadgeColor = (initials: string) =>
+    initials === "SD"
+      ? "bg-orange-50 text-orange-600 border-orange-200 shadow-2xs font-extrabold"
+      : initials === "PP"
+        ? "bg-sky-50 text-sky-600 border-sky-200 shadow-2xs font-extrabold"
+        : initials === "PL"
+          ? "bg-blue-50 text-blue-600 border-blue-200 shadow-2xs font-extrabold"
+          : initials === "PT"
+            ? "bg-rose-50 text-rose-600 border-rose-200 shadow-2xs font-extrabold"
+            : "bg-blue-50 text-blue-700 border-blue-200 shadow-2xs font-extrabold";
+
   const getPartidoBadge = (cand: Candidate) => {
     if (!cand)
       return {
@@ -310,6 +324,22 @@ export default function App() {
         fullName: "",
         color: "bg-slate-100 text-slate-700 border-slate-200",
       };
+
+    // O Nexus entrega o partido de cada candidato, então quando esse vínculo
+    // existe não há nada a deduzir. Todo o resto abaixo é adivinhação pelo
+    // texto do cargo, mantida só para dados antigos que não têm o vínculo.
+    if (cand.partyId) {
+      const linked = parties.find((p) => p.id === cand.partyId);
+      if (linked) {
+        return {
+          name: linked.initials,
+          logo: linked.logo_url,
+          fullName: linked.name,
+          color: partyBadgeColor(linked.initials),
+        };
+      }
+    }
+
     const officeUpper = (cand.office || "").toUpperCase();
     const nameUpper = (cand.name || "").toUpperCase();
 
@@ -423,11 +453,6 @@ export default function App() {
   const [adminSubTab, setAdminSubTab] = useState<"candidates" | "parties">(
     "parties",
   );
-  const [isPartyModalOpen, setIsPartyModalOpen] = useState(false);
-  const [partyEditing, setPartyEditing] = useState<Party | null>(null);
-  const [partyName, setPartyName] = useState("");
-  const [partyInitials, setPartyInitials] = useState("");
-  const [partyLogoUrl, setPartyLogoUrl] = useState("");
   const [partySearch, setPartySearch] = useState("");
   const [inspectedParty, setInspectedParty] = useState<Party | null>(null);
   const [inspectedCandidate, setInspectedCandidate] =
@@ -625,7 +650,7 @@ export default function App() {
     const activeCand = tempCandidates.find((c: any) => c.id === matchedId);
     if (!activeCand) return defaultState;
 
-    const rawCity = activeCand.estado || activeCand.city || "";
+    const rawCity = candidateLocationText(activeCand);
     if (!rawCity) return defaultState;
 
     const UF_TO_STATE_NAME: { [key: string]: string } = {
@@ -890,49 +915,8 @@ export default function App() {
           if (fetchedCheckins.length > 0) setCheckIns(fetchedCheckins);
         }
 
-        // Also fetch candidates
-        try {
-          const candRes = await SupabaseService.fetchCandidates();
-          if (candRes.success && candRes.data) {
-            if (candRes.data.length > 0) {
-              setCandidates(candRes.data);
-            } else {
-              // Send default ones to Supabase
-              for (const cand of candidates) {
-                await SupabaseService.upsertCandidate(cand);
-              }
-            }
-          }
-        } catch (error) {
-          console.warn(
-            "Erro ao carregar candidatos do Supabase no mount:",
-            error,
-          );
-        }
-
-        // Also fetch parties
-        try {
-          const partyRes = await SupabaseService.fetchParties();
-          if (partyRes.success && partyRes.data) {
-            if (partyRes.data.length > 0) {
-              setParties(partyRes.data);
-            } else {
-              // Send default initial ones to Supabase
-              for (const p of INITIAL_PARTIES) {
-                await SupabaseService.upsertParty(p);
-              }
-              const partyResReloaded = await SupabaseService.fetchParties();
-              if (partyResReloaded.success && partyResReloaded.data) {
-                setParties(partyResReloaded.data);
-              }
-            }
-          }
-        } catch (error) {
-          console.warn(
-            "Erro ao carregar partidos do Supabase no mount:",
-            error,
-          );
-        }
+        // Candidatos e partidos não vêm mais do Supabase: a fonte é o Nexus,
+        // carregado no efeito logo abaixo.
 
         // Also fetch supporters
         try {
@@ -1170,7 +1154,7 @@ export default function App() {
 
     (async () => {
       const location = await resolveCandidateLocation(
-        candidate.estado || candidate.city,
+        candidateLocationText(candidate),
         controller.signal,
       );
       if (!active) return;
@@ -1633,7 +1617,7 @@ export default function App() {
     const activeCand = candidates.find((c) => c.id === checkInCandidateId);
     if (!activeCand) return;
 
-    const rawCity = activeCand.estado || activeCand.city || "";
+    const rawCity = candidateLocationText(activeCand);
     let uf = "AL";
 
     const UF_TO_STATE_NAME: { [key: string]: string } = {
@@ -1999,6 +1983,40 @@ export default function App() {
     text: string;
     type: "success" | "info" | "error";
   } | null>(null);
+
+  // Carrega partidos e candidatos do Nexus, a fonte oficial desses dados.
+  // A lista local só permanece se a consulta falhar, para o sistema não ficar
+  // vazio por causa de uma queda momentânea.
+  const [isLoadingNexus, setIsLoadingNexus] = useState(true);
+  const [nexusError, setNexusError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const { candidates: nexusCandidates, parties: nexusParties } =
+          await fetchNexusData(controller.signal);
+        if (!active) return;
+
+        setCandidates(nexusCandidates);
+        setParties(nexusParties);
+        setNexusError(null);
+      } catch (err: any) {
+        if (!active || err?.name === "AbortError") return;
+        console.error("Erro ao carregar dados do Nexus:", err);
+        setNexusError(err?.message || "Não foi possível consultar o Nexus.");
+      } finally {
+        if (active) setIsLoadingNexus(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, []);
 
   // Save to localstorage on change
   useEffect(() => {
@@ -4813,7 +4831,7 @@ export default function App() {
     const q = candSearch.toLowerCase();
     const filteredCandidates = candidates.filter((c) => {
       const nameMatch = c.name?.toLowerCase().includes(q) || false;
-      const cityMatch = (c.estado || c.city || "")?.toLowerCase().includes(q) || false;
+      const cityMatch = candidateLocationText(c)?.toLowerCase().includes(q) || false;
       const officeMatch = c.office?.toLowerCase().includes(q) || false;
       return nameMatch || cityMatch || officeMatch;
     });
@@ -4825,7 +4843,7 @@ export default function App() {
     const pendingCount = 0;
     const uniqueCities = new Set(
       candidates
-        .map((c) => (c.estado || c.city || "").toLowerCase().trim())
+        .map((c) => candidateLocationText(c).toLowerCase().trim())
         .filter(Boolean),
     ).size;
 
@@ -4883,106 +4901,6 @@ export default function App() {
       return nameMatch || initialsMatch;
     });
 
-    const handleOpenCreatePartyModal = () => {
-      setPartyEditing(null);
-      setPartyName("");
-      setPartyInitials("");
-      setPartyLogoUrl("");
-      setIsPartyModalOpen(true);
-    };
-
-    const handleOpenEditPartyModal = (party: Party) => {
-      setPartyEditing(party);
-      setPartyName(party.name);
-      setPartyInitials(party.initials);
-      setPartyLogoUrl(party.logo_url || "");
-      setIsPartyModalOpen(true);
-    };
-
-    const handleSavePartySubmit = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!partyName.trim() || !partyInitials.trim()) {
-        triggerNotification(
-          "O nome do partido e a sigla são obrigatórios.",
-          "error",
-        );
-        return;
-      }
-
-      const payload = {
-        name: partyName.trim(),
-        initials: partyInitials.trim().toUpperCase(),
-        logo_url:
-          partyLogoUrl.trim() ||
-          "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/SD_LOGO.png",
-      };
-
-      if (isSupabaseConfigured) {
-        triggerNotification("Salvando partido no Supabase...", "info");
-        const res = await SupabaseService.upsertParty({
-          id: partyEditing?.id,
-          ...payload,
-        });
-        if (res.success) {
-          triggerNotification("Partido salvo com sucesso no banco!", "success");
-          const reload = await SupabaseService.fetchParties();
-          if (reload.success && reload.data) {
-            setParties(reload.data);
-          } else {
-            const updatedId =
-              res.data?.id || partyEditing?.id || "party-" + Date.now();
-            setParties((prev) => {
-              const existing = prev.find((p) => p.id === partyEditing?.id);
-              if (existing) {
-                return prev.map((p) =>
-                  p.id === partyEditing?.id
-                    ? { ...p, ...payload, id: updatedId }
-                    : p,
-                );
-              } else {
-                return [...prev, { ...payload, id: updatedId }];
-              }
-            });
-          }
-        } else {
-          triggerNotification(`Erro Supabase: ${res.error}`, "error");
-        }
-      } else {
-        const updatedId = partyEditing?.id || "party-" + Date.now();
-        setParties((prev) => {
-          const existing = prev.find((p) => p.id === partyEditing?.id);
-          if (existing) {
-            return prev.map((p) =>
-              p.id === partyEditing?.id
-                ? { ...p, ...payload, id: updatedId }
-                : p,
-            );
-          } else {
-            return [...prev, { ...payload, id: updatedId }];
-          }
-        });
-        triggerNotification("Partido salvo localmente!", "success");
-      }
-      setIsPartyModalOpen(false);
-    };
-
-    const handleDeleteParty = async (id: string, initials: string) => {
-      if (confirm(`Deseja realmente remover o partido ${initials}?`)) {
-        if (isSupabaseConfigured) {
-          triggerNotification("Excluindo partido do Supabase...", "info");
-          const res = await SupabaseService.deleteParty(id);
-          if (res.success) {
-            setParties((prev) => prev.filter((p) => p.id !== id));
-            triggerNotification("Partido excluído com sucesso!", "success");
-          } else {
-            triggerNotification(`Erro Supabase: ${res.error}`, "error");
-          }
-        } else {
-          setParties((prev) => prev.filter((p) => p.id !== id));
-          triggerNotification("Partido removido localmente!", "info");
-        }
-      }
-    };
 
     const handleOpenCreateModal = () => {
       setCandidateEditing(null);
@@ -5193,7 +5111,7 @@ export default function App() {
             <p className="text-[#8492A6] text-xs font-semibold mt-1">
               {inspectedParty
                 ? `Inspecionando os candidatos associados ao partido ${inspectedParty.name} (${inspectedParty.initials})`
-                : "Cadastre as siglas partidárias parceiras de sua campanha eleitoral"}
+                : "Siglas partidárias parceiras, sincronizadas do Nexus"}
             </p>
           </div>
 
@@ -5236,15 +5154,7 @@ export default function App() {
                   <span>Novo Candidato</span>
                 </button>
               </>
-            ) : (
-              <button
-                onClick={handleOpenCreatePartyModal}
-                className="px-5 h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl shadow-lg border border-emerald-700/30 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Novo Partido</span>
-              </button>
-            )}
+            ) : null}
 
             {/* LOG OUT BADGE */}
             {!inspectedParty && (
@@ -5732,7 +5642,7 @@ export default function App() {
                               inspectedParty.initials.toUpperCase()
                             );
                           })
-                          .map((c) => (c.estado || c.city || "").toLowerCase().trim())
+                          .map((c) => candidateLocationText(c).toLowerCase().trim())
                           .filter(Boolean),
                       ).size
                     }
@@ -6262,7 +6172,7 @@ export default function App() {
                           c.name
                             .toLowerCase()
                             .includes(partySearch.toLowerCase()) ||
-                          (c.estado || c.city || "")
+                          candidateLocationText(c)
                             .toLowerCase()
                             .includes(partySearch.toLowerCase()) ||
                           (c.office || "")
@@ -6291,7 +6201,7 @@ export default function App() {
                               c.name
                                 .toLowerCase()
                                 .includes(partySearch.toLowerCase()) ||
-                              (c.estado || c.city || "")
+                              candidateLocationText(c)
                                 .toLowerCase()
                                 .includes(partySearch.toLowerCase()) ||
                               (c.office || "")
@@ -6339,7 +6249,7 @@ export default function App() {
                                   <div className="flex flex-col text-slate-600 font-bold text-[13px]">
                                     <div className="flex items-center gap-1.5 text-slate-700">
                                       <MapPin className="w-3.5 h-3.5 text-[#8492A6]" />
-                                      <span>{cand.estado || cand.city}</span>
+                                      <span>{candidateLocationText(cand)}</span>
                                     </div>
                                     {cand.neighborhood && (
                                       <span className="text-[10.5px] text-[#8492A6] font-semibold mt-0.5 ml-5">
@@ -6501,11 +6411,24 @@ export default function App() {
         ) : (
           /* PARTIES MASTER CARDS GRID - ALIGNED TO ATTACHED SCREENSHOT STRUCTURE */
           <div className="flex flex-col flex-1 gap-6">
+            {nexusError && (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl px-5 py-3.5 mb-4">
+                <p className="text-xs font-bold text-rose-700">
+                  Não foi possível carregar os dados do Nexus
+                </p>
+                <p className="text-[11px] text-rose-600 mt-1 leading-snug">
+                  {nexusError}
+                </p>
+              </div>
+            )}
+
             {filteredParties.length === 0 ? (
               <div className="bg-white border border-slate-200 rounded-3xl p-16 text-center shadow-sm flex flex-col items-center justify-center min-h-[300px]">
                 <Building2 className="w-12 h-12 text-slate-300 mb-4" />
                 <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">
-                  Nenhum partido político cadastrado
+                  {isLoadingNexus
+                    ? "Carregando partidos do Nexus..."
+                    : "Nenhum partido político encontrado"}
                 </span>
               </div>
             ) : (
@@ -6527,7 +6450,7 @@ export default function App() {
                   });
                   const partyCitiesCount = new Set(
                     partyCandidates
-                      .map((c) => (c.estado || c.city || "").toLowerCase().trim())
+                      .map((c) => candidateLocationText(c).toLowerCase().trim())
                       .filter(Boolean),
                   ).size;
 
@@ -6581,18 +6504,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Top Actions: Delete Party */}
-                        <div className="flex items-center ml-auto">
-                          <button
-                            onClick={() =>
-                              handleDeleteParty(party.id, party.initials)
-                            }
-                            className="p-1.5 rounded-xl text-slate-300 hover:text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            title="Remover Partido"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
                       </div>
 
                       {/* MIDDLE QUADRO DE MÉTRICAS (Duplo bloco de status do Printout) */}
@@ -6628,13 +6539,6 @@ export default function App() {
                         </div>
 
                         <button
-                          onClick={() => handleOpenEditPartyModal(party)}
-                          className="text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-[#015FC9] cursor-pointer transition-all"
-                        >
-                          Editar
-                        </button>
-
-                        <button
                           onClick={() => setInspectedParty(party)}
                           className="text-[11px] font-black uppercase tracking-wider text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer transition-all hover:translate-x-0.5 group/btn"
                         >
@@ -6652,7 +6556,7 @@ export default function App() {
             <div className="py-4.5 px-6 border border-slate-200 rounded-3xl bg-[#FAFBFD] flex justify-between items-center shadow-3xs mt-2">
               <span className="text-[#8492A6] text-xs font-bold font-sans">
                 Mostrando {filteredParties.length} de {parties.length} partidos
-                políticos cadastrados
+                políticos
               </span>
             </div>
           </div>
@@ -6845,162 +6749,6 @@ export default function App() {
         )}
 
         {/* MODAL: CREATE AND EDIT PARTY */}
-        {isPartyModalOpen && (
-          <div className="fixed inset-0 bg-[#0c1322]/40 backdrop-blur-xs flex items-center justify-center z-[11000] p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-white rounded-3xl w-full max-w-lg shadow-3xl overflow-hidden border border-slate-100 font-sans flex flex-col max-h-[90vh]"
-            >
-              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-black text-slate-800">
-                    {partyEditing
-                      ? "Editar Partido Político"
-                      : "Cadastrar Novo Partido"}
-                  </h3>
-                  <p className="text-[10px] uppercase tracking-widest text-[#8492A6] font-bold mt-0.5">
-                    {partyEditing
-                      ? "Atualize as informações do partido"
-                      : "Insira uma nova sigla partidária parceira"}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setIsPartyModalOpen(false)}
-                  className="p-2 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-full transition-all cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <form
-                onSubmit={handleSavePartySubmit}
-                className="flex-1 overflow-y-auto p-6 space-y-4"
-              >
-                {/* Nome do Partido */}
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    Nome Oficial do Partido
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={partyName}
-                    onChange={(e) => setPartyName(e.target.value)}
-                    placeholder="Ex: Partido Social Democrático"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-[#015FC9] focus:bg-white focus:border-[#015FC9]"
-                  />
-                </div>
-
-                {/* Sigla */}
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    Sigla (Siglas em Letras Maiúsculas)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={partyInitials}
-                    onChange={(e) => setPartyInitials(e.target.value)}
-                    placeholder="Ex: PSD"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-[#015FC9] focus:bg-white focus:border-[#015FC9] uppercase"
-                  />
-                </div>
-
-                {/* Logo URL */}
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    URL da Logo do Partido (Opcional)
-                  </label>
-                  <input
-                    type="url"
-                    value={partyLogoUrl}
-                    onChange={(e) => setPartyLogoUrl(e.target.value)}
-                    placeholder="Ex: https://link-da-imagem.png"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-[#015FC9] focus:bg-white focus:border-[#015FC9]"
-                  />
-                  <p className="text-[10px] text-zinc-400 font-medium">
-                    Deixe em branco para usar uma sigla de texto ou um escudo
-                    padrão neutro.
-                  </p>
-                </div>
-
-                {/* Sugestões de Logo pré-fabricadas */}
-                <div className="space-y-2 pt-2">
-                  <label className="block text-[9px] uppercase font-extrabold tracking-wider text-slate-400">
-                    Logos Oficiais Prontas de Demonstração:
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      {
-                        name: "MDB",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/MDB_LOGO.png",
-                      },
-                      {
-                        name: "SD",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/SD_LOGO.png",
-                      },
-                      {
-                        name: "PP",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PP_LOGO.png",
-                      },
-                      {
-                        name: "PL",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PL_LOGO.png",
-                      },
-                      {
-                        name: "PT",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PT_LOGO.png",
-                      },
-                      {
-                        name: "PSD",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PSD_LOGO.png",
-                      },
-                    ].map((preset, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setPartyInitials(preset.name);
-                          setPartyLogoUrl(preset.url);
-                          if (!partyName) {
-                            setPartyName(`Partido ${preset.name}`);
-                          }
-                        }}
-                        className="px-2.5 py-1 text-[9px] font-extrabold uppercase bg-slate-100 hover:bg-emerald-600 hover:text-white rounded-md transition-all cursor-pointer border border-[#E1E8ED] flex items-center gap-1"
-                      >
-                        <img
-                          src={preset.url}
-                          alt={preset.name}
-                          className="w-3.5 h-3.5 rounded-full object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                        <span>{preset.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Form Buttons */}
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3 font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setIsPartyModalOpen(false)}
-                    className="px-5 py-3 border border-slate-200 text-[#5A6E85] text-xs uppercase font-extrabold tracking-wider rounded-xl hover:bg-slate-50 transition-all cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs uppercase font-extrabold tracking-wider rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer"
-                  >
-                    Salvar Partido
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
 
         {/* MODAL: CANDIDATE DETAIL VIEW */}
         {candViewDetail && (

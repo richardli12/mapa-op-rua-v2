@@ -96,6 +96,7 @@ export interface Candidate {
   office: string;
   image?: string;
   status_active?: boolean; // optional client-side helper or extra column
+  partyId?: string; // vínculo com o partido, vindo do Nexus
 }
 
 export interface Party {
@@ -103,6 +104,7 @@ export interface Party {
   name: string;
   initials: string;
   logo_url: string;
+  color?: string; // cor primária do partido, vinda do Nexus
 }
 
 
