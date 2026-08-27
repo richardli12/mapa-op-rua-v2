@@ -2604,7 +2604,7 @@ export default function App() {
     ) {
       return false;
     }
-    // Retringir missões atribuídas a membros específicos do Time Delta
+    // Retringir missões atribuídas a membros específicos da Equipe
     if (currentUrlView === "checkin" && authenticatedSupporter) {
       const assigned = a.assignedDeltas || a.center?.assignedDeltas || [];
       if (
@@ -2633,7 +2633,7 @@ export default function App() {
     ) {
       return false;
     }
-    // Retringir pinos táticos atribuídos a membros específicos do Time Delta
+    // Retringir pinos táticos atribuídos a membros específicos da Equipe
     if (currentUrlView === "checkin" && authenticatedSupporter) {
       const assigned = p.assignedDeltas || p.position?.assignedDeltas || [];
       if (
@@ -5587,12 +5587,12 @@ export default function App() {
                                   }
                                   setInspectedCandidate(cand);
                                   triggerNotification(
-                                    `Inspecionando time Delta de: ${cand.name}`,
+                                    `Inspecionando a Equipe de: ${cand.name}`,
                                     "info",
                                   );
                                 }}
                                 className="p-1.5 h-8 w-8 hover:bg-[#E0F2FE] text-slate-400 hover:text-sky-600 border border-transparent hover:border-[#BAE6FD] rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                title="Inspecionar Time Delta (Olho)"
+                                title="Inspecionar Equipe"
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
@@ -5819,7 +5819,7 @@ export default function App() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
                     <span className="text-slate-400 font-bold text-[9.5px] uppercase tracking-wider">
-                      Integrantes Time Delta
+                      Integrantes da Equipe
                     </span>
                     <h3 className="text-2xl font-black text-[#0D233A] mt-1">
                       {
@@ -5895,7 +5895,7 @@ export default function App() {
                     <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                       <div>
                         <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
-                          <span>🚀 Equipe Multiplicadora (Time Delta)</span>
+                          <span>🚀 Equipe</span>
                         </h4>
                         <p className="text-[10px] text-slate-400 font-bold mt-0.5">
                           Gerenciamento e comunicação com mobilizadores ativos
@@ -5907,7 +5907,7 @@ export default function App() {
                         className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-xl flex items-center gap-1 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
                       >
                         <PlusCircle className="w-3.5 h-3.5" />
-                        <span>Novo Delta</span>
+                        <span>Novo Integrante</span>
                       </button>
                     </div>
 
@@ -5915,7 +5915,7 @@ export default function App() {
                     {isAddingSupporter && (
                       <div className="p-5 bg-emerald-50/50 border-b border-slate-100">
                         <h5 className="text-xs font-black text-emerald-800 uppercase tracking-wider mb-3">
-                          Novo Delta do Time Delta
+                          Novo Integrante da Equipe
                         </h5>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
@@ -6018,7 +6018,7 @@ export default function App() {
                         <thead>
                           <tr className="bg-[#FAFBFD] border-b border-slate-100">
                             <th className="py-3 px-6 text-[9.5px] uppercase font-black text-[#8492A6]">
-                              Delta
+                              Integrante
                             </th>
                             <th className="py-3 px-6 text-[9.5px] uppercase font-black text-[#8492A6]">
                               WhatsApp
@@ -6039,7 +6039,7 @@ export default function App() {
                                 colSpan={3}
                                 className="py-12 text-center text-slate-400 font-bold text-xs uppercase tracking-widest bg-slate-50/20"
                               >
-                                Nenhum delta registrado no Time Delta
+                                Nenhum integrante registrado na Equipe
                               </td>
                             </tr>
                           ) : (
@@ -6086,7 +6086,7 @@ export default function App() {
                                           onClick={async () => {
                                             if (
                                               confirm(
-                                                `Remover multiplicador ${sup.full_name} do Time Delta?`,
+                                                `Remover ${sup.full_name} da Equipe?`,
                                               )
                                             ) {
                                               setSupporters((prev) =>
@@ -6114,7 +6114,7 @@ export default function App() {
                                             }
                                           }}
                                           className="p-1 h-7 w-7 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md border border-transparent hover:border-rose-100 flex items-center justify-center transition-all cursor-pointer"
-                                          title="Remover do Time Delta"
+                                          title="Remover da Equipe"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -6456,12 +6456,12 @@ export default function App() {
                                       onClick={() => {
                                         setInspectedCandidate(cand);
                                         triggerNotification(
-                                          `Inspecionando time Delta de: ${cand.name}`,
+                                          `Inspecionando a Equipe de: ${cand.name}`,
                                           "info",
                                         );
                                       }}
                                       className="p-1.5 h-8 w-8 hover:bg-[#E0F2FE] text-slate-400 hover:text-sky-600 border border-transparent hover:border-[#BAE6FD] rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                      title="Inspecionar Time Delta (Olho)"
+                                      title="Inspecionar Equipe"
                                     >
                                       <Eye className="w-4 h-4" />
                                     </button>
@@ -7962,7 +7962,7 @@ export default function App() {
                             </div>
                           )}
 
-                          {/* Membros do Time Delta Atribuídos */}
+                          {/* Membros da Equipe Atribuídos */}
                           {(() => {
                             const assignedIds =
                               area.assignedDeltas ||
@@ -8285,7 +8285,7 @@ export default function App() {
                             "{pin.description || "Sem descrição cadastrada."}"
                           </p>
 
-                          {/* Membros do Time Delta Atribuídos para PINS */}
+                          {/* Membros da Equipe Atribuídos para PINS */}
                           {(() => {
                             const assignedIds =
                               pin.assignedDeltas ||
@@ -9258,7 +9258,7 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Associar Candidato & Seleção de Membros do Time Delta */}
+                        {/* Associar Candidato & Seleção de Membros da Equipe */}
                         <div className="space-y-3 pt-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                           {selectedCandidateFilter === "all" && (
                             <div>
@@ -9285,7 +9285,7 @@ export default function App() {
 
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
-                              Direcionar Missão ao Time Delta do Candidato
+                              Direcionar Missão à Equipe do Candidato
                             </label>
                             <p className="text-[10px] text-slate-500 font-medium mb-1 leading-tight">
                               Selecione os membros que devem receber esta
@@ -9303,8 +9303,8 @@ export default function App() {
                               if (!activeCandId) {
                                 return (
                                   <div className="text-[10px] text-slate-400 italic bg-white p-2 rounded-xl border border-slate-150 text-center">
-                                    Selecione um candidato acima para carregar o
-                                    seu Time Delta.
+                                    Selecione um candidato acima para carregar a
+                                    sua Equipe.
                                   </div>
                                 );
                               }
@@ -9312,7 +9312,7 @@ export default function App() {
                               if (candidatesDeltas.length === 0) {
                                 return (
                                   <div className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-xl font-semibold text-center">
-                                    Nenhum integrante cadastrado no Time Delta
+                                    Nenhum integrante cadastrado na Equipe
                                     deste candidato.
                                   </div>
                                 );
@@ -9466,7 +9466,7 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Associar Candidato & Seleção de Membros do Time Delta para PIN */}
+                        {/* Associar Candidato & Seleção de Membros da Equipe para PIN */}
                         <div className="space-y-3 pt-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                           {selectedCandidateFilter === "all" && (
                             <div>
@@ -9493,7 +9493,7 @@ export default function App() {
 
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
-                              Direcionar Missão ao Time Delta do Candidato
+                              Direcionar Missão à Equipe do Candidato
                             </label>
                             <p className="text-[10px] text-slate-500 font-medium mb-1 leading-tight">
                               Selecione os membros que devem receber esta
@@ -9511,8 +9511,8 @@ export default function App() {
                               if (!activeCandId) {
                                 return (
                                   <div className="text-[10px] text-slate-400 italic bg-white p-2 rounded-xl border border-slate-150 text-center">
-                                    Selecione um candidato acima para carregar o
-                                    seu Time Delta.
+                                    Selecione um candidato acima para carregar a
+                                    sua Equipe.
                                   </div>
                                 );
                               }
@@ -9520,7 +9520,7 @@ export default function App() {
                               if (candidatesDeltas.length === 0) {
                                 return (
                                   <div className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-xl font-semibold text-center">
-                                    Nenhum integrante cadastrado no Time Delta
+                                    Nenhum integrante cadastrado na Equipe
                                     deste candidato.
                                   </div>
                                 );
