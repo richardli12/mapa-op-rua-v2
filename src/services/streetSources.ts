@@ -597,3 +597,55 @@ export const fetchStreetGeometry = async (
 
   return null;
 };
+
+export interface ReverseGeocodedAddress {
+  road: string | null;
+  suburb: string | null;
+  city: string | null;
+  uf: string | null;
+  displayName: string | null;
+}
+
+/**
+ * Endereço aproximado de um ponto do mapa.
+ *
+ * Usado quando o usuário escolhe o local clicando no mapa: sem isso o registro
+ * salvo ficaria sem bairro e sem rua, já que ele não passou pelos seletores.
+ */
+export const reverseGeocode = async (
+  lat: number,
+  lng: number,
+  signal?: AbortSignal,
+): Promise<ReverseGeocodedAddress | null> => {
+  try {
+    const response = await fetchWithTimeout(
+      `${NOMINATIM_BASE}/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=pt-BR&zoom=17`,
+      NOMINATIM_TIMEOUT_MS,
+      { signal },
+    );
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const address = data?.address;
+    if (!address) return null;
+
+    return {
+      road: address.road || address.pedestrian || address.footway || null,
+      suburb:
+        address.suburb ||
+        address.neighbourhood ||
+        address.quarter ||
+        address.city_district ||
+        null,
+      city:
+        address.city || address.town || address.municipality || address.village || null,
+      uf: address["ISO3166-2-lvl4"]?.replace("BR-", "") || null,
+      displayName: data.display_name || null,
+    };
+  } catch (err) {
+    if (!isAbort(err)) {
+      console.warn("Não foi possível identificar o endereço do ponto:", err);
+    }
+    return null;
+  }
+};

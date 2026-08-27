@@ -3,6 +3,7 @@ import {
   fetchCepStreets,
   fetchOsmStreets,
   mergeStreetLists,
+  reverseGeocode,
   StreetOption,
 } from "./services/streetSources";
 import {
@@ -1043,6 +1044,21 @@ export default function App() {
   }, []);
 
   // Coordinating map selecting interaction
+  /**
+   * Como o usuário vai informar o local do pin ou do raio.
+   *
+   * "ask" é a pergunta inicial; "search" abre o formulário de endereço;
+   * "map" tira o formulário da frente para ele clicar direto no mapa.
+   */
+  const [creationLocationMode, setCreationLocationMode] = useState<
+    "ask" | "search" | "map" | null
+  >(null);
+  const [isResolvingPickedAddress, setIsResolvingPickedAddress] =
+    useState(false);
+  const [pickedAddressLabel, setPickedAddressLabel] = useState<string | null>(
+    null,
+  );
+
   const [clickToPickCoords, setClickToPickCoords] = useState(false);
   const [coordsPickingMode, setCoordsPickingMode] = useState<"area" | "pin">(
     "area",
@@ -1207,6 +1223,18 @@ export default function App() {
     );
     return match?.ibgeId ?? null;
   }, [candidateLocation, brasilCities]);
+
+  /**
+   * O local do pin ou do raio já está definido? Depende do caminho escolhido:
+   * pela busca, quando bairro e rua estão preenchidos; pelo mapa, quando o
+   * ponto foi clicado.
+   */
+  const creationLocationReady =
+    creationLocationMode === "map"
+      ? !!pickedCoords
+      : creationLocationMode === "search"
+        ? !!(creationBairroName && creationRuaName)
+        : false;
 
   /** Ponto de partida do painel de endereço no mapa. */
   const mapDefaultLocation = candidateLocation
@@ -2026,6 +2054,74 @@ export default function App() {
     }
   }, [pickedCoords]);
 
+  // Quem escolhe pelo mapa não passa pelos seletores de bairro e rua, então o
+  // endereço do ponto clicado é descoberto aqui. Sem isso o registro salvo
+  // ficaria sem bairro, e o bairro é usado na listagem e nos relatórios.
+  useEffect(() => {
+    if (creationLocationMode !== "map" || !pickedCoords) {
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    setIsResolvingPickedAddress(true);
+    setPickedAddressLabel(null);
+
+    (async () => {
+      const address = await reverseGeocode(
+        pickedCoords.lat,
+        pickedCoords.lng,
+        controller.signal,
+      );
+      if (!active) return;
+
+      setIsResolvingPickedAddress(false);
+      if (!address) return;
+
+      const bairro = address.suburb || "";
+      const rua = address.road || "";
+      const cidade = address.city || creationCityName || "";
+      const uf = address.uf || creationStateShortName || "";
+
+      if (bairro) {
+        setCreationBairroName(bairro);
+        if (coordsPickingMode === "area") setAreaBairro(bairro);
+      }
+      if (rua) setCreationRuaName(rua);
+
+      setPickedAddressLabel(
+        [rua, bairro, cidade && uf ? `${cidade} - ${uf}` : cidade]
+          .filter(Boolean)
+          .join(", ") || address.displayName,
+      );
+
+      // Mesmo preenchimento automático de título e descrição da via de busca,
+      // para os dois caminhos chegarem no mesmo lugar.
+      const local = rua || bairro;
+      if (!local) return;
+      if (coordsPickingMode === "area") {
+        setAreaTitle((current) => current || `Equipe - ${local}`);
+        setAreaDescription(
+          (current) =>
+            current ||
+            `Ações de panfletagem da equipe focadas na ${local}${bairro ? `, bairro ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${uf ? ` - ${uf}` : ""}.`,
+        );
+      } else {
+        setPinTitle((current) => current || `Ponto - ${local}`);
+        setPinDescription(
+          (current) =>
+            current ||
+            `Ponto estratégico de campanha política situado na ${local}${bairro ? `, ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${uf ? ` - ${uf}` : ""}.`,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [creationLocationMode, pickedCoords]);
+
   // Handle when Bairro selection dropdown is changed in Area Form
   const handleBairroChange = (bairroName: string) => {
     setAreaBairro(bairroName);
@@ -2237,6 +2333,7 @@ export default function App() {
     setAreaColor("#2563eb");
     setAreaTeamSize(10);
     setAreaContact("");
+    setAreaBairro("");
     setPickedCoords(null);
     setEditingAreaId(null);
     setAreaCandidateId("");
@@ -2244,6 +2341,9 @@ export default function App() {
     setCreationBairroName(null);
     setCreationRuaName(null);
     setCreationModalType(null);
+    setCreationLocationMode(null);
+    setPickedAddressLabel(null);
+    setIsResolvingPickedAddress(false);
     applyDefaultCreationLocation();
     setCreationDistrictId(null);
     setModalStateSearch("");
@@ -2340,6 +2440,9 @@ export default function App() {
     setCreationBairroName(null);
     setCreationRuaName(null);
     setCreationModalType(null);
+    setCreationLocationMode(null);
+    setPickedAddressLabel(null);
+    setIsResolvingPickedAddress(false);
     applyDefaultCreationLocation();
     setCreationDistrictId(null);
     setModalStateSearch("");
@@ -2467,6 +2570,7 @@ export default function App() {
     setIsSidebarOpen(false); // Do not open right sidebar
     setClickToPickCoords(false); // Do not start map clicking
     setCoordsPickingMode("area");
+    setCreationLocationMode("ask");
     setCreationModalType("area"); // Open modal in the center of the screen
   };
 
@@ -2483,6 +2587,7 @@ export default function App() {
     setIsSidebarOpen(false); // Do not open right sidebar
     setClickToPickCoords(false); // Do not start map clicking
     setCoordsPickingMode("pin");
+    setCreationLocationMode("ask");
     setCreationModalType("pin"); // Open modal in the center of the screen
   };
 
@@ -7262,6 +7367,9 @@ export default function App() {
           <button
             onClick={() => {
               setClickToPickCoords(false);
+              // Com o formulário aberto, cancelar devolve à pergunta inicial em
+              // vez de deixar a pessoa num passo sem saída.
+              if (creationModalType) setCreationLocationMode("ask");
               triggerNotification("Seleção de coordenadas suspensa.", "info");
             }}
             className="px-3 py-1 bg-red-650 hover:bg-red-700 bg-red-600 text-[10px] text-white rounded-full font-bold transition-all border border-red-500 cursor-pointer"
@@ -8441,7 +8549,7 @@ export default function App() {
 
       {/* CENTER RE-DESIGNED CREATION MODAL */}
       <AnimatePresence>
-        {creationModalType && (
+        {creationModalType && !clickToPickCoords && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -8464,7 +8572,11 @@ export default function App() {
                       : "Criar Ponto Estratégico (PIN)"}
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Planeje a localização ideal selecionando o bairro e rua.
+                    {creationLocationMode === "map"
+                      ? "Local definido pelo ponto clicado no mapa."
+                      : creationLocationMode === "search"
+                        ? "Planeje a localização ideal selecionando o bairro e rua."
+                        : "Primeiro, escolha como quer definir o local."}
                   </p>
                 </div>
                 <button
@@ -8488,7 +8600,123 @@ export default function App() {
                 }}
                 className="space-y-4"
               >
+                {/* 0. COMO INFORMAR O LOCAL */}
+                {creationLocationMode === "ask" && (
+                  <div className="space-y-3 animate-in fade-in slide-in-from-top-1.5 duration-200">
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center font-extrabold text-[10px] text-indigo-600">
+                        1
+                      </div>
+                      <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none">
+                        Como definir o local?
+                      </h4>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setCreationLocationMode("search")}
+                      className="w-full text-left p-4 bg-white border border-slate-200 rounded-2xl hover:border-indigo-400 hover:bg-indigo-50/40 transition-all cursor-pointer flex items-start gap-3 shadow-2xs"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+                        <Search className="w-4 h-4 text-indigo-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-indigo-950 leading-tight">
+                          Pesquisar o endereço
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1 leading-snug">
+                          Escolha estado, município, bairro e rua nos seletores.
+                        </p>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreationLocationMode("map");
+                        startCoordinatesPicking(
+                          creationModalType === "area" ? "area" : "pin",
+                        );
+                      }}
+                      className="w-full text-left p-4 bg-white border border-slate-200 rounded-2xl hover:border-emerald-400 hover:bg-emerald-50/40 transition-all cursor-pointer flex items-start gap-3 shadow-2xs"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
+                        <MapPin className="w-4 h-4 text-emerald-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-indigo-950 leading-tight">
+                          Escolher no mapa
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1 leading-snug">
+                          Clique direto no ponto exato onde a ação acontece.
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                )}
+
+                {/* 1B. LOCAL ESCOLHIDO PELO MAPA */}
+                {creationLocationMode === "map" && (
+                  <div className="space-y-3 p-4 bg-emerald-50/40 border border-emerald-100 rounded-2xl animate-in fade-in slide-in-from-top-1.5 duration-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-5 h-5 rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center font-extrabold text-[10px] text-emerald-700 shrink-0">
+                          1
+                        </div>
+                        <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none truncate">
+                          Local escolhido no mapa
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCreationLocationMode("ask")}
+                        className="text-[10px] uppercase font-bold tracking-wider text-slate-400 hover:text-slate-600 transition-colors cursor-pointer shrink-0"
+                      >
+                        Trocar
+                      </button>
+                    </div>
+
+                    {pickedCoords ? (
+                      <>
+                        <div className="bg-white border border-emerald-100 rounded-xl p-3">
+                          {isResolvingPickedAddress ? (
+                            <p className="text-xs text-slate-400 italic">
+                              Identificando o endereço do ponto...
+                            </p>
+                          ) : (
+                            <p className="text-xs font-semibold text-slate-700 leading-snug">
+                              {pickedAddressLabel ||
+                                "Endereço não identificado para este ponto."}
+                            </p>
+                          )}
+                          <p className="text-[10px] text-slate-400 font-mono mt-1.5">
+                            {pickedCoords.lat.toFixed(5)},{" "}
+                            {pickedCoords.lng.toFixed(5)}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            startCoordinatesPicking(
+                              creationModalType === "area" ? "area" : "pin",
+                            )
+                          }
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-all cursor-pointer"
+                        >
+                          Escolher outro ponto
+                        </button>
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-500 leading-snug">
+                        Nenhum ponto selecionado ainda.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* 1. SELEÇÃO DE BAIRRO E RUA (SEMPRE APARECE NO MEIO DA TELA PRIMEIRO) */}
+                {creationLocationMode === "search" && (
                 <div className="space-y-3.5 p-4 bg-slate-50/50 border border-slate-100 rounded-2xl">
                   <div className="flex items-center gap-2 mb-1">
                     <div className="w-5 h-5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center font-extrabold text-[10px] text-indigo-600">
@@ -8902,8 +9130,10 @@ export default function App() {
                   )}
                 </div>
 
-                {/* 2. DADOS ADICIONAIS SÓ APÓS SELECIONAR BAIRRO E RUA */}
-                {creationBairroName && creationRuaName ? (
+                )}
+
+                {/* 2. DADOS ADICIONAIS SÓ APÓS O LOCAL ESTAR DEFINIDO */}
+                {creationLocationReady ? (
                   <div className="space-y-4 animate-in fade-in slide-in-from-top-1.5 duration-200">
                     <div className="border-t border-slate-100 pt-3">
                       <div className="flex items-center gap-2 mb-3">
@@ -9396,8 +9626,11 @@ export default function App() {
                 ) : (
                   <div className="py-6 text-center select-none">
                     <p className="text-xs text-slate-400 animate-pulse">
-                      Escolha o Bairro e a Rua acima para prosseguir com os
-                      dados da criação
+                      {creationLocationMode === "map"
+                        ? "Clique no mapa para definir o local e prosseguir com os dados da criação"
+                        : creationLocationMode === "search"
+                          ? "Escolha o Bairro e a Rua acima para prosseguir com os dados da criação"
+                          : "Escolha acima como quer definir o local da ação"}
                     </p>
                   </div>
                 )}
