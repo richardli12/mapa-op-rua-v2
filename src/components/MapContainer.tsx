@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
+import { fetchCepStreets, fetchOsmStreets, mergeStreetLists, StreetOption } from '../services/streetSources';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate } from '../types';
 
@@ -424,7 +425,7 @@ export default function MapContainer({
   const [brasilStates, setBrasilStates] = useState<{ name: string; shortName: string }[]>([]);
   const [brasilCities, setBrasilCities] = useState<{ id: number; ibgeId: number; name: string }[]>([]);
   const [brasilDistricts, setBrasilDistricts] = useState<{ id: number; name: string }[]>([]);
-  const [brasilStreets, setBrasilStreets] = useState<{ id: number; name: string }[]>([]);
+  const [brasilStreets, setBrasilStreets] = useState<StreetOption[]>([]);
 
   const [selectedStateShortName, setSelectedStateShortName] = useState<string | null>(externalStateShortName || 'AL');
   const [selectedStateName, setSelectedStateName] = useState<string | null>(externalStateName || 'Alagoas');
@@ -456,6 +457,7 @@ export default function MapContainer({
   const [loadingCities, setLoadingCities] = useState(false);
   const [loadingDistricts, setLoadingDistricts] = useState(false);
   const [loadingStreets, setLoadingStreets] = useState(false);
+  const [loadingOsmStreets, setLoadingOsmStreets] = useState(false);
 
   // Search Results Marker State
   const searchMarkerRef = useRef<L.Marker | null>(null);
@@ -574,32 +576,47 @@ export default function MapContainer({
     loadDistricts();
   }, [selectedCityIbgeId]);
 
-  // Load Streets when district selected changes
+  // Load Streets when district selected changes.
+  // Duas fontes: a base de CEP (rápida, porém incompleta em cidades que usam CEP
+  // geral) e o OpenStreetMap (as ruas que o usuário está vendo no mapa). A lista
+  // de CEP aparece assim que chega e as ruas do mapa entram nela quando o
+  // Overpass responde, sem repetir nenhuma rua.
   useEffect(() => {
     if (!selectedDistrictId) {
       setBrasilStreets([]);
+      setLoadingOsmStreets(false);
       return;
     }
-    const loadStreets = async () => {
-      setLoadingStreets(true);
-      try {
-        const token = (import.meta as any).env?.VITE_BRASIL_ABERTO_TOKEN;
-        const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const response = await fetch(`https://api.brasilaberto.com/v1/streets/${selectedDistrictId}`, { headers });
-        if (response.ok) {
-          const res = await response.json();
-          if (res && res.result) {
-            setBrasilStreets(res.result);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar ruas no mapa:", err);
-      } finally {
-        setLoadingStreets(false);
-      }
+
+    let active = true;
+    const controller = new AbortController();
+    const bairro = selectedBairroName || '';
+    const city = selectedCityName || '';
+    const state = selectedStateShortName || '';
+
+    setLoadingStreets(true);
+    setLoadingOsmStreets(true);
+
+    (async () => {
+      const cepRequest = fetchCepStreets(selectedDistrictId, controller.signal);
+      const osmRequest = fetchOsmStreets(bairro, city, state, controller.signal);
+
+      const cepStreets = await cepRequest;
+      if (!active) return;
+      setBrasilStreets(mergeStreetLists([cepStreets]));
+      setLoadingStreets(false);
+
+      const osmStreets = await osmRequest;
+      if (!active) return;
+      setBrasilStreets(mergeStreetLists([cepStreets, osmStreets]));
+      setLoadingOsmStreets(false);
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
     };
-    loadStreets();
-  }, [selectedDistrictId]);
+  }, [selectedDistrictId, selectedBairroName, selectedCityName, selectedStateShortName]);
 
   // Geocode address using OpenStreetMap Nominatim with multi-stage fallback strategy
   const geocodeAddress = async (street: string | null, bair: string, city: string, state: string) => {
@@ -1743,16 +1760,28 @@ export default function MapContainer({
                           key={r.id}
                           type="button"
                           onClick={() => handleRuaSelect(r.name, r.id)}
-                          className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between text-xs text-slate-700 cursor-pointer"
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between gap-2 text-xs text-slate-700 cursor-pointer"
                         >
                           <span className={selectedRuaName === r.name ? "font-bold text-indigo-600 truncate" : "font-medium truncate"}>
                             {r.name}
                           </span>
-                          {selectedRuaName === r.name && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[9px] uppercase font-bold tracking-wider text-slate-300">
+                              {r.source === 'cep' ? 'CEP' : 'Mapa'}
+                            </span>
+                            {selectedRuaName === r.name && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+                          </span>
                         </button>
                       ))}
 
-                      {filteredStreets.length === 0 && (
+                      {loadingOsmStreets && (
+                        <p className="px-3.5 py-2 flex items-center gap-1.5 text-[11px] text-slate-400 font-medium italic">
+                          <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                          Buscando mais ruas no mapa...
+                        </p>
+                      )}
+
+                      {filteredStreets.length === 0 && !loadingOsmStreets && (
                         <p className="p-4 text-center text-xs text-slate-400 font-medium italic">
                           Rua não encontrada ou não carregada.
                         </p>

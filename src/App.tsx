@@ -1,5 +1,11 @@
 import React, { useState, useEffect } from "react";
 import {
+  fetchCepStreets,
+  fetchOsmStreets,
+  mergeStreetLists,
+  StreetOption,
+} from "./services/streetSources";
+import {
   MapPin,
   Users,
   Layers,
@@ -684,9 +690,7 @@ export default function App() {
   const [checkInDistricts, setCheckInDistricts] = useState<
     { id: number; name: string }[]
   >([]);
-  const [checkInStreets, setCheckInStreets] = useState<
-    { id: number; name: string }[]
-  >([]);
+  const [checkInStreets, setCheckInStreets] = useState<StreetOption[]>([]);
 
   const [prefetchedLatitude, setPrefetchedLatitude] = useState<number | undefined>(undefined);
   const [prefetchedLongitude, setPrefetchedLongitude] = useState<number | undefined>(undefined);
@@ -726,6 +730,8 @@ export default function App() {
   const [loadingCheckInCities, setLoadingCheckInCities] = useState(false);
   const [loadingCheckInDistricts, setLoadingCheckInDistricts] = useState(false);
   const [loadingCheckInStreets, setLoadingCheckInStreets] = useState(false);
+  const [loadingCheckInOsmStreets, setLoadingCheckInOsmStreets] =
+    useState(false);
 
   // States to make check-in dropdowns searchable/custom
   const [checkInBairroSearch, setCheckInBairroSearch] = useState("");
@@ -1045,9 +1051,7 @@ export default function App() {
   const [brasilDistricts, setBrasilDistricts] = useState<
     { id: number; name: string }[]
   >([]);
-  const [brasilStreets, setBrasilStreets] = useState<
-    { id: number; name: string }[]
-  >([]);
+  const [brasilStreets, setBrasilStreets] = useState<StreetOption[]>([]);
 
   const [creationStateShortName, setCreationStateShortName] = useState<
     string | null
@@ -1081,6 +1085,7 @@ export default function App() {
   const [loadingCities, setLoadingCities] = useState(false);
   const [loadingDistricts, setLoadingDistricts] = useState(false);
   const [loadingStreets, setLoadingStreets] = useState(false);
+  const [loadingOsmStreets, setLoadingOsmStreets] = useState(false);
 
   // Forms state variables (Area)
   const [areaTitle, setAreaTitle] = useState("");
@@ -1309,33 +1314,48 @@ export default function App() {
   useEffect(() => {
     if (!creationDistrictId) {
       setBrasilStreets([]);
+      setLoadingOsmStreets(false);
       return;
     }
-    const loadStreets = async () => {
-      setLoadingStreets(true);
-      try {
-        const token = (import.meta as any).env?.VITE_BRASIL_ABERTO_TOKEN;
-        const headers: HeadersInit = token
-          ? { Authorization: `Bearer ${token}` }
-          : {};
-        const response = await fetch(
-          `https://api.brasilaberto.com/v1/streets/${creationDistrictId}`,
-          { headers },
-        );
-        if (response.ok) {
-          const res = await response.json();
-          if (res && res.result) {
-            setBrasilStreets(res.result);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar ruas:", err);
-      } finally {
-        setLoadingStreets(false);
-      }
+    let active = true;
+    const controller = new AbortController();
+    const bairro = creationBairroName || "";
+    const city = creationCityName || "";
+    const state = creationStateShortName || "";
+
+    setLoadingStreets(true);
+    setLoadingOsmStreets(true);
+
+    (async () => {
+      const cepRequest = fetchCepStreets(creationDistrictId, controller.signal);
+      const osmRequest = fetchOsmStreets(
+        bairro,
+        city,
+        state,
+        controller.signal,
+      );
+
+      const cepStreets = await cepRequest;
+      if (!active) return;
+      setBrasilStreets(mergeStreetLists([cepStreets]));
+      setLoadingStreets(false);
+
+      const osmStreets = await osmRequest;
+      if (!active) return;
+      setBrasilStreets(mergeStreetLists([cepStreets, osmStreets]));
+      setLoadingOsmStreets(false);
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
     };
-    loadStreets();
-  }, [creationDistrictId]);
+  }, [
+    creationDistrictId,
+    creationBairroName,
+    creationCityName,
+    creationStateShortName,
+  ]);
 
   // 0.9 Sincronizar apoiador com o Supabase quando carregar a tela de checkin
   useEffect(() => {
@@ -1698,42 +1718,50 @@ export default function App() {
   useEffect(() => {
     if (currentUrlView !== "checkin" || !checkInDistrictId) {
       setCheckInStreets([]);
+      setLoadingCheckInOsmStreets(false);
       return;
     }
 
     let active = true;
+    const controller = new AbortController();
+    const bairro = checkInBairro || "";
+    const city = checkInMunicipio || "";
+    const state = checkInEstadoUf || "";
 
-    const loadCheckInStreets = async () => {
-      setLoadingCheckInStreets(true);
-      try {
-        const token = (import.meta as any).env?.VITE_BRASIL_ABERTO_TOKEN;
-        const headers: HeadersInit = token
-          ? { Authorization: `Bearer ${token}` }
-          : {};
-        const response = await fetch(
-          `https://api.brasilaberto.com/v1/streets/${checkInDistrictId}`,
-          { headers },
-        );
-        if (response.ok) {
-          const res = await response.json();
-          if (active && res && res.result) {
-            setCheckInStreets(res.result);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar ruas do check-in:", err);
-      } finally {
-        if (active) {
-          setLoadingCheckInStreets(false);
-        }
-      }
-    };
-    loadCheckInStreets();
+    setLoadingCheckInStreets(true);
+    setLoadingCheckInOsmStreets(true);
+
+    (async () => {
+      const cepRequest = fetchCepStreets(checkInDistrictId, controller.signal);
+      const osmRequest = fetchOsmStreets(
+        bairro,
+        city,
+        state,
+        controller.signal,
+      );
+
+      const cepStreets = await cepRequest;
+      if (!active) return;
+      setCheckInStreets(mergeStreetLists([cepStreets]));
+      setLoadingCheckInStreets(false);
+
+      const osmStreets = await osmRequest;
+      if (!active) return;
+      setCheckInStreets(mergeStreetLists([cepStreets, osmStreets]));
+      setLoadingCheckInOsmStreets(false);
+    })();
 
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [currentUrlView, checkInDistrictId]);
+  }, [
+    currentUrlView,
+    checkInDistrictId,
+    checkInBairro,
+    checkInMunicipio,
+    checkInEstadoUf,
+  ]);
 
   // Calculated filtered lists for modal searchable dropdowns
   const ALL_STATES_FALLBACK = [
@@ -4146,7 +4174,13 @@ export default function App() {
                                   )}
                                 </button>
                               ))}
+                              {loadingCheckInOsmStreets && (
+                                <p className="px-3.5 py-2 text-xs text-slate-400 italic font-sans font-medium">
+                                  Buscando mais ruas no mapa...
+                                </p>
+                              )}
                               {filteredCheckInStreets.length === 0 &&
+                                !loadingCheckInOsmStreets &&
                                 !checkInRuaSearch.trim() && (
                                   <p className="p-3 text-center text-xs text-slate-400 italic font-sans font-medium">
                                     Nenhuma rua encontrada
@@ -8715,7 +8749,13 @@ export default function App() {
                                   );
                                 })
                               )}
+                              {!loadingStreets && loadingOsmStreets && (
+                                <p className="px-3.5 py-2 text-xs text-slate-400 italic font-sans">
+                                  Buscando mais ruas no mapa...
+                                </p>
+                              )}
                               {!loadingStreets &&
+                                !loadingOsmStreets &&
                                 filteredModalRuas.length === 0 &&
                                 !modalRuaSearch.trim() && (
                                   <p className="p-3 text-center text-xs text-slate-400 italic font-sans">
