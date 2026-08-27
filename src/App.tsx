@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from "react";
 import {
+  fetchCepStreets,
+  fetchOsmStreets,
+  mergeStreetLists,
+  StreetOption,
+} from "./services/streetSources";
+import {
+  CandidateLocation,
+  resolveCandidateLocation,
+} from "./services/candidateLocation";
+import {
   MapPin,
   Users,
   Layers,
@@ -218,6 +228,14 @@ const INITIAL_CANDIDATES: Candidate[] = [
   },
 ];
 
+/** Compara nomes de município ignorando acento e caixa. */
+const normalizeCityName = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
 const slugify = (text: string) => {
   return text
     .toString()
@@ -254,6 +272,14 @@ export default function App() {
   const [adminTab, setAdminTab] = useState<"candidates" | "map">("candidates");
   const [selectedCandidateFilter, setSelectedCandidateFilter] =
     useState<string>("all");
+
+  /**
+   * Estado e município do candidato em foco, usados como ponto de partida do
+   * painel de endereço e dos formulários de pin e raio. É só um padrão: o
+   * usuário continua livre para trocar nos seletores.
+   */
+  const [candidateLocation, setCandidateLocation] =
+    useState<CandidateLocation | null>(null);
 
   // Candidate management visual states
   const [isCandidateModalOpen, setIsCandidateModalOpen] = useState(false);
@@ -684,9 +710,7 @@ export default function App() {
   const [checkInDistricts, setCheckInDistricts] = useState<
     { id: number; name: string }[]
   >([]);
-  const [checkInStreets, setCheckInStreets] = useState<
-    { id: number; name: string }[]
-  >([]);
+  const [checkInStreets, setCheckInStreets] = useState<StreetOption[]>([]);
 
   const [prefetchedLatitude, setPrefetchedLatitude] = useState<number | undefined>(undefined);
   const [prefetchedLongitude, setPrefetchedLongitude] = useState<number | undefined>(undefined);
@@ -726,6 +750,8 @@ export default function App() {
   const [loadingCheckInCities, setLoadingCheckInCities] = useState(false);
   const [loadingCheckInDistricts, setLoadingCheckInDistricts] = useState(false);
   const [loadingCheckInStreets, setLoadingCheckInStreets] = useState(false);
+  const [loadingCheckInOsmStreets, setLoadingCheckInOsmStreets] =
+    useState(false);
 
   // States to make check-in dropdowns searchable/custom
   const [checkInBairroSearch, setCheckInBairroSearch] = useState("");
@@ -1045,9 +1071,7 @@ export default function App() {
   const [brasilDistricts, setBrasilDistricts] = useState<
     { id: number; name: string }[]
   >([]);
-  const [brasilStreets, setBrasilStreets] = useState<
-    { id: number; name: string }[]
-  >([]);
+  const [brasilStreets, setBrasilStreets] = useState<StreetOption[]>([]);
 
   const [creationStateShortName, setCreationStateShortName] = useState<
     string | null
@@ -1081,6 +1105,7 @@ export default function App() {
   const [loadingCities, setLoadingCities] = useState(false);
   const [loadingDistricts, setLoadingDistricts] = useState(false);
   const [loadingStreets, setLoadingStreets] = useState(false);
+  const [loadingOsmStreets, setLoadingOsmStreets] = useState(false);
 
   // Forms state variables (Area)
   const [areaTitle, setAreaTitle] = useState("");
@@ -1104,6 +1129,132 @@ export default function App() {
   const [pinDate, setPinDate] = useState("");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [pinCandidateId, setPinCandidateId] = useState<string>("");
+
+  /**
+   * Candidato que dita o padrão de estado e município.
+   *
+   * Dentro do formulário vale o candidato escolhido nele; fora, vale o
+   * candidato filtrado no mapa. Sem candidato em foco, não há padrão.
+   */
+  const locationCandidateId =
+    (creationModalType === "area" ? areaCandidateId : "") ||
+    (creationModalType === "pin" ? pinCandidateId : "") ||
+    (selectedCandidateFilter !== "all" ? selectedCandidateFilter : "");
+
+  // Descobre estado e município do candidato em foco.
+  useEffect(() => {
+    const candidate = candidates.find((c) => c.id === locationCandidateId);
+    if (!candidate) {
+      setCandidateLocation(null);
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+
+    (async () => {
+      const location = await resolveCandidateLocation(
+        candidate.estado || candidate.city,
+        controller.signal,
+      );
+      if (!active) return;
+      // Mantém o objeto anterior quando nada mudou, para não reiniciar a
+      // seleção que o usuário já fez nos seletores.
+      setCandidateLocation((previous) =>
+        previous &&
+        location &&
+        previous.uf === location.uf &&
+        previous.cityName === location.cityName
+          ? previous
+          : location,
+      );
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [locationCandidateId, candidates]);
+
+  // Casa o município que ainda está só pelo nome — o do candidato, por exemplo
+  // — com o registro oficial, que é quem traz o código IBGE usado para listar
+  // os bairros. Fica em efeito próprio porque precisa rodar tanto quando a
+  // lista de municípios chega quanto quando o candidato muda sem trocar de
+  // estado.
+  useEffect(() => {
+    if (creationCityIbgeId || !creationCityName || brasilCities.length === 0) {
+      return;
+    }
+    const wanted = normalizeCityName(creationCityName);
+    const match = brasilCities.find(
+      (c) => normalizeCityName(c.name) === wanted,
+    );
+    if (match) {
+      setCreationCityIbgeId(match.ibgeId);
+      setCreationCityName(match.name);
+    }
+  }, [brasilCities, creationCityIbgeId, creationCityName]);
+
+  /**
+   * Código IBGE do município do candidato, quando ele já aparece na lista de
+   * municípios carregada para o estado.
+   */
+  const candidateCityIbgeId = React.useMemo(() => {
+    if (!candidateLocation?.cityName) return null;
+    const wanted = normalizeCityName(candidateLocation.cityName);
+    const match = brasilCities.find(
+      (c) => normalizeCityName(c.name) === wanted,
+    );
+    return match?.ibgeId ?? null;
+  }, [candidateLocation, brasilCities]);
+
+  /** Ponto de partida do painel de endereço no mapa. */
+  const mapDefaultLocation = candidateLocation
+    ? {
+        uf: candidateLocation.uf,
+        stateName: candidateLocation.stateName,
+        cityIbgeId: candidateCityIbgeId,
+        cityName: candidateLocation.cityName,
+      }
+    : {
+        uf: "AL",
+        stateName: "Alagoas",
+        cityIbgeId: 2704302,
+        cityName: "Maceió",
+      };
+
+  /**
+   * Devolve os seletores ao padrão do candidato em foco. Sem candidato, cai no
+   * padrão histórico do sistema.
+   */
+  const applyDefaultCreationLocation = () => {
+    if (candidateLocation) {
+      setCreationStateShortName(candidateLocation.uf);
+      setCreationStateName(candidateLocation.stateName);
+      setCreationCityIbgeId(null);
+      setCreationCityName(candidateLocation.cityName);
+      return;
+    }
+    setCreationStateShortName("AL");
+    setCreationStateName("Alagoas");
+    setCreationCityIbgeId(2704302);
+    setCreationCityName("Maceió");
+  };
+
+  // Aplica esse padrão aos seletores. Roda quando o candidato em foco muda, e
+  // não a cada render, então a escolha manual do usuário é preservada até ele
+  // trocar de candidato.
+  useEffect(() => {
+    if (!candidateLocation) return;
+    setCreationStateShortName(candidateLocation.uf);
+    setCreationStateName(candidateLocation.stateName);
+    setCreationCityIbgeId(null);
+    setCreationCityName(candidateLocation.cityName);
+    setCreationDistrictId(null);
+    setCreationBairroName(null);
+    setCreationRuaName(null);
+  }, [candidateLocation]);
+
 
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [isSubmittingCheckIn, setIsSubmittingCheckIn] = useState(false);
@@ -1250,15 +1401,6 @@ export default function App() {
           const res = await response.json();
           if (res && res.result) {
             setBrasilCities(res.result);
-            if (creationStateShortName === "AL") {
-              const maceio = res.result.find(
-                (c: any) => c.name === "Maceió" || c.ibgeId === 2704302,
-              );
-              if (maceio) {
-                setCreationCityIbgeId(maceio.ibgeId);
-                setCreationCityName(maceio.name);
-              }
-            }
           }
         }
       } catch (err) {
@@ -1309,33 +1451,48 @@ export default function App() {
   useEffect(() => {
     if (!creationDistrictId) {
       setBrasilStreets([]);
+      setLoadingOsmStreets(false);
       return;
     }
-    const loadStreets = async () => {
-      setLoadingStreets(true);
-      try {
-        const token = (import.meta as any).env?.VITE_BRASIL_ABERTO_TOKEN;
-        const headers: HeadersInit = token
-          ? { Authorization: `Bearer ${token}` }
-          : {};
-        const response = await fetch(
-          `https://api.brasilaberto.com/v1/streets/${creationDistrictId}`,
-          { headers },
-        );
-        if (response.ok) {
-          const res = await response.json();
-          if (res && res.result) {
-            setBrasilStreets(res.result);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar ruas:", err);
-      } finally {
-        setLoadingStreets(false);
-      }
+    let active = true;
+    const controller = new AbortController();
+    const bairro = creationBairroName || "";
+    const city = creationCityName || "";
+    const state = creationStateShortName || "";
+
+    setLoadingStreets(true);
+    setLoadingOsmStreets(true);
+
+    (async () => {
+      const cepRequest = fetchCepStreets(creationDistrictId, controller.signal);
+      const osmRequest = fetchOsmStreets(
+        bairro,
+        city,
+        state,
+        controller.signal,
+      );
+
+      const cepStreets = await cepRequest;
+      if (!active) return;
+      setBrasilStreets(mergeStreetLists([cepStreets]));
+      setLoadingStreets(false);
+
+      const osmStreets = await osmRequest;
+      if (!active) return;
+      setBrasilStreets(mergeStreetLists([cepStreets, osmStreets]));
+      setLoadingOsmStreets(false);
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
     };
-    loadStreets();
-  }, [creationDistrictId]);
+  }, [
+    creationDistrictId,
+    creationBairroName,
+    creationCityName,
+    creationStateShortName,
+  ]);
 
   // 0.9 Sincronizar apoiador com o Supabase quando carregar a tela de checkin
   useEffect(() => {
@@ -1698,42 +1855,50 @@ export default function App() {
   useEffect(() => {
     if (currentUrlView !== "checkin" || !checkInDistrictId) {
       setCheckInStreets([]);
+      setLoadingCheckInOsmStreets(false);
       return;
     }
 
     let active = true;
+    const controller = new AbortController();
+    const bairro = checkInBairro || "";
+    const city = checkInMunicipio || "";
+    const state = checkInEstadoUf || "";
 
-    const loadCheckInStreets = async () => {
-      setLoadingCheckInStreets(true);
-      try {
-        const token = (import.meta as any).env?.VITE_BRASIL_ABERTO_TOKEN;
-        const headers: HeadersInit = token
-          ? { Authorization: `Bearer ${token}` }
-          : {};
-        const response = await fetch(
-          `https://api.brasilaberto.com/v1/streets/${checkInDistrictId}`,
-          { headers },
-        );
-        if (response.ok) {
-          const res = await response.json();
-          if (active && res && res.result) {
-            setCheckInStreets(res.result);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar ruas do check-in:", err);
-      } finally {
-        if (active) {
-          setLoadingCheckInStreets(false);
-        }
-      }
-    };
-    loadCheckInStreets();
+    setLoadingCheckInStreets(true);
+    setLoadingCheckInOsmStreets(true);
+
+    (async () => {
+      const cepRequest = fetchCepStreets(checkInDistrictId, controller.signal);
+      const osmRequest = fetchOsmStreets(
+        bairro,
+        city,
+        state,
+        controller.signal,
+      );
+
+      const cepStreets = await cepRequest;
+      if (!active) return;
+      setCheckInStreets(mergeStreetLists([cepStreets]));
+      setLoadingCheckInStreets(false);
+
+      const osmStreets = await osmRequest;
+      if (!active) return;
+      setCheckInStreets(mergeStreetLists([cepStreets, osmStreets]));
+      setLoadingCheckInOsmStreets(false);
+    })();
 
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [currentUrlView, checkInDistrictId]);
+  }, [
+    currentUrlView,
+    checkInDistrictId,
+    checkInBairro,
+    checkInMunicipio,
+    checkInEstadoUf,
+  ]);
 
   // Calculated filtered lists for modal searchable dropdowns
   const ALL_STATES_FALLBACK = [
@@ -2079,10 +2244,7 @@ export default function App() {
     setCreationBairroName(null);
     setCreationRuaName(null);
     setCreationModalType(null);
-    setCreationStateShortName("AL");
-    setCreationStateName("Alagoas");
-    setCreationCityIbgeId(2704302);
-    setCreationCityName("Maceió");
+    applyDefaultCreationLocation();
     setCreationDistrictId(null);
     setModalStateSearch("");
     setModalCitySearch("");
@@ -2178,10 +2340,7 @@ export default function App() {
     setCreationBairroName(null);
     setCreationRuaName(null);
     setCreationModalType(null);
-    setCreationStateShortName("AL");
-    setCreationStateName("Alagoas");
-    setCreationCityIbgeId(2704302);
-    setCreationCityName("Maceió");
+    applyDefaultCreationLocation();
     setCreationDistrictId(null);
     setModalStateSearch("");
     setModalCitySearch("");
@@ -4146,7 +4305,13 @@ export default function App() {
                                   )}
                                 </button>
                               ))}
+                              {loadingCheckInOsmStreets && (
+                                <p className="px-3.5 py-2 text-xs text-slate-400 italic font-sans font-medium">
+                                  Buscando mais ruas no mapa...
+                                </p>
+                              )}
                               {filteredCheckInStreets.length === 0 &&
+                                !loadingCheckInOsmStreets &&
                                 !checkInRuaSearch.trim() && (
                                   <p className="p-3 text-center text-xs text-slate-400 italic font-sans font-medium">
                                     Nenhuma rua encontrada
@@ -8212,6 +8377,7 @@ export default function App() {
           pins={filteredPins}
           checkIns={filteredCheckIns}
           selectedId={selectedId}
+          defaultLocation={mapDefaultLocation}
           selectedCandidateId={selectedCandidateFilter}
           candidates={candidates}
           mapFilter={mapFilter}
@@ -8715,7 +8881,13 @@ export default function App() {
                                   );
                                 })
                               )}
+                              {!loadingStreets && loadingOsmStreets && (
+                                <p className="px-3.5 py-2 text-xs text-slate-400 italic font-sans">
+                                  Buscando mais ruas no mapa...
+                                </p>
+                              )}
                               {!loadingStreets &&
+                                !loadingOsmStreets &&
                                 filteredModalRuas.length === 0 &&
                                 !modalRuaSearch.trim() && (
                                   <p className="p-3 text-center text-xs text-slate-400 italic font-sans">
