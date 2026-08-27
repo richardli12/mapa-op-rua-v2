@@ -1220,6 +1220,21 @@ export default function App() {
         ? !!(creationBairroName && creationRuaName)
         : false;
 
+  /**
+   * Candidato do link de check-in compartilhado pelo mapa.
+   *
+   * O link precisa apontar para um candidato: é ele que identifica de quem é o
+   * check-in. Sem candidato em foco não há link a oferecer.
+   */
+  const shareCandidate =
+    selectedCandidateFilter !== "all"
+      ? candidates.find((c) => c.id === selectedCandidateFilter)
+      : undefined;
+
+  const shareCheckInUrl = shareCandidate
+    ? `${window.location.origin}/checkin/${slugify(shareCandidate.name)}`
+    : "";
+
   /** Ponto de partida do painel de endereço no mapa. */
   const mapDefaultLocation = candidateLocation
     ? {
@@ -9464,17 +9479,18 @@ export default function App() {
                 </label>
                 <div className="flex gap-2">
                   <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-mono text-xs text-slate-600 truncate select-all">
-                    {window.location.origin}/checkin
+                    {shareCheckInUrl || `${window.location.origin}/checkin/...`}
                   </div>
                   <button
                     type="button"
+                    disabled={!shareCheckInUrl}
                     onClick={() => {
-                      const shareUrl = `${window.location.origin}/checkin`;
+                      if (!shareCheckInUrl) return;
                       navigator.clipboard
-                        .writeText(shareUrl)
+                        .writeText(shareCheckInUrl)
                         .then(() => {
                           triggerNotification(
-                            "Link de check-in copiado!",
+                            `Link de check-in de ${shareCandidate?.name} copiado!`,
                             "success",
                           );
                         })
@@ -9482,11 +9498,30 @@ export default function App() {
                           triggerNotification("Erro ao copiar link.", "error");
                         });
                     }}
-                    className="px-4 bg-indigo-600 hover:bg-indigo-700 hover:text-white border border-indigo-750 text-white font-bold text-xs rounded-xl cursor-pointer transition-colors whitespace-nowrap active:scale-95 shadow-md hover:shadow-lg"
+                    className={`px-4 border font-bold text-xs rounded-xl transition-colors whitespace-nowrap shadow-md ${
+                      shareCheckInUrl
+                        ? "bg-indigo-600 hover:bg-indigo-700 border-indigo-750 text-white cursor-pointer active:scale-95 hover:shadow-lg"
+                        : "bg-slate-200 border-slate-200 text-slate-400 cursor-not-allowed"
+                    }`}
                   >
                     Copiar
                   </button>
                 </div>
+
+                {shareCandidate ? (
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Os check-ins feitos por este link entram como{" "}
+                    <span className="font-bold text-slate-600">
+                      {shareCandidate.name}
+                    </span>
+                    .
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-amber-600 font-semibold leading-snug">
+                    Selecione um candidato no filtro do mapa para gerar o link.
+                    Sem candidato, o check-in não teria a quem ser atribuído.
+                  </p>
+                )}
               </div>
 
               {/* Botão de Simulação Instantânea */}
@@ -9505,9 +9540,14 @@ export default function App() {
                   onClick={() => {
                     setIsShareModalOpen(false);
                     setCurrentUrlView("checkin");
+                    // A simulação abre no candidato em foco, como o link real
+                    if (shareCandidate) setCheckInCandidateId(shareCandidate.id);
                     // Atualizar url temporariamente sem dar reload
                     const url = new URL(window.location.href);
                     url.searchParams.set("view", "checkin");
+                    if (shareCandidate) {
+                      url.searchParams.set("candidate", shareCandidate.id);
+                    }
                     window.history.pushState({}, "", url.toString());
                   }}
                   className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-sm hover:shadow-md transition-colors whitespace-nowrap active:scale-95"
