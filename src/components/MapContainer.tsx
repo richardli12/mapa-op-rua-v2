@@ -280,6 +280,12 @@ interface MapContainerProps {
   onExternalStateChange?: (shortName: string | null, name: string | null) => void;
   onExternalCityChange?: (ibgeId: number | null, name: string | null) => void;
   onExternalDistrictIdChange?: (id: number | null) => void;
+  defaultLocation?: {
+    uf: string;
+    stateName: string;
+    cityIbgeId: number | null;
+    cityName: string | null;
+  } | null;
   selectedCandidateId?: string;
   candidates?: Candidate[];
   mapFilter?: 'all' | 'checkins' | 'markers';
@@ -380,6 +386,7 @@ export default function MapContainer({
   onExternalStateChange,
   onExternalCityChange,
   onExternalDistrictIdChange,
+  defaultLocation,
   selectedCandidateId,
   candidates,
   mapFilter: propMapFilter,
@@ -934,10 +941,18 @@ export default function MapContainer({
   };
 
   const handleClearSelection = () => {
-    setSelectedStateShortName('AL');
-    setSelectedStateName('Alagoas');
-    setSelectedCityIbgeId(2704302);
-    setSelectedCityName('Maceió');
+    // Limpar devolve ao ponto de partida do candidato, não a um lugar fixo.
+    const fallback = defaultLocation ?? {
+      uf: 'AL',
+      stateName: 'Alagoas',
+      cityIbgeId: 2704302,
+      cityName: 'Maceió',
+    };
+
+    setSelectedStateShortName(fallback.uf);
+    setSelectedStateName(fallback.stateName);
+    setSelectedCityIbgeId(fallback.cityIbgeId);
+    setSelectedCityName(fallback.cityName);
     setSelectedBairroName(null);
     setSelectedDistrictId(null);
     setSelectedRuaName(null);
@@ -953,8 +968,8 @@ export default function MapContainer({
     setSearchMarkerCoords(null);
     delimitationGroupRef.current?.clearLayers();
 
-    if (onExternalStateChange) onExternalStateChange('AL', 'Alagoas');
-    if (onExternalCityChange) onExternalCityChange(2704302, 'Maceió');
+    if (onExternalStateChange) onExternalStateChange(fallback.uf, fallback.stateName);
+    if (onExternalCityChange) onExternalCityChange(fallback.cityIbgeId, fallback.cityName);
     if (onExternalBairroChange) onExternalBairroChange(null);
     if (onExternalDistrictIdChange) onExternalDistrictIdChange(null);
     if (onExternalRuaChange) onExternalRuaChange(null, 0, 0);
@@ -979,9 +994,6 @@ export default function MapContainer({
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
-
-    // Attribution is required by the OpenStreetMap tile usage policy
-    L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
 
     // Custom Zoom control at bottom right for a professional layout
     L.control.zoom({ position: 'bottomright' }).addTo(map);

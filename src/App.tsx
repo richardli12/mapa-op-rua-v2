@@ -6,6 +6,10 @@ import {
   StreetOption,
 } from "./services/streetSources";
 import {
+  CandidateLocation,
+  resolveCandidateLocation,
+} from "./services/candidateLocation";
+import {
   MapPin,
   Users,
   Layers,
@@ -224,6 +228,14 @@ const INITIAL_CANDIDATES: Candidate[] = [
   },
 ];
 
+/** Compara nomes de município ignorando acento e caixa. */
+const normalizeCityName = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
 const slugify = (text: string) => {
   return text
     .toString()
@@ -260,6 +272,14 @@ export default function App() {
   const [adminTab, setAdminTab] = useState<"candidates" | "map">("candidates");
   const [selectedCandidateFilter, setSelectedCandidateFilter] =
     useState<string>("all");
+
+  /**
+   * Estado e município do candidato em foco, usados como ponto de partida do
+   * painel de endereço e dos formulários de pin e raio. É só um padrão: o
+   * usuário continua livre para trocar nos seletores.
+   */
+  const [candidateLocation, setCandidateLocation] =
+    useState<CandidateLocation | null>(null);
 
   // Candidate management visual states
   const [isCandidateModalOpen, setIsCandidateModalOpen] = useState(false);
@@ -1110,6 +1130,132 @@ export default function App() {
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [pinCandidateId, setPinCandidateId] = useState<string>("");
 
+  /**
+   * Candidato que dita o padrão de estado e município.
+   *
+   * Dentro do formulário vale o candidato escolhido nele; fora, vale o
+   * candidato filtrado no mapa. Sem candidato em foco, não há padrão.
+   */
+  const locationCandidateId =
+    (creationModalType === "area" ? areaCandidateId : "") ||
+    (creationModalType === "pin" ? pinCandidateId : "") ||
+    (selectedCandidateFilter !== "all" ? selectedCandidateFilter : "");
+
+  // Descobre estado e município do candidato em foco.
+  useEffect(() => {
+    const candidate = candidates.find((c) => c.id === locationCandidateId);
+    if (!candidate) {
+      setCandidateLocation(null);
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+
+    (async () => {
+      const location = await resolveCandidateLocation(
+        candidate.estado || candidate.city,
+        controller.signal,
+      );
+      if (!active) return;
+      // Mantém o objeto anterior quando nada mudou, para não reiniciar a
+      // seleção que o usuário já fez nos seletores.
+      setCandidateLocation((previous) =>
+        previous &&
+        location &&
+        previous.uf === location.uf &&
+        previous.cityName === location.cityName
+          ? previous
+          : location,
+      );
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [locationCandidateId, candidates]);
+
+  // Casa o município que ainda está só pelo nome — o do candidato, por exemplo
+  // — com o registro oficial, que é quem traz o código IBGE usado para listar
+  // os bairros. Fica em efeito próprio porque precisa rodar tanto quando a
+  // lista de municípios chega quanto quando o candidato muda sem trocar de
+  // estado.
+  useEffect(() => {
+    if (creationCityIbgeId || !creationCityName || brasilCities.length === 0) {
+      return;
+    }
+    const wanted = normalizeCityName(creationCityName);
+    const match = brasilCities.find(
+      (c) => normalizeCityName(c.name) === wanted,
+    );
+    if (match) {
+      setCreationCityIbgeId(match.ibgeId);
+      setCreationCityName(match.name);
+    }
+  }, [brasilCities, creationCityIbgeId, creationCityName]);
+
+  /**
+   * Código IBGE do município do candidato, quando ele já aparece na lista de
+   * municípios carregada para o estado.
+   */
+  const candidateCityIbgeId = React.useMemo(() => {
+    if (!candidateLocation?.cityName) return null;
+    const wanted = normalizeCityName(candidateLocation.cityName);
+    const match = brasilCities.find(
+      (c) => normalizeCityName(c.name) === wanted,
+    );
+    return match?.ibgeId ?? null;
+  }, [candidateLocation, brasilCities]);
+
+  /** Ponto de partida do painel de endereço no mapa. */
+  const mapDefaultLocation = candidateLocation
+    ? {
+        uf: candidateLocation.uf,
+        stateName: candidateLocation.stateName,
+        cityIbgeId: candidateCityIbgeId,
+        cityName: candidateLocation.cityName,
+      }
+    : {
+        uf: "AL",
+        stateName: "Alagoas",
+        cityIbgeId: 2704302,
+        cityName: "Maceió",
+      };
+
+  /**
+   * Devolve os seletores ao padrão do candidato em foco. Sem candidato, cai no
+   * padrão histórico do sistema.
+   */
+  const applyDefaultCreationLocation = () => {
+    if (candidateLocation) {
+      setCreationStateShortName(candidateLocation.uf);
+      setCreationStateName(candidateLocation.stateName);
+      setCreationCityIbgeId(null);
+      setCreationCityName(candidateLocation.cityName);
+      return;
+    }
+    setCreationStateShortName("AL");
+    setCreationStateName("Alagoas");
+    setCreationCityIbgeId(2704302);
+    setCreationCityName("Maceió");
+  };
+
+  // Aplica esse padrão aos seletores. Roda quando o candidato em foco muda, e
+  // não a cada render, então a escolha manual do usuário é preservada até ele
+  // trocar de candidato.
+  useEffect(() => {
+    if (!candidateLocation) return;
+    setCreationStateShortName(candidateLocation.uf);
+    setCreationStateName(candidateLocation.stateName);
+    setCreationCityIbgeId(null);
+    setCreationCityName(candidateLocation.cityName);
+    setCreationDistrictId(null);
+    setCreationBairroName(null);
+    setCreationRuaName(null);
+  }, [candidateLocation]);
+
+
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [isSubmittingCheckIn, setIsSubmittingCheckIn] = useState(false);
 
@@ -1255,15 +1401,6 @@ export default function App() {
           const res = await response.json();
           if (res && res.result) {
             setBrasilCities(res.result);
-            if (creationStateShortName === "AL") {
-              const maceio = res.result.find(
-                (c: any) => c.name === "Maceió" || c.ibgeId === 2704302,
-              );
-              if (maceio) {
-                setCreationCityIbgeId(maceio.ibgeId);
-                setCreationCityName(maceio.name);
-              }
-            }
           }
         }
       } catch (err) {
@@ -2107,10 +2244,7 @@ export default function App() {
     setCreationBairroName(null);
     setCreationRuaName(null);
     setCreationModalType(null);
-    setCreationStateShortName("AL");
-    setCreationStateName("Alagoas");
-    setCreationCityIbgeId(2704302);
-    setCreationCityName("Maceió");
+    applyDefaultCreationLocation();
     setCreationDistrictId(null);
     setModalStateSearch("");
     setModalCitySearch("");
@@ -2206,10 +2340,7 @@ export default function App() {
     setCreationBairroName(null);
     setCreationRuaName(null);
     setCreationModalType(null);
-    setCreationStateShortName("AL");
-    setCreationStateName("Alagoas");
-    setCreationCityIbgeId(2704302);
-    setCreationCityName("Maceió");
+    applyDefaultCreationLocation();
     setCreationDistrictId(null);
     setModalStateSearch("");
     setModalCitySearch("");
@@ -8246,6 +8377,7 @@ export default function App() {
           pins={filteredPins}
           checkIns={filteredCheckIns}
           selectedId={selectedId}
+          defaultLocation={mapDefaultLocation}
           selectedCandidateId={selectedCandidateFilter}
           candidates={candidates}
           mapFilter={mapFilter}
