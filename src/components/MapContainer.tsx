@@ -933,10 +933,14 @@ export default function MapContainer({
       attributionControl: false
     });
 
-    // Add clean elegant CartoDB Voyager map layer
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: ''
+    // OpenStreetMap standard tiles: no API key required and free to use
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
+
+    // Attribution is required by the OpenStreetMap tile usage policy
+    L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
 
     // Custom Zoom control at bottom right for a professional layout
     L.control.zoom({ position: 'bottomright' }).addTo(map);
