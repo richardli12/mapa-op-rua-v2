@@ -34,9 +34,6 @@ const NOMINATIM_TIMEOUT_MS = 10000;
 const OVERPASS_TIMEOUT_MS = 25000;
 const CEP_TIMEOUT_MS = 12000;
 
-/** Raio usado quando o bairro está mapeado como ponto, e não como área. */
-const FALLBACK_RADIUS_METERS = 1500;
-
 /**
  * Espera curta antes de consultar o Nominatim.
  *
@@ -48,9 +45,27 @@ const FALLBACK_RADIUS_METERS = 1500;
  */
 const NOMINATIM_POLITENESS_DELAY_MS = 600;
 
-/** Ids de área do Overpass: relações somam 3.6e9 e ways somam 2.4e9 ao id OSM. */
-const OVERPASS_RELATION_OFFSET = 3600000000;
-const OVERPASS_WAY_OFFSET = 2400000000;
+/**
+ * Meia-altura mínima da caixa de busca, em graus (~1,3 km).
+ *
+ * Quando o bairro está mapeado como ponto, o Nominatim devolve uma caixa de
+ * poucos metros, que não pegaria rua nenhuma. Nesse caso a caixa é expandida
+ * até este mínimo em volta do centro.
+ */
+const MIN_BBOX_HALF_SPAN_DEG = 0.012;
+
+/** Tipos de lugar que o Nominatim usa para bairro, em ordem de preferência. */
+const PLACE_TYPE_PRIORITY = [
+  "suburb",
+  "neighbourhood",
+  "quarter",
+  "city_district",
+  "district",
+  "residential",
+  "village",
+  "hamlet",
+  "town",
+];
 
 /** Ids sintéticos para ruas vindas do OSM, que não têm id na base de CEP. */
 const OSM_ID_OFFSET = 900000000;
@@ -307,12 +322,62 @@ export const fetchCepStreets = async (
 };
 
 /**
+ * Escolhe o resultado do Nominatim que realmente é o bairro procurado.
+ *
+ * Pegar o primeiro da lista erra em nomes repetidos pelo país: buscar o bairro
+ * "Rio Verde" traz antes a cidade de Rio Verde, em Goiás. Um resultado com cara
+ * de bairro vem primeiro; se nenhum tiver, sobra o primeiro mesmo.
+ */
+const pickBestPlace = (places: any[]) => {
+  for (const wanted of PLACE_TYPE_PRIORITY) {
+    const match = places.find(
+      (place) => place?.type === wanted || place?.addresstype === wanted,
+    );
+    if (match) return match;
+  }
+  return places[0];
+};
+
+/**
+ * Caixa de busca do bairro, no formato que o Overpass espera, garantindo um
+ * tamanho mínimo utilizável.
+ */
+const toSearchBox = (place: any) => {
+  const lat = parseFloat(place?.lat);
+  const lng = parseFloat(place?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  // Nominatim devolve boundingbox como [sul, norte, oeste, leste].
+  const raw = Array.isArray(place?.boundingbox)
+    ? place.boundingbox.map((value: string) => parseFloat(value))
+    : [];
+  const hasBox = raw.length === 4 && raw.every((v: number) => Number.isFinite(v));
+
+  const south = hasBox ? Math.min(raw[0], raw[1]) : lat;
+  const north = hasBox ? Math.max(raw[0], raw[1]) : lat;
+  const west = hasBox ? Math.min(raw[2], raw[3]) : lng;
+  const east = hasBox ? Math.max(raw[2], raw[3]) : lng;
+
+  return {
+    south: Math.min(south, lat - MIN_BBOX_HALF_SPAN_DEG),
+    north: Math.max(north, lat + MIN_BBOX_HALF_SPAN_DEG),
+    west: Math.min(west, lng - MIN_BBOX_HALF_SPAN_DEG),
+    east: Math.max(east, lng + MIN_BBOX_HALF_SPAN_DEG),
+  };
+};
+
+/**
  * Ruas desenhadas no mapa dentro do bairro, via OpenStreetMap.
  *
- * Primeiro o Nominatim localiza o bairro. Quando ele está mapeado como área
- * (relação ou way fechado), a busca no Overpass é limitada a essa área. Quando
- * está mapeado apenas como ponto — comum em cidades menores — cai para um raio
- * fixo em volta do ponto.
+ * O Nominatim localiza o bairro e devolve a caixa que o envolve; o Overpass
+ * lista as vias nomeadas dentro dessa caixa.
+ *
+ * A busca é por caixa, e não pela área do bairro, de propósito: o Overpass só
+ * consegue filtrar por área quando o objeto tem uma área indexada, o que boa
+ * parte dos bairros brasileiros (mapeados como ponto, ou como polígono simples)
+ * não tem — e nesses casos a consulta não falha, apenas volta vazia. A caixa
+ * sempre existe. Ela pode trazer alguma rua vizinha na borda, o que é preferível
+ * a não trazer rua nenhuma.
  */
 export const fetchOsmStreets = async (
   bairro: string,
@@ -330,7 +395,7 @@ export const fetchOsmStreets = async (
       .join(", ");
 
     const placeResponse = await fetchWithTimeout(
-      `${NOMINATIM_BASE}/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`,
+      `${NOMINATIM_BASE}/search?format=jsonv2&limit=5&countrycodes=br&q=${encodeURIComponent(query)}`,
       NOMINATIM_TIMEOUT_MS,
       { signal },
     );
@@ -339,21 +404,11 @@ export const fetchOsmStreets = async (
     const places = await placeResponse.json();
     if (!Array.isArray(places) || places.length === 0) return [];
 
-    const place = places[0];
-    const lat = parseFloat(place.lat);
-    const lng = parseFloat(place.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+    const place = pickBestPlace(places);
+    const bbox = toSearchBox(place);
+    if (!bbox) return [];
 
-    let areaFilter: string;
-    if (place.osm_type === "relation" && place.osm_id) {
-      areaFilter = `(area:${OVERPASS_RELATION_OFFSET + Number(place.osm_id)})`;
-    } else if (place.osm_type === "way" && place.osm_id) {
-      areaFilter = `(area:${OVERPASS_WAY_OFFSET + Number(place.osm_id)})`;
-    } else {
-      areaFilter = `(around:${FALLBACK_RADIUS_METERS},${lat},${lng})`;
-    }
-
-    const overpassQuery = `[out:json][timeout:${Math.floor(OVERPASS_TIMEOUT_MS / 1000)}];way["highway"]["name"]${areaFilter};out tags;`;
+    const overpassQuery = `[out:json][timeout:${Math.floor(OVERPASS_TIMEOUT_MS / 1000)}];way["highway"]["name"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});out tags;`;
 
     const overpassResponse = await fetchWithTimeout(
       `${OVERPASS_BASE}?data=${encodeURIComponent(overpassQuery)}`,

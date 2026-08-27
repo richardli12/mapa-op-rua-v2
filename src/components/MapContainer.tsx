@@ -1760,17 +1760,12 @@ export default function MapContainer({
                           key={r.id}
                           type="button"
                           onClick={() => handleRuaSelect(r.name, r.id)}
-                          className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between gap-2 text-xs text-slate-700 cursor-pointer"
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between text-xs text-slate-700 cursor-pointer"
                         >
                           <span className={selectedRuaName === r.name ? "font-bold text-indigo-600 truncate" : "font-medium truncate"}>
                             {r.name}
                           </span>
-                          <span className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-[9px] uppercase font-bold tracking-wider text-slate-300">
-                              {r.source === 'cep' ? 'CEP' : 'Mapa'}
-                            </span>
-                            {selectedRuaName === r.name && <Check className="w-3.5 h-3.5 text-indigo-600" />}
-                          </span>
+                          {selectedRuaName === r.name && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
                         </button>
                       ))}
 
