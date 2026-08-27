@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { fetchCepStreets, fetchOsmStreets, mergeStreetLists, StreetOption } from '../services/streetSources';
+import {
+  expandBox,
+  fetchCepStreets,
+  fetchNeighborhoodArea,
+  fetchOsmStreets,
+  fetchStreetGeometry,
+  isInsideBox,
+  mergeStreetLists,
+  StreetOption,
+} from '../services/streetSources';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate } from '../types';
 
@@ -619,15 +628,58 @@ export default function MapContainer({
   }, [selectedDistrictId, selectedBairroName, selectedCityName, selectedStateShortName]);
 
   // Geocode address using OpenStreetMap Nominatim with multi-stage fallback strategy
+  /** Desenha o traçado exato da rua sobre o mapa. */
+  const drawStreetLines = (lines: [number, number][][], label: string) => {
+    const tooltipHtml = `
+      <div class="px-2.5 py-1 font-sans text-xs">
+        <span class="font-bold text-indigo-600">🛣️ Rua Delimitada:</span>
+        <p class="font-semibold text-slate-850 mt-0.5">${label}</p>
+      </div>
+    `;
+
+    lines.forEach((latlngs) => {
+      const glowLine = L.polyline(latlngs, { color: '#3b82f6', weight: 12, opacity: 0.35 });
+      const mainLine = L.polyline(latlngs, { color: '#4f46e5', weight: 5, opacity: 0.95 });
+
+      glowLine.bindTooltip(tooltipHtml, { sticky: true });
+      mainLine.bindTooltip(tooltipHtml, { sticky: true });
+
+      delimitationGroupRef.current?.addLayer(glowLine);
+      delimitationGroupRef.current?.addLayer(mainLine);
+    });
+  };
+
   const geocodeAddress = async (street: string | null, bair: string, city: string, state: string) => {
     // Clear any previous delimitation
     delimitationGroupRef.current?.clearLayers();
+
+    // Caixa do bairro escolhido. Tudo que for procurado a partir daqui fica
+    // preso a ela: é o que impede o resultado de cair em outro bairro.
+    const area = bair && bair.trim()
+      ? await fetchNeighborhoodArea(bair, city, state)
+      : null;
+    const allowedBox = area ? expandBox(area.box, 0.005) : null;
+
+    // Caminho preciso: procura a rua pela geometria real do OpenStreetMap,
+    // por nome exato e dentro do bairro. Quando encontra, o marcador e a
+    // demarcação vêm da mesma fonte, então não há como um apontar para uma rua
+    // e o outro para outra.
+    if (street && street.trim() && area) {
+      const geometry = await fetchStreetGeometry(street, area.box);
+      if (geometry) {
+        const { lat, lng } = geometry.center;
+        mapRef.current?.flyTo([lat, lng], 16, { animate: true, duration: 1.2 });
+        setSearchMarkerCoords({ lat, lng, name: `${geometry.name}, ${bair}` });
+        drawStreetLines(geometry.lines, `${geometry.name}, ${bair}`);
+        return { lat, lng };
+      }
+    }
 
     const queries: string[] = [];
     if (street && street.trim()) {
       queries.push(`${street}, ${bair}, ${city}, ${state}, Brasil`);
       queries.push(`${street}, ${city}, ${state}, Brasil`);
-      
+
       // Try clean street names if they have common prefixes
       const cleanStreet = street.replace(/^(Rua|Avenida|Av\.|Travessa|Al\.|Alameda|Rodovia|Rod\.)\s+/i, '');
       if (cleanStreet !== street) {
@@ -635,7 +687,11 @@ export default function MapContainer({
         queries.push(`${cleanStreet}, ${city}, ${state}, Brasil`);
       }
     }
-    
+
+    // Quantas consultas acima são de rua. Um acerto de rua precisa cair dentro
+    // do bairro; um acerto de bairro ou município, não.
+    const streetQueryCount = queries.length;
+
     if (bair && bair.trim()) {
       queries.push(`${bair}, ${city}, ${state}, Brasil`);
     }
@@ -653,7 +709,16 @@ export default function MapContainer({
             const item = data[0];
             const lat = parseFloat(item.lat);
             const lng = parseFloat(item.lon);
-            const isExactMatch = street ? q.includes(street) : false;
+
+            // Uma rua encontrada fora do bairro escolhido é uma homônima de
+            // outro lugar, não a rua pedida. Descarta e tenta a próxima
+            // consulta, em vez de marcar o ponto errado.
+            const isStreetQuery = i < streetQueryCount;
+            if (isStreetQuery && allowedBox && !isInsideBox(allowedBox, lat, lng)) {
+              continue;
+            }
+
+            const isExactMatch = isStreetQuery;
             
             // Fly map to exact or neighborhood center
             mapRef.current?.flyTo([lat, lng], isExactMatch ? 16 : 14, {
@@ -661,70 +726,29 @@ export default function MapContainer({
               duration: 1.2
             });
             
+            // Só cita a rua quando o acerto foi de rua. Cair no centro do
+            // bairro e ainda assim rotular "Rua X" faria o sistema afirmar uma
+            // localização que ele não encontrou.
             setSearchMarkerCoords({
               lat,
               lng,
-              name: street ? `${street}, ${bair}` : bair
+              name: isStreetQuery && street ? `${street}, ${bair}` : bair
             });
 
-            // Tenta obter as linhas geográficas exatas da rua (via Overpass API) para delimitar o trajeto completo da rua no mapa de forma ASSÍNCRONA E NÃO-BLOQUEANTE
-            if (street && street.trim()) {
+            // Traçado da rua, buscado por nome exato e restrito à vizinhança do
+            // ponto encontrado. Sem essa restrição de nome, procurar "Rua B"
+            // acabava desenhando qualquer rua com "b" no nome por perto.
+            // Quando o bairro foi localizado, o caminho preciso lá em cima já
+            // procurou o traçado; aqui só resta o caso em que ele não rodou.
+            if (street && street.trim() && !area) {
+              const searchBox = expandBox(
+                { south: lat, west: lng, north: lat, east: lng },
+                0.02,
+              );
               (async () => {
-                try {
-                  const cleanName = street
-                    .replace(/^(Rua|Avenida|Av\.|Travessa|Al\.|Alameda|Rodovia|Rod\.|Praça|Ladeira|Conjunto)\s+/i, '')
-                    .trim();
-                  
-                  if (cleanName.length >= 3) {
-                    const overpassQuery = `[out:json][timeout:8];
-                      (
-                        way["name"~"${cleanName}",i](around:2000,${lat},${lng});
-                        way["name"~"${street}",i](around:2000,${lat},${lng});
-                      );
-                      out geom;`;
-                    
-                    const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
-                    const opResponse = await fetch(overpassUrl);
-                    
-                    if (opResponse.ok) {
-                      const opResult = await opResponse.json();
-                      if (opResult && opResult.elements && opResult.elements.length > 0) {
-                        opResult.elements.forEach((element: any) => {
-                          if (element.type === 'way' && element.geometry && element.geometry.length > 0) {
-                            const latlngs = element.geometry.map((pt: any) => [pt.lat, pt.lon]);
-                            
-                            // Linhas de design para a rua (glow externo + linha central nítida)
-                            const glowLine = L.polyline(latlngs, {
-                              color: '#3b82f6',
-                              weight: 12,
-                              opacity: 0.35
-                            });
-
-                            const mainLine = L.polyline(latlngs, {
-                              color: '#4f46e5',
-                              weight: 5,
-                              opacity: 0.95
-                            });
-
-                            const tooltipHtml = `
-                              <div class="px-2.5 py-1 font-sans text-xs">
-                                <span class="font-bold text-indigo-600">🛣️ Rua Delimitada:</span>
-                                <p class="font-semibold text-slate-850 mt-0.5">${element.tags?.name || street}</p>
-                              </div>
-                            `;
-
-                            glowLine.bindTooltip(tooltipHtml, { sticky: true });
-                            mainLine.bindTooltip(tooltipHtml, { sticky: true });
-
-                            delimitationGroupRef.current?.addLayer(glowLine);
-                            delimitationGroupRef.current?.addLayer(mainLine);
-                          }
-                        });
-                      }
-                    }
-                  }
-                } catch (opErr) {
-                  console.warn('Erro ao carregar malha urbana da rua via Overpass:', opErr);
+                const geometry = await fetchStreetGeometry(street, searchBox);
+                if (geometry) {
+                  drawStreetLines(geometry.lines, `${geometry.name}, ${bair}`);
                 }
               })();
             }

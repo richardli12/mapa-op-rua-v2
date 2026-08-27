@@ -26,6 +26,25 @@ export interface StreetOption {
   source: StreetSource;
 }
 
+/** Caixa geográfica, nos limites que o Overpass e o Nominatim usam. */
+export interface GeoBox {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
+export interface NeighborhoodArea {
+  center: { lat: number; lng: number };
+  box: GeoBox;
+}
+
+export interface StreetGeometry {
+  name: string;
+  center: { lat: number; lng: number };
+  lines: [number, number][][];
+}
+
 const BRASIL_ABERTO_BASE = "https://api.brasilaberto.com/v1";
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
 const OVERPASS_BASE = "https://overpass-api.de/api/interpreter";
@@ -338,11 +357,27 @@ const pickBestPlace = (places: any[]) => {
   return places[0];
 };
 
+/** Amplia a caixa em todas as direções, em graus. */
+export const expandBox = (box: GeoBox, margin: number): GeoBox => ({
+  south: box.south - margin,
+  west: box.west - margin,
+  north: box.north + margin,
+  east: box.east + margin,
+});
+
+/** Diz se um ponto cai dentro da caixa. */
+export const isInsideBox = (
+  box: GeoBox,
+  lat: number,
+  lng: number,
+): boolean =>
+  lat >= box.south && lat <= box.north && lng >= box.west && lng <= box.east;
+
 /**
  * Caixa de busca do bairro, no formato que o Overpass espera, garantindo um
  * tamanho mínimo utilizável.
  */
-const toSearchBox = (place: any) => {
+const toSearchBox = (place: any): GeoBox | null => {
   const lat = parseFloat(place?.lat);
   const lng = parseFloat(place?.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -367,6 +402,70 @@ const toSearchBox = (place: any) => {
 };
 
 /**
+ * Cache dos bairros já localizados. A caixa do bairro é consultada tanto para
+ * listar as ruas quanto para localizar cada rua escolhida, e ela não muda
+ * enquanto o usuário mexe no painel.
+ */
+const neighborhoodAreaCache = new Map<string, NeighborhoodArea | null>();
+
+/**
+ * Localiza o bairro e devolve seu centro e a caixa que o envolve.
+ *
+ * Essa caixa é o limite de tudo que o sistema procura depois: a lista de ruas e
+ * a demarcação da rua escolhida. É ela que impede o sistema de sair do bairro
+ * que o usuário selecionou.
+ */
+export const fetchNeighborhoodArea = async (
+  bairro: string,
+  cidade: string,
+  uf: string,
+  signal?: AbortSignal,
+): Promise<NeighborhoodArea | null> => {
+  if (!bairro?.trim()) return null;
+
+  const cacheKey = `${bairro}|${cidade}|${uf}`.toLowerCase();
+  const cached = neighborhoodAreaCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    await wait(NOMINATIM_POLITENESS_DELAY_MS, signal);
+
+    const query = [bairro, cidade, uf, "Brasil"]
+      .filter((part) => part && String(part).trim())
+      .join(", ");
+
+    const response = await fetchWithTimeout(
+      `${NOMINATIM_BASE}/search?format=jsonv2&limit=5&countrycodes=br&q=${encodeURIComponent(query)}`,
+      NOMINATIM_TIMEOUT_MS,
+      { signal },
+    );
+    if (!response.ok) return null;
+
+    const places = await response.json();
+    if (!Array.isArray(places) || places.length === 0) {
+      neighborhoodAreaCache.set(cacheKey, null);
+      return null;
+    }
+
+    const place = pickBestPlace(places);
+    const box = toSearchBox(place);
+    if (!box) return null;
+
+    const area: NeighborhoodArea = {
+      center: { lat: parseFloat(place.lat), lng: parseFloat(place.lon) },
+      box,
+    };
+    neighborhoodAreaCache.set(cacheKey, area);
+    return area;
+  } catch (err) {
+    if (!isAbort(err)) {
+      console.warn("Não foi possível localizar o bairro no mapa:", err);
+    }
+    return null;
+  }
+};
+
+/**
  * Ruas desenhadas no mapa dentro do bairro, via OpenStreetMap.
  *
  * O Nominatim localiza o bairro e devolve a caixa que o envolve; o Overpass
@@ -388,27 +487,11 @@ export const fetchOsmStreets = async (
   if (!bairro?.trim()) return [];
 
   try {
-    await wait(NOMINATIM_POLITENESS_DELAY_MS, signal);
+    const area = await fetchNeighborhoodArea(bairro, cidade, uf, signal);
+    if (!area) return [];
 
-    const query = [bairro, cidade, uf, "Brasil"]
-      .filter((part) => part && String(part).trim())
-      .join(", ");
-
-    const placeResponse = await fetchWithTimeout(
-      `${NOMINATIM_BASE}/search?format=jsonv2&limit=5&countrycodes=br&q=${encodeURIComponent(query)}`,
-      NOMINATIM_TIMEOUT_MS,
-      { signal },
-    );
-    if (!placeResponse.ok) return [];
-
-    const places = await placeResponse.json();
-    if (!Array.isArray(places) || places.length === 0) return [];
-
-    const place = pickBestPlace(places);
-    const bbox = toSearchBox(place);
-    if (!bbox) return [];
-
-    const overpassQuery = `[out:json][timeout:${Math.floor(OVERPASS_TIMEOUT_MS / 1000)}];way["highway"]["name"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});out tags;`;
+    const { box } = area;
+    const overpassQuery = `[out:json][timeout:${Math.floor(OVERPASS_TIMEOUT_MS / 1000)}];way["highway"]["name"](${box.south},${box.west},${box.north},${box.east});out tags;`;
 
     const overpassResponse = await fetchWithTimeout(
       `${OVERPASS_BASE}?data=${encodeURIComponent(overpassQuery)}`,
@@ -436,4 +519,81 @@ export const fetchOsmStreets = async (
     }
     return [];
   }
+};
+
+/** Escapa aspas e barras para o nome caber com segurança na consulta Overpass. */
+const escapeOverpassString = (value: string) =>
+  value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+/** Escapa os caracteres especiais de expressão regular do Overpass. */
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Ponto que fica sobre a rua: o vértice do meio do trecho mais longo. */
+const midpointOfLongestLine = (lines: [number, number][][]) => {
+  const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), lines[0]);
+  const [lat, lng] = longest[Math.floor(longest.length / 2)];
+  return { lat, lng };
+};
+
+/**
+ * Geometria real de uma rua dentro do bairro escolhido.
+ *
+ * O nome é comparado por igualdade exata, e só depois — se nada casar — por
+ * igualdade ancorada sem diferenciar maiúsculas e acentos de caixa. Comparação
+ * solta aqui é perigosa: procurar "Rua B" por trecho de texto casaria com
+ * "Rua Bahia", "Rua Bacabeira" e qualquer outra que contenha as mesmas letras.
+ *
+ * A busca também nunca sai da caixa do bairro, então uma rua de mesmo nome em
+ * outro bairro do município não pode ser devolvida no lugar da certa.
+ */
+export const fetchStreetGeometry = async (
+  streetName: string,
+  box: GeoBox,
+  signal?: AbortSignal,
+): Promise<StreetGeometry | null> => {
+  const name = streetName?.trim();
+  if (!name) return null;
+
+  const bbox = `${box.south},${box.west},${box.north},${box.east}`;
+  const timeout = Math.floor(OVERPASS_TIMEOUT_MS / 1000);
+
+  const filters = [
+    `["name"="${escapeOverpassString(name)}"]`,
+    `["name"~"^${escapeOverpassString(escapeRegExp(name))}$",i]`,
+  ];
+
+  for (const filter of filters) {
+    try {
+      const query = `[out:json][timeout:${timeout}];way["highway"]${filter}(${bbox});out geom;`;
+      const response = await fetchWithTimeout(
+        `${OVERPASS_BASE}?data=${encodeURIComponent(query)}`,
+        OVERPASS_TIMEOUT_MS,
+        { signal },
+      );
+      if (!response.ok) continue;
+
+      const result = await response.json();
+      const elements = Array.isArray(result?.elements) ? result.elements : [];
+
+      const lines: [number, number][][] = elements
+        .filter((element: any) => Array.isArray(element?.geometry) && element.geometry.length > 1)
+        .map((element: any) =>
+          element.geometry.map((point: any) => [point.lat, point.lon] as [number, number]),
+        );
+
+      if (lines.length === 0) continue;
+
+      return {
+        name: elements[0]?.tags?.name || name,
+        center: midpointOfLongestLine(lines),
+        lines,
+      };
+    } catch (err) {
+      if (isAbort(err)) return null;
+      console.warn("Não foi possível obter o traçado da rua:", err);
+    }
+  }
+
+  return null;
 };
