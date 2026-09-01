@@ -102,6 +102,12 @@ create table if not exists time_delta (
   image text
 );
 
+-- Realtime: sem isso o Supabase nao emite os eventos e o pino so aparece
+-- depois de recarregar a pagina.
+alter publication supabase_realtime add table check_ins;
+alter publication supabase_realtime add table panfletagem_areas;
+alter publication supabase_realtime add table campaign_pins;
+
 -- Ativar RLS ou desativar conforme sua necessidade. Por padrão, se você quiser ler/escrever anonimamente,
 -- pode desabilitar RLS ou criar políticas de leitura e gravação para todos.
 alter table panfletagem_areas disable row level security;
@@ -151,6 +157,11 @@ export async function detectTableCasing() {
   } catch (e) {
     detectedCasing.check_ins = 'lower';
   }
+}
+
+/** Converte as colunas cruas do Postgres para o formato camelCase do app. */
+export function normalizeRecord<T>(obj: any): T {
+  return normalizeFields<T>(obj);
 }
 
 function normalizeFields<T>(obj: any): T {

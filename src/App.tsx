@@ -87,6 +87,7 @@ import {
   isSupabaseConfigured,
   SUPABASE_SQL_SETUP,
   supabase,
+  normalizeRecord,
 } from "./supabaseClient";
 
 const INITIAL_PARTIES: Party[] = [
@@ -996,7 +997,9 @@ export default function App() {
         (payload: any) => {
           console.log("Sincronização em Tempo Real (Check-In):", payload);
           if (payload.eventType === "INSERT") {
-            const newCheckIn = payload.new as CheckIn;
+            // O payload vem com os nomes crus das colunas; sem normalizar, o
+            // candidateId some e o pino não passa no filtro do mapa.
+            const newCheckIn = normalizeRecord<CheckIn>(payload.new);
             setCheckIns((prev) => {
               if (prev.some((c) => c.id === newCheckIn.id)) return prev;
               return [newCheckIn, ...prev];
@@ -1006,7 +1009,7 @@ export default function App() {
               "success",
             );
           } else if (payload.eventType === "UPDATE") {
-            const updatedCheckIn = payload.new as CheckIn;
+            const updatedCheckIn = normalizeRecord<CheckIn>(payload.new);
             setCheckIns((prev) =>
               prev.map((c) =>
                 c.id === updatedCheckIn.id ? updatedCheckIn : c,
@@ -1024,13 +1027,13 @@ export default function App() {
         (payload: any) => {
           console.log("Sincronização em Tempo Real (Área):", payload);
           if (payload.eventType === "INSERT") {
-            const newArea = payload.new as PanfletagemArea;
+            const newArea = normalizeRecord<PanfletagemArea>(payload.new);
             setAreas((prev) => {
               if (prev.some((a) => a.id === newArea.id)) return prev;
               return [...prev, newArea];
             });
           } else if (payload.eventType === "UPDATE") {
-            const updatedArea = payload.new as PanfletagemArea;
+            const updatedArea = normalizeRecord<PanfletagemArea>(payload.new);
             setAreas((prev) =>
               prev.map((a) => (a.id === updatedArea.id ? updatedArea : a)),
             );
@@ -1046,13 +1049,13 @@ export default function App() {
         (payload: any) => {
           console.log("Sincronização em Tempo Real (Marcação):", payload);
           if (payload.eventType === "INSERT") {
-            const newPin = payload.new as CampaignPin;
+            const newPin = normalizeRecord<CampaignPin>(payload.new);
             setPins((prev) => {
               if (prev.some((p) => p.id === newPin.id)) return prev;
               return [...prev, newPin];
             });
           } else if (payload.eventType === "UPDATE") {
-            const updatedPin = payload.new as CampaignPin;
+            const updatedPin = normalizeRecord<CampaignPin>(payload.new);
             setPins((prev) =>
               prev.map((p) => (p.id === updatedPin.id ? updatedPin : p)),
             );
@@ -5042,57 +5045,34 @@ export default function App() {
                   {/* Botões de captura */}
                   {checkInMediaDrafts.length < CHECKIN_MAX_MEDIA ? (
                     <div className="font-sans">
+                      {/* Um input só: a própria câmera do aparelho decide entre
+                          foto e vídeo, e o tipo do arquivo é detectado no envio. */}
                       <input
                         id="checkin-camera-input"
                         type="file"
-                        accept="image/*"
+                        accept="image/*,video/*"
                         capture="environment"
                         multiple
                         onChange={handleCheckInFileChange}
                         className="sr-only"
                       />
-                      <input
-                        id="checkin-video-input"
-                        type="file"
-                        accept="video/*"
-                        capture="environment"
-                        onChange={handleCheckInFileChange}
-                        className="sr-only"
-                      />
 
-                      <div className="grid grid-cols-2 gap-2.5">
-                        <label
-                          htmlFor="checkin-camera-input"
-                          className="flex flex-col items-center justify-center p-5 bg-white border border-dashed border-slate-300 hover:border-[#F58220] hover:bg-orange-50/5 transition-all rounded-2xl cursor-pointer text-center group min-h-[120px] shadow-3xs"
-                        >
-                          <div className="w-11 h-11 rounded-full bg-orange-50 flex items-center justify-center text-[#F58220] group-hover:scale-105 transition-all mb-2.5 border border-orange-100 shadow-3xs">
-                            <Camera className="w-5 h-5 stroke-[2]" />
-                          </div>
-                          <span className="text-[13px] font-bold text-slate-700 group-hover:text-[#F58220] transition-colors leading-tight">
-                            {checkInMediaDrafts.length > 0
-                              ? "Mais uma foto"
-                              : "Tirar Foto"}
-                          </span>
-                          <span className="text-[9px] text-slate-400 font-bold mt-1 uppercase tracking-wider">
-                            Até 5MB cada
-                          </span>
-                        </label>
-
-                        <label
-                          htmlFor="checkin-video-input"
-                          className="flex flex-col items-center justify-center p-5 bg-white border border-dashed border-slate-300 hover:border-[#3B82F6] hover:bg-blue-50/5 transition-all rounded-2xl cursor-pointer text-center group min-h-[120px] shadow-3xs"
-                        >
-                          <div className="w-11 h-11 rounded-full bg-blue-50 flex items-center justify-center text-[#3B82F6] group-hover:scale-105 transition-all mb-2.5 border border-blue-100 shadow-3xs">
-                            <Video className="w-5 h-5 stroke-[2]" />
-                          </div>
-                          <span className="text-[13px] font-bold text-slate-700 group-hover:text-[#3B82F6] transition-colors leading-tight">
-                            Gravar Vídeo
-                          </span>
-                          <span className="text-[9px] text-slate-400 font-bold mt-1 uppercase tracking-wider">
-                            Até 50MB
-                          </span>
-                        </label>
-                      </div>
+                      <label
+                        htmlFor="checkin-camera-input"
+                        className="flex flex-col items-center justify-center p-6 bg-white border border-dashed border-slate-300 hover:border-[#F58220] hover:bg-orange-50/5 transition-all rounded-2xl cursor-pointer text-center group min-h-[140px] shadow-3xs"
+                      >
+                        <div className="w-12 h-12 rounded-full bg-orange-50 flex items-center justify-center text-[#F58220] group-hover:scale-105 transition-all mb-3 border border-orange-100 shadow-3xs">
+                          <Camera className="w-6 h-6 stroke-[2]" />
+                        </div>
+                        <span className="text-sm font-bold text-slate-700 group-hover:text-[#F58220] transition-colors leading-tight">
+                          {checkInMediaDrafts.length > 0
+                            ? "Anexar mais"
+                            : "Tirar Foto ou Gravar Vídeo"}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-bold mt-1.5 uppercase tracking-wider">
+                          Foto até 5MB • Vídeo até 50MB
+                        </span>
+                      </label>
 
                       <p className="text-[9.5px] text-slate-400 font-semibold mt-2 leading-snug text-center">
                         Pode anexar até {CHECKIN_MAX_MEDIA} arquivos entre fotos

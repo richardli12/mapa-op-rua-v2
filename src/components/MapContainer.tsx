@@ -11,7 +11,7 @@ import {
   mergeStreetLists,
   StreetOption,
 } from '../services/streetSources';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, getCheckInPriority } from '../types';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
@@ -2028,19 +2028,11 @@ export default function MapContainer({
                           Capturado com Sucesso
                         </span>
                       </div>
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${selectedCheckInForModal.userLatitude},${selectedCheckInForModal.userLongitude}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[10px] font-bold text-amber-700 hover:text-amber-800 underline flex items-center gap-1 transition-colors"
-                      >
-                        Ver no Google Maps →
-                      </a>
                     </div>
                     
                     <div className="bg-white/90 p-3.5 rounded-xl border border-slate-100 space-y-3 shadow-3xs text-xs font-sans text-slate-700">
                       <div>
-                        <span className="text-[9px] font-bold text-slate-400 uppercase block select-none">Endereço Completo (Resolvido via GPS)</span>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block select-none">Endereço Completo</span>
                         {isReverseGeocoding ? (
                           <div className="flex items-center gap-1.5 text-indigo-600 font-semibold mt-1">
                             <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0"/>
@@ -2082,9 +2074,15 @@ export default function MapContainer({
                         </div>
                       </div>
 
-                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[9px] font-mono text-slate-400">
-                        <span>Lat/Lng exata do dispositivo: {selectedCheckInForModal.userLatitude.toFixed(6)}, {selectedCheckInForModal.userLongitude.toFixed(6)}</span>
-                      </div>
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${selectedCheckInForModal.userLatitude},${selectedCheckInForModal.userLongitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 w-full py-3 bg-[#F58220] hover:bg-[#E06E10] active:bg-[#C05D10] text-white font-extrabold text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md hover:shadow-lg active:scale-98 flex items-center justify-center gap-2 no-underline"
+                      >
+                        <Navigation className="w-4 h-4 stroke-[2.5]" />
+                        Abrir no Google Maps
+                      </a>
                     </div>
                   </div>
                 ) : (
