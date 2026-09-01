@@ -2885,6 +2885,37 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  // Quantas missões o integrante logado tem atribuídas no candidato escolhido.
+  const userMissionCount = (() => {
+    if (!checkInCandidateId || !authenticatedSupporter?.id) return 0;
+    const isMine = (assigned: any) =>
+      Array.isArray(assigned) && assigned.includes(authenticatedSupporter.id);
+    const mineAreas = areas.filter(
+      (a) =>
+        a.active &&
+        a.candidateId === checkInCandidateId &&
+        isMine(a.assignedDeltas || a.center?.assignedDeltas),
+    ).length;
+    const minePins = pins.filter(
+      (p) =>
+        p.active &&
+        p.candidateId === checkInCandidateId &&
+        isMine(p.assignedDeltas || p.position?.assignedDeltas),
+    ).length;
+    return mineAreas + minePins;
+  })();
+  const hasAssignedMissions = userMissionCount > 0;
+
+  // Sem missão atribuída não há escolha a fazer: o check-in livre é o único
+  // caminho, então o app já entra nele em vez de oferecer um botão.
+  useEffect(() => {
+    if (currentUrlView !== "checkin") return;
+    if (!hasAssignedMissions && checkInMode !== "livre") {
+      setCheckInMode("livre");
+      setActiveMissionId(null);
+    }
+  }, [currentUrlView, hasAssignedMissions, checkInMode]);
+
   // Funções para manipulação de check-in
   const handleCheckInBairroChange = (bName: string) => {
     setCheckInBairro(bName);
@@ -4182,7 +4213,8 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Seleção da Modalidade do Check-in */}
+                {/* Seleção da Modalidade: só faz sentido com missão atribuída */}
+                {hasAssignedMissions && (
                 <div className="space-y-2 text-left">
                   <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
                     Modalidade do Check-in *
@@ -4251,20 +4283,23 @@ export default function App() {
                     </button>
                   </div>
 
-                  {isFreeCheckIn && (
-                    <div className="bg-orange-50/60 border border-orange-150 rounded-xl p-3 flex gap-2.5 items-start animate-in fade-in slide-in-from-top-1 duration-200 font-sans">
-                      <MapPin className="w-4 h-4 text-[#F58220] shrink-0 mt-0.5" />
-                      <p className="text-[10px] text-slate-600 font-medium leading-relaxed">
-                        O pino vai para o{" "}
-                        <strong className="text-slate-800 font-extrabold">
-                          ponto exato onde você está agora
-                        </strong>
-                        , capturado pelo GPS do aparelho. Fique no local da
-                        ocorrência ao confirmar.
-                      </p>
-                    </div>
-                  )}
                 </div>
+                )}
+
+                {/* Aviso do ponto exato, valendo com ou sem seletor na tela */}
+                {isFreeCheckIn && (
+                  <div className="bg-orange-50/60 border border-orange-150 rounded-xl p-3 flex gap-2.5 items-start animate-in fade-in duration-200 font-sans text-left">
+                    <MapPin className="w-4 h-4 text-[#F58220] shrink-0 mt-0.5" />
+                    <p className="text-[10px] text-slate-600 font-medium leading-relaxed">
+                      O pino vai para o{" "}
+                      <strong className="text-slate-800 font-extrabold">
+                        ponto exato onde você está agora
+                      </strong>
+                      , capturado pelo GPS do aparelho. Fique no local da
+                      ocorrência ao confirmar.
+                    </p>
+                  </div>
+                )}
 
                 {/* Lista Coesiva de Missões Ativas de Campo do Voluntário */}
                 {!isFreeCheckIn &&
@@ -4308,27 +4343,9 @@ export default function App() {
 
                   const totalUserMissions = userAreas.length + userPins.length;
 
+                  // Sem missão a tela já está em modo livre; nada a mostrar aqui.
                   if (totalUserMissions === 0) {
-                    return (
-                      <div className="bg-amber-50/45 border border-amber-100 rounded-2xl p-4 text-center font-sans">
-                        <p className="text-xs text-amber-600 font-bold">
-                          Nenhuma missão de campo pendente para o seu perfil no
-                          momento.
-                        </p>
-                        <p className="text-[10px] text-slate-500 mt-1">
-                          Sem missão você ainda pode registrar o que viu na rua:
-                          use o check-in livre.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectCheckInMode("livre")}
-                          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#F58220] hover:bg-[#E06E10] text-white text-[10px] font-extrabold uppercase tracking-wider rounded-lg transition-colors cursor-pointer active:scale-95"
-                        >
-                          <AlertCircle className="w-3.5 h-3.5" />
-                          Fazer check-in livre
-                        </button>
-                      </div>
-                    );
+                    return null;
                   }
 
                   return (
