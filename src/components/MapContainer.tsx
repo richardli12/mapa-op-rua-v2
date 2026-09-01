@@ -1382,9 +1382,24 @@ export default function MapContainer({
       const marker = L.marker([checkIn.coordinates.lat, checkIn.coordinates.lng], { icon: checkInIcon });
 
       const dateText = new Date(checkIn.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' • ' + new Date(checkIn.createdAt).toLocaleDateString([], { day: '2-digit', month: '2-digit' });
-      const photoHtml = checkIn.photo ? `
+
+      const media = checkIn.media && checkIn.media.length > 0
+        ? checkIn.media
+        : checkIn.photo
+          ? [{ url: checkIn.photo, type: 'image' as const }]
+          : [];
+      const coverImage = media.find(m => m.type === 'image');
+      const videoCount = media.filter(m => m.type === 'video').length;
+
+      const countHtml = media.length > 1
+        ? `<p class="text-[9px] text-slate-500 font-bold mt-1">📎 ${media.length} arquivos${videoCount > 0 ? ` • ${videoCount} vídeo${videoCount > 1 ? 's' : ''}` : ''}</p>`
+        : videoCount > 0
+          ? `<p class="text-[9px] text-slate-500 font-bold mt-1">🎬 Vídeo anexado</p>`
+          : '';
+
+      const photoHtml = coverImage ? `
         <div class="mt-2 rounded-lg overflow-hidden border border-slate-100 max-w-[150px] max-h-[100px] shadow-2xs">
-          <img src="${checkIn.photo}" class="w-full h-full object-cover animate-in fade-in duration-300" />
+          <img src="${coverImage.url}" class="w-full h-full object-cover animate-in fade-in duration-300" />
         </div>
       ` : '';
 
@@ -1398,6 +1413,7 @@ export default function MapContainer({
           <p class="font-bold text-slate-900 text-sm">${checkIn.name}</p>
           <p class="text-[10px] text-slate-500 font-semibold mt-0.5">📍 ${checkIn.rua}, ${checkIn.bairro}</p>
           <p class="text-[9px] text-slate-400 mt-1 font-medium bg-slate-50 border border-slate-100 p-1 rounded inline-block">🕒 ${dateText}</p>
+          ${countHtml}
           <p class="text-[8px] text-slate-400 font-bold uppercase mt-1">💡 Clique para ver detalhes</p>
           ${photoHtml}
         </div>
@@ -2080,25 +2096,54 @@ export default function MapContainer({
                 )}
               </div>
 
-              {/* Imagem em destaque */}
-              <div>
-                <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">Imagem de Comprovação</p>
-                {selectedCheckInForModal.photo ? (
-                  <div className="shadow-inner border border-slate-150 rounded-2xl overflow-hidden max-h-64 sm:max-h-80 bg-slate-50 flex items-center justify-center relative group">
-                    <img
-                      referrerPolicy="no-referrer"
-                      src={selectedCheckInForModal.photo}
-                      alt="Foto anexada ao check-in"
-                      className="w-full h-full object-cover max-h-64 sm:max-h-80 animate-in fade-in zoom-in-95 duration-500 hover:scale-105 transition-transform cursor-pointer"
-                    />
+              {/* Fotos e vídeos anexados */}
+              {(() => {
+                const media = selectedCheckInForModal.media && selectedCheckInForModal.media.length > 0
+                  ? selectedCheckInForModal.media
+                  : selectedCheckInForModal.photo
+                    ? [{ url: selectedCheckInForModal.photo, type: 'image' as const }]
+                    : [];
+
+                return (
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                      Imagens de Comprovação{media.length > 1 ? ` (${media.length})` : ''}
+                    </p>
+                    {media.length > 0 ? (
+                      <div className={media.length > 1 ? 'grid grid-cols-2 gap-2.5' : ''}>
+                        {media.map((item, index) => (
+                          <div
+                            key={`${item.url}-${index}`}
+                            className="shadow-inner border border-slate-150 rounded-2xl overflow-hidden bg-slate-50 flex items-center justify-center relative"
+                          >
+                            {item.type === 'video' ? (
+                              <video
+                                src={item.url}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className="w-full h-full object-cover max-h-64 sm:max-h-80 bg-black"
+                              />
+                            ) : (
+                              <img
+                                referrerPolicy="no-referrer"
+                                src={item.url}
+                                alt="Arquivo anexado ao check-in"
+                                className="w-full h-full object-cover max-h-64 sm:max-h-80 animate-in fade-in zoom-in-95 duration-500"
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center gap-1.5 select-none">
+                        <User className="w-8 h-8 text-slate-300" />
+                        <p className="text-xs text-slate-400 font-semibold" id="no-photo-attached-text">Nenhuma foto foi anexada neste check-in.</p>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center gap-1.5 select-none">
-                    <User className="w-8 h-8 text-slate-300" />
-                    <p className="text-xs text-slate-400 font-semibold" id="no-photo-attached-text">Nenhuma foto foi anexada neste check-in.</p>
-                  </div>
-                )}
-              </div>
+                );
+              })()}
 
             </div>
 

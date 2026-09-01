@@ -52,6 +52,7 @@ import {
   ArrowRight,
   LogOut,
   Camera,
+  Video,
   Image,
   Instagram,
   Mail,
@@ -75,6 +76,11 @@ import {
   CheckInPriority,
   CHECKIN_PRIORITIES,
   getCheckInPriority,
+  CheckInMedia,
+  CheckInMediaType,
+  CHECKIN_MAX_MEDIA,
+  CHECKIN_MAX_IMAGE_BYTES,
+  CHECKIN_MAX_VIDEO_BYTES,
 } from "./types";
 import {
   SupabaseService,
@@ -191,6 +197,23 @@ const INITIAL_PINS: CampaignPin[] = [
     date: "2026-06-25",
   },
 ];
+
+/** Lê um arquivo como data URL, usado quando o Storage não está disponível. */
+function readFileAsDataUrl(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve((reader.result as string) || null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Fotos e vídeos de um check-in, já unificando os registros antigos que só têm photo. */
+function getCheckInMedia(checkIn: CheckIn): CheckInMedia[] {
+  if (checkIn.media && checkIn.media.length > 0) return checkIn.media;
+  if (checkIn.photo) return [{ url: checkIn.photo, type: 'image' }];
+  return [];
+}
 
 // Mock inicial de check-ins para Maceió
 const INITIAL_CHECK_INS: CheckIn[] = [
@@ -612,8 +635,17 @@ export default function App() {
   });
   const [checkInBairro, setCheckInBairro] = useState("");
   const [checkInRua, setCheckInRua] = useState("");
-  const [checkInPhoto, setCheckInPhoto] = useState<string | null>(null);
-  const [checkInFile, setCheckInFile] = useState<File | null>(null);
+  // Fotos e vídeos anexados ao check-in. previewUrl é só para exibir na tela;
+  // o que vai para o banco é a URL devolvida pelo Storage no envio.
+  type CheckInMediaDraft = {
+    id: string;
+    type: CheckInMediaType;
+    previewUrl: string;
+    file: File;
+  };
+  const [checkInMediaDrafts, setCheckInMediaDrafts] = useState<
+    CheckInMediaDraft[]
+  >([]);
   const [checkInSuccess, setCheckInSuccess] = useState(false);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   // Modalidade do check-in: por missão enviada pelo comitê ou livre (sem missão).
@@ -2121,7 +2153,13 @@ export default function App() {
   }, [pins]);
 
   useEffect(() => {
-    localStorage.setItem("campaign_map_checkins", JSON.stringify(checkIns));
+    try {
+      localStorage.setItem("campaign_map_checkins", JSON.stringify(checkIns));
+    } catch (err) {
+      // Vários check-ins com fotos embutidas (modo local, sem Storage) estouram
+      // a cota do navegador. O cache local se perde, mas o app segue rodando.
+      console.warn("Não foi possível guardar os check-ins no navegador:", err);
+    }
   }, [checkIns]);
 
   useEffect(() => {
@@ -2851,19 +2889,59 @@ export default function App() {
   };
 
   const handleCheckInFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        triggerNotification("A imagem deve ter menos de 5MB.", "error");
-        return;
+    const picked: File[] = e.target.files ? Array.from(e.target.files) : [];
+    // O input é limpo aqui para permitir escolher o mesmo arquivo de novo.
+    e.target.value = "";
+    if (picked.length === 0) return;
+
+    setCheckInMediaDrafts((prev) => {
+      const accepted: CheckInMediaDraft[] = [];
+      let full = false;
+      let tooBig = false;
+
+      for (const file of picked) {
+        if (prev.length + accepted.length >= CHECKIN_MAX_MEDIA) {
+          full = true;
+          break;
+        }
+        const isVideo = file.type.startsWith("video/");
+        const limit = isVideo
+          ? CHECKIN_MAX_VIDEO_BYTES
+          : CHECKIN_MAX_IMAGE_BYTES;
+        if (file.size > limit) {
+          tooBig = true;
+          continue;
+        }
+        accepted.push({
+          id: "media_" + Math.random().toString(36).substr(2, 9),
+          type: isVideo ? "video" : "image",
+          previewUrl: URL.createObjectURL(file),
+          file,
+        });
       }
-      setCheckInFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setCheckInPhoto(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
+
+      if (tooBig) {
+        triggerNotification(
+          "Cada foto deve ter até 5MB e cada vídeo até 50MB.",
+          "error",
+        );
+      }
+      if (full) {
+        triggerNotification(
+          `Você pode anexar no máximo ${CHECKIN_MAX_MEDIA} arquivos por check-in.`,
+          "info",
+        );
+      }
+      return accepted.length > 0 ? [...prev, ...accepted] : prev;
+    });
+  };
+
+  const handleRemoveCheckInMedia = (id: string) => {
+    setCheckInMediaDrafts((prev) => {
+      const target = prev.find((m) => m.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((m) => m.id !== id);
+    });
   };
 
   if (currentUrlView === "checkin") {
@@ -3028,7 +3106,7 @@ export default function App() {
         );
         return;
       }
-      if (isFreeCheckIn && !checkInPhoto) {
+      if (isFreeCheckIn && checkInMediaDrafts.length === 0) {
         triggerNotification(
           "Tire a foto do local para registrar o check-in livre.",
           "error",
@@ -3151,23 +3229,57 @@ export default function App() {
         }
       }
 
-      let uploadedPhotoUrl = checkInPhoto;
+      // Sobe cada foto/vídeo anexado e guarda a URL pública devolvida.
+      const uploadedMedia: CheckInMedia[] = [];
+      let failedUploads = 0;
 
-      if (isSupabaseConfigured && checkInFile) {
-        try {
-          const uploadRes = await SupabaseService.uploadImage(checkInFile);
-          if (uploadRes.success && uploadRes.url) {
-            uploadedPhotoUrl = uploadRes.url;
-          } else {
-            console.warn(
-              "Upload falhou, usando imagem local:",
-              uploadRes.error,
-            );
+      for (const draft of checkInMediaDrafts) {
+        let resolvedUrl: string | null = null;
+
+        if (isSupabaseConfigured) {
+          try {
+            const uploadRes = await SupabaseService.uploadMedia(draft.file);
+            if (uploadRes.success && uploadRes.url) {
+              resolvedUrl = uploadRes.url;
+            } else {
+              console.warn("Upload falhou:", uploadRes.error);
+            }
+          } catch (uploadErr) {
+            console.error("Erro ao fazer upload do arquivo:", uploadErr);
           }
-        } catch (uploadErr) {
-          console.error("Erro ao fazer upload da foto:", uploadErr);
+        }
+
+        if (!resolvedUrl) {
+          if (draft.type === "image") {
+            // Sem Storage o que sobra é embutir a imagem no próprio registro.
+            resolvedUrl = await readFileAsDataUrl(draft.file);
+          } else {
+            // Vídeo em base64 estoura o localStorage, então ele não é embutido.
+            failedUploads += 1;
+            continue;
+          }
+        }
+
+        if (resolvedUrl) {
+          uploadedMedia.push({ url: resolvedUrl, type: draft.type });
+        } else {
+          failedUploads += 1;
         }
       }
+
+      if (failedUploads > 0) {
+        triggerNotification(
+          `${failedUploads} arquivo(s) não puderam ser enviados. Vídeos precisam do Supabase configurado.`,
+          "info",
+        );
+      }
+
+      // A coluna photo continua com a primeira foto, para os registros antigos
+      // e para as telas que mostram uma miniatura só.
+      const uploadedPhotoUrl =
+        uploadedMedia.find((m) => m.type === "image")?.url ||
+        uploadedMedia[0]?.url ||
+        null;
 
       const newCheckIn: CheckIn = {
         id: "checkin_" + Math.random().toString(36).substr(2, 9),
@@ -3177,6 +3289,7 @@ export default function App() {
         municipio: checkInMunicipio,
         estado: checkInEstado,
         photo: uploadedPhotoUrl || undefined,
+        media: uploadedMedia.length > 0 ? uploadedMedia : undefined,
         coordinates: checkInCoords, // Dropdown selection coordinates for the map
         userLatitude: userLat,      // Real user physical device latitude
         userLongitude: userLng,     // Real user physical device longitude
@@ -3248,8 +3361,8 @@ export default function App() {
       setCheckInName(sName);
       setCheckInBairro("");
       setCheckInRua("");
-      setCheckInPhoto(null);
-      setCheckInFile(null);
+      checkInMediaDrafts.forEach((m) => URL.revokeObjectURL(m.previewUrl));
+      setCheckInMediaDrafts([]);
       setCheckInSuccess(false);
       setCheckInCandidateId("");
       setCheckInMunicipio("Maceió");
@@ -3778,16 +3891,39 @@ export default function App() {
                       </strong>
                     </div>
                   )}
-                  {checkInPhoto && (
-                    <div className="pt-3 flex items-center gap-3">
-                      <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-200 shadow-3xs flex-shrink-0">
-                        <img
-                          src={checkInPhoto}
-                          className="w-full h-full object-cover"
-                        />
+                  {checkInMediaDrafts.length > 0 && (
+                    <div className="pt-3 space-y-2">
+                      <div className="flex gap-2 flex-wrap">
+                        {checkInMediaDrafts.map((item) => (
+                          <div
+                            key={item.id}
+                            className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-200 shadow-3xs flex-shrink-0 bg-slate-100"
+                          >
+                            {item.type === "video" ? (
+                              <>
+                                <video
+                                  src={item.previewUrl}
+                                  className="w-full h-full object-cover"
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                />
+                                <span className="absolute inset-0 flex items-center justify-center bg-slate-900/35 text-white">
+                                  <Video className="w-4 h-4" />
+                                </span>
+                              </>
+                            ) : (
+                              <img
+                                src={item.previewUrl}
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+                          </div>
+                        ))}
                       </div>
-                      <span className="text-xs text-slate-500 font-semibold font-sans">
-                        Foto anexada e enviada!
+                      <span className="text-xs text-slate-500 font-semibold font-sans block">
+                        {checkInMediaDrafts.length} arquivo(s) anexado(s) e
+                        enviado(s)!
                       </span>
                     </div>
                   )}
@@ -4847,71 +4983,127 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Upload de Foto */}
-                <div className="space-y-2 text-left">
-                  <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
-                    {isFreeCheckIn
-                      ? "Foto da Ocorrência *"
-                      : "Evidência Fotográfica (Opcional)"}
-                  </label>
+                {/* Fotos e Vídeos */}
+                <div className="space-y-2.5 text-left">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
+                      {isFreeCheckIn
+                        ? "Fotos e Vídeos da Ocorrência *"
+                        : "Evidência Fotográfica (Opcional)"}
+                    </label>
+                    <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider font-sans shrink-0">
+                      {checkInMediaDrafts.length}/{CHECKIN_MAX_MEDIA}
+                    </span>
+                  </div>
 
-                  {checkInPhoto ? (
-                    <div className="p-3.5 bg-slate-50 border border-slate-150 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-3">
-                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0 shadow-3xs font-sans">
-                          <img
-                            src={checkInPhoto}
-                            className="w-full h-full object-cover"
-                          />
+                  {/* Miniaturas do que já foi anexado */}
+                  {checkInMediaDrafts.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 font-sans animate-in fade-in duration-200">
+                      {checkInMediaDrafts.map((item) => (
+                        <div
+                          key={item.id}
+                          className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-3xs group"
+                        >
+                          {item.type === "video" ? (
+                            <video
+                              src={item.previewUrl}
+                              className="w-full h-full object-cover"
+                              muted
+                              playsInline
+                              preload="metadata"
+                            />
+                          ) : (
+                            <img
+                              src={item.previewUrl}
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+
+                          {item.type === "video" && (
+                            <span className="absolute bottom-1 left-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-900/70 text-white text-[8px] font-extrabold uppercase tracking-wider">
+                              <Video className="w-2.5 h-2.5" />
+                              Vídeo
+                            </span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCheckInMedia(item.id)}
+                            title="Remover"
+                            className="absolute top-1 right-1 w-6 h-6 rounded-full bg-slate-900/65 hover:bg-rose-600 text-white flex items-center justify-center transition-colors cursor-pointer active:scale-95"
+                          >
+                            <X className="w-3.5 h-3.5 stroke-[3]" />
+                          </button>
                         </div>
-                        <div>
-                          <span className="text-xs font-bold text-slate-700 block">
-                            Foto anexada
-                          </span>
-                          <span className="text-[10px] text-emerald-500 font-bold block mt-0.5">
-                            Pronta para envio
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCheckInPhoto(null);
-                          setCheckInFile(null);
-                        }}
-                        className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] uppercase font-bold rounded-lg transition-colors cursor-pointer font-sans"
-                      >
-                        Remover
-                      </button>
+                      ))}
                     </div>
-                  ) : (
-                    <div className="pb-1 font-sans">
-                      {/* Hidden input used standardly via label */}
+                  )}
+
+                  {/* Botões de captura */}
+                  {checkInMediaDrafts.length < CHECKIN_MAX_MEDIA ? (
+                    <div className="font-sans">
                       <input
                         id="checkin-camera-input"
                         type="file"
                         accept="image/*"
                         capture="environment"
+                        multiple
+                        onChange={handleCheckInFileChange}
+                        className="sr-only"
+                      />
+                      <input
+                        id="checkin-video-input"
+                        type="file"
+                        accept="video/*"
+                        capture="environment"
                         onChange={handleCheckInFileChange}
                         className="sr-only"
                       />
 
-                      {/* Camera Button */}
-                      <label
-                        htmlFor="checkin-camera-input"
-                        className="flex flex-col items-center justify-center p-6 bg-white border border-dashed border-slate-300 hover:border-[#F58220] hover:bg-orange-50/5 transition-all rounded-2xl cursor-pointer text-center group min-h-[140px] shadow-3xs"
-                      >
-                        <div className="w-12 h-12 rounded-full bg-orange-50 flex items-center justify-center text-[#F58220] group-hover:scale-105 transition-all mb-3 border border-orange-100 shadow-3xs">
-                          <Camera className="w-6 h-6 stroke-[2]" />
-                        </div>
-                        <span className="text-sm font-bold text-slate-700 group-hover:text-[#F58220] transition-colors leading-tight">
-                          Tirar Foto
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-bold mt-1.5 uppercase tracking-wider">
-                          Apenas fotos tiradas na hora pela câmera (Máximo 5MB)
-                        </span>
-                      </label>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <label
+                          htmlFor="checkin-camera-input"
+                          className="flex flex-col items-center justify-center p-5 bg-white border border-dashed border-slate-300 hover:border-[#F58220] hover:bg-orange-50/5 transition-all rounded-2xl cursor-pointer text-center group min-h-[120px] shadow-3xs"
+                        >
+                          <div className="w-11 h-11 rounded-full bg-orange-50 flex items-center justify-center text-[#F58220] group-hover:scale-105 transition-all mb-2.5 border border-orange-100 shadow-3xs">
+                            <Camera className="w-5 h-5 stroke-[2]" />
+                          </div>
+                          <span className="text-[13px] font-bold text-slate-700 group-hover:text-[#F58220] transition-colors leading-tight">
+                            {checkInMediaDrafts.length > 0
+                              ? "Mais uma foto"
+                              : "Tirar Foto"}
+                          </span>
+                          <span className="text-[9px] text-slate-400 font-bold mt-1 uppercase tracking-wider">
+                            Até 5MB cada
+                          </span>
+                        </label>
+
+                        <label
+                          htmlFor="checkin-video-input"
+                          className="flex flex-col items-center justify-center p-5 bg-white border border-dashed border-slate-300 hover:border-[#3B82F6] hover:bg-blue-50/5 transition-all rounded-2xl cursor-pointer text-center group min-h-[120px] shadow-3xs"
+                        >
+                          <div className="w-11 h-11 rounded-full bg-blue-50 flex items-center justify-center text-[#3B82F6] group-hover:scale-105 transition-all mb-2.5 border border-blue-100 shadow-3xs">
+                            <Video className="w-5 h-5 stroke-[2]" />
+                          </div>
+                          <span className="text-[13px] font-bold text-slate-700 group-hover:text-[#3B82F6] transition-colors leading-tight">
+                            Gravar Vídeo
+                          </span>
+                          <span className="text-[9px] text-slate-400 font-bold mt-1 uppercase tracking-wider">
+                            Até 50MB
+                          </span>
+                        </label>
+                      </div>
+
+                      <p className="text-[9.5px] text-slate-400 font-semibold mt-2 leading-snug text-center">
+                        Pode anexar até {CHECKIN_MAX_MEDIA} arquivos entre fotos
+                        e vídeos.
+                      </p>
                     </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 font-bold bg-slate-50 border border-slate-150 rounded-xl p-3 text-center font-sans">
+                      Limite de {CHECKIN_MAX_MEDIA} arquivos atingido. Remova um
+                      para anexar outro.
+                    </p>
                   )}
                 </div>
 
@@ -7692,6 +7884,11 @@ export default function App() {
                       const isSelected = selectedId === checkIn.id;
                       const isFree = checkIn.mode === "livre";
                       const priority = getCheckInPriority(checkIn.priority);
+                      const media = getCheckInMedia(checkIn);
+                      const cover = media.find((m) => m.type === "image");
+                      const videoCount = media.filter(
+                        (m) => m.type === "video",
+                      ).length;
 
                       return (
                         <div
@@ -7706,15 +7903,22 @@ export default function App() {
                           }}
                         >
                           {/* Foto de Check-in em Miniatura */}
-                          <div className="w-12 h-12 rounded-lg bg-emerald-100/30 border border-emerald-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
-                            {checkIn.photo ? (
+                          <div className="w-12 h-12 rounded-lg bg-emerald-100/30 border border-emerald-100 flex-shrink-0 overflow-hidden flex items-center justify-center relative">
+                            {cover ? (
                               <img
-                                src={checkIn.photo}
+                                src={cover.url}
                                 className="w-full h-full object-cover"
                                 referrerPolicy="no-referrer"
                               />
+                            ) : videoCount > 0 ? (
+                              <Video className="w-5 h-5 text-emerald-600" />
                             ) : (
                               <Users className="w-5 h-5 text-emerald-600 animate-pulse" />
+                            )}
+                            {media.length > 1 && (
+                              <span className="absolute bottom-0 right-0 px-1 py-px bg-slate-900/75 text-white text-[8px] font-extrabold rounded-tl-md leading-tight">
+                                {media.length}
+                              </span>
                             )}
                           </div>
 
@@ -7751,6 +7955,12 @@ export default function App() {
                                     style={{ backgroundColor: priority.color }}
                                   />
                                   Prioridade {priority.label}
+                                </span>
+                              )}
+                              {videoCount > 0 && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-100 select-none">
+                                  <Video className="w-2.5 h-2.5" />
+                                  {videoCount} vídeo{videoCount > 1 ? "s" : ""}
                                 </span>
                               )}
                               {!isFree && checkIn.missionTitle && (

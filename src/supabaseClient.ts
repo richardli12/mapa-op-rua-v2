@@ -57,7 +57,8 @@ create table if not exists check_ins (
   mode text,
   priority text,
   "missionId" text,
-  "missionTitle" text
+  "missionTitle" text,
+  media jsonb
 );
 
 -- Migração para bancos já existentes: adiciona as colunas do check-in livre
@@ -66,6 +67,9 @@ alter table check_ins add column if not exists mode text;
 alter table check_ins add column if not exists priority text;
 alter table check_ins add column if not exists "missionId" text;
 alter table check_ins add column if not exists "missionTitle" text;
+
+-- Varias fotos e videos por check-in (a coluna photo segue guardando a primeira foto).
+alter table check_ins add column if not exists media jsonb;
 
 create table if not exists auth_users (
   email text primary key,
@@ -467,12 +471,16 @@ export const SupabaseService = {
     }
   },
 
-  async uploadImage(file: File) {
+  /** Envia uma foto ou um vídeo do check-in para o Storage e devolve a URL pública. */
+  async uploadMedia(file: File) {
     if (!supabase) {
       return { success: false, url: null, error: 'Supabase não configurado.' };
     }
     try {
-      const fileExt = file.name.split('.').pop() || 'png';
+      const isVideo = file.type.startsWith('video/');
+      const nameExt = file.name.includes('.') ? file.name.split('.').pop() : '';
+      // A câmera de alguns aparelhos manda o arquivo sem extensão no nome.
+      const fileExt = nameExt || (isVideo ? 'mp4' : 'jpg');
       const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
       const filePath = `check_ins/${fileName}`;
 
@@ -480,7 +488,8 @@ export const SupabaseService = {
         .from('imagens')
         .upload(filePath, file, {
           cacheControl: '3600',
-          upsert: false
+          upsert: false,
+          contentType: file.type || undefined
         });
 
       if (error) throw error;
@@ -492,7 +501,11 @@ export const SupabaseService = {
       return { success: true, url: publicUrl, error: null };
     } catch (err: any) {
       console.error('Erro de upload no Supabase Storage:', err);
-      return { success: false, url: null, error: err.message || 'Falha no upload da imagem.' };
+      return {
+        success: false,
+        url: null,
+        error: err.message || 'Falha no upload do arquivo.'
+      };
     }
   },
 

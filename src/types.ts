@@ -55,6 +55,18 @@ export function getCheckInPriority(value?: string) {
   return CHECKIN_PRIORITIES.find(p => p.value === value);
 }
 
+export type CheckInMediaType = 'image' | 'video';
+
+/** Cada foto ou vídeo anexado ao check-in. */
+export interface CheckInMedia {
+  url: string;
+  type: CheckInMediaType;
+}
+
+export const CHECKIN_MAX_MEDIA = 6;
+export const CHECKIN_MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+export const CHECKIN_MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50 MB
+
 export interface CheckIn {
   id: string;
   name: string;
@@ -62,7 +74,8 @@ export interface CheckIn {
   rua: string;
   municipio?: string;
   estado?: string;
-  photo?: string; // string Base64 da imagem enviada
+  photo?: string; // primeira foto do check-in (mantido para os registros antigos)
+  media?: CheckInMedia[]; // todas as fotos e vídeos anexados
   coordinates: { lat: number; lng: number };
   userLatitude?: number;  // Localização física exata capturada no check-in
   userLongitude?: number; // Localização física exata capturada no check-in
