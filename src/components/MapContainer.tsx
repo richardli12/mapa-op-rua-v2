@@ -12,7 +12,7 @@ import {
   StreetOption,
 } from '../services/streetSources';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate } from '../types';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, getCheckInPriority } from '../types';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
 const normalizeText = (text: string): string => {
@@ -1334,25 +1334,37 @@ export default function MapContainer({
     if (!checkIns) return;
 
     checkIns.forEach(checkIn => {
-      // Ícone do bonequinho verde ("bonequinho verde") para todos os check-ins
+      // Check-in por missão usa o bonequinho verde de sempre. O check-in livre
+      // vira um alerta pintado com a cor do grau de prioridade informado.
+      const isFree = checkIn.mode === 'livre';
+      const priority = getCheckInPriority(checkIn.priority);
+      const markerColor = isFree ? (priority?.color || '#f97316') : '#10b981';
+      const markerIcon = isFree
+        ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>
+            <path d="M12 9v4"/>
+            <path d="M12 17h.01"/>
+          </svg>`
+        : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>`;
+
       const avatarHtml = `
         <div style="
           width: 38px;
           height: 38px;
           border-radius: 50%;
-          background: #10b981;
+          background: ${markerColor};
           border: 3px solid white;
-          box-shadow: 0 4px 10px rgba(16, 185, 129, 0.4);
+          box-shadow: 0 4px 10px ${markerColor}66;
           display: flex;
           align-items: center;
           justify-content: center;
           color: white;
           transition: all 0.2s ease;
         ">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
-            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
+          ${markerIcon}
         </div>
       `;
 
@@ -1376,9 +1388,13 @@ export default function MapContainer({
         </div>
       ` : '';
 
+      const headerHtml = isFree
+        ? `<p class="font-extrabold uppercase tracking-wider text-[9px] mb-0.5" style="color:${markerColor}">⚠️ Check-in Livre${priority ? ` • Prioridade ${priority.label}` : ''}</p>`
+        : `<p class="font-extrabold text-emerald-600 uppercase tracking-wider text-[9px] mb-0.5">✅ Check-in de Voluntário</p>`;
+
       marker.bindTooltip(`
         <div class="px-2.5 py-2 font-sans text-xs min-w-[160px]">
-          <p class="font-extrabold text-emerald-600 uppercase tracking-wider text-[9px] mb-0.5">✅ Check-in de Voluntário</p>
+          ${headerHtml}
           <p class="font-bold text-slate-900 text-sm">${checkIn.name}</p>
           <p class="text-[10px] text-slate-500 font-semibold mt-0.5">📍 ${checkIn.rua}, ${checkIn.bairro}</p>
           <p class="text-[9px] text-slate-400 mt-1 font-medium bg-slate-50 border border-slate-100 p-1 rounded inline-block">🕒 ${dateText}</p>
@@ -1869,7 +1885,9 @@ export default function MapContainer({
                 </div>
                 <div>
                   <h3 className="font-extrabold text-[11px] uppercase tracking-wider text-emerald-100 leading-none">Detalhes do Check-in</h3>
-                  <p className="text-xs font-semibold text-emerald-50 mt-0.5">Voluntário Registrado</p>
+                  <p className="text-xs font-semibold text-emerald-50 mt-0.5">
+                    {selectedCheckInForModal.mode === 'livre' ? 'Registro Livre (sem missão)' : 'Voluntário Registrado'}
+                  </p>
                 </div>
               </div>
               <button
@@ -1884,7 +1902,44 @@ export default function MapContainer({
 
             {/* Conteúdo rolável */}
             <div className="p-6 overflow-y-auto space-y-5 text-left font-sans">
-              
+
+              {/* Modalidade e grau de prioridade/impacto */}
+              {(() => {
+                const isFree = selectedCheckInForModal.mode === 'livre';
+                const priority = getCheckInPriority(selectedCheckInForModal.priority);
+                return (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border ${
+                        isFree
+                          ? 'bg-orange-50 text-orange-700 border-orange-200'
+                          : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                      }`}
+                    >
+                      {isFree ? 'Check-in Livre' : 'Check-in por Missão'}
+                    </span>
+                    {priority && (
+                      <span
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border"
+                        style={{
+                          color: priority.color,
+                          borderColor: `${priority.color}40`,
+                          backgroundColor: `${priority.color}14`
+                        }}
+                      >
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: priority.color }} />
+                        Prioridade {priority.label}
+                      </span>
+                    )}
+                    {!isFree && selectedCheckInForModal.missionTitle && (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-50 text-slate-600 border border-slate-150">
+                        {selectedCheckInForModal.missionTitle}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Seção principal de identificação */}
               <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-xl flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">

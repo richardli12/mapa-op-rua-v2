@@ -71,6 +71,10 @@ import {
   PIN_ICONS,
   Candidate,
   Party,
+  CheckInMode,
+  CheckInPriority,
+  CHECKIN_PRIORITIES,
+  getCheckInPriority,
 } from "./types";
 import {
   SupabaseService,
@@ -612,6 +616,11 @@ export default function App() {
   const [checkInFile, setCheckInFile] = useState<File | null>(null);
   const [checkInSuccess, setCheckInSuccess] = useState(false);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
+  // Modalidade do check-in: por missão enviada pelo comitê ou livre (sem missão).
+  const [checkInMode, setCheckInMode] = useState<CheckInMode>("missao");
+  const [checkInPriority, setCheckInPriority] = useState<CheckInPriority | "">(
+    "",
+  );
   const initialCheckInState = (() => {
     let slug = "";
     if (typeof window !== "undefined") {
@@ -2974,6 +2983,23 @@ export default function App() {
       r.name.toLowerCase().includes(checkInRuaSearch.toLowerCase()),
     );
 
+    // Modalidade 2: check-in livre, sem missão enviada pelo comitê.
+    const isFreeCheckIn = checkInMode === "livre";
+    const activeMission = activeMissionId
+      ? [...areas, ...pins].find((m) => m.id === activeMissionId)
+      : undefined;
+    const selectedPriority = getCheckInPriority(checkInPriority);
+
+    const handleSelectCheckInMode = (mode: CheckInMode) => {
+      setCheckInMode(mode);
+      if (mode === "livre") {
+        // Um registro livre não pertence a nenhuma missão.
+        setActiveMissionId(null);
+      } else {
+        setCheckInPriority("");
+      }
+    };
+
     const handleCheckInSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!checkInName.trim()) {
@@ -2995,6 +3021,20 @@ export default function App() {
         triggerNotification("Selecione a rua onde você está.", "error");
         return;
       }
+      if (isFreeCheckIn && !checkInPriority) {
+        triggerNotification(
+          "Informe o grau de prioridade/impacto da ocorrência.",
+          "error",
+        );
+        return;
+      }
+      if (isFreeCheckIn && !checkInPhoto) {
+        triggerNotification(
+          "Tire a foto do local para registrar o check-in livre.",
+          "error",
+        );
+        return;
+      }
 
       setIsSubmittingCheckIn(true);
 
@@ -3002,34 +3042,53 @@ export default function App() {
       let userLat: number | undefined = prefetchedLatitude;
       let userLng: number | undefined = prefetchedLongitude;
 
-      if (!userLat || !userLng) {
-        if (navigator.geolocation) {
-          try {
-            const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-              navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: true,
-                timeout: 5000,
-              });
-            });
-            userLat = pos.coords.latitude;
-            userLng = pos.coords.longitude;
-            setPrefetchedLatitude(userLat);
-            setPrefetchedLongitude(userLng);
-          } catch (geoErr: any) {
-            console.warn("Could not capture user exact position on submit:", geoErr);
-            let errorMsg = "Não foi possível obter sua localização exata por GPS.";
-            if (geoErr.code === 1) {
-              errorMsg = "Permissão de localização negada pelo navegador. Ative o acesso ao GPS para capturar a geolocalização física real.";
-            } else if (geoErr.code === 2) {
-              errorMsg = "Sinal de GPS fraco ou indisponível no dispositivo.";
-            } else if (geoErr.code === 3) {
-              errorMsg = "Tempo esgotado para obter a localização via GPS.";
-            }
-            triggerNotification(errorMsg, "info");
+      const requestPosition = (options: PositionOptions) =>
+        new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, options);
+        });
+
+      const describeGeoError = (geoErr: any) => {
+        if (geoErr?.code === 1)
+          return "Permissão de localização negada pelo navegador. Ative o acesso ao GPS para capturar a geolocalização física real.";
+        if (geoErr?.code === 2)
+          return "Sinal de GPS fraco ou indisponível no dispositivo.";
+        if (geoErr?.code === 3)
+          return "Tempo esgotado para obter a localização via GPS.";
+        return "Não foi possível obter sua localização exata por GPS.";
+      };
+
+      // No check-in livre a posição precisa ser a de agora — a pessoa pode ter
+      // andado depois que a tela abriu, e o pino vai exatamente onde ela está.
+      if (navigator.geolocation && (isFreeCheckIn || !userLat || !userLng)) {
+        try {
+          const pos = await requestPosition({
+            enableHighAccuracy: true,
+            timeout: isFreeCheckIn ? 15000 : 5000,
+            maximumAge: isFreeCheckIn ? 0 : 60000,
+          });
+          userLat = pos.coords.latitude;
+          userLng = pos.coords.longitude;
+          setPrefetchedLatitude(userLat);
+          setPrefetchedLongitude(userLng);
+        } catch (geoErr: any) {
+          console.warn("Could not capture user exact position on submit:", geoErr);
+          if (!isFreeCheckIn || (!userLat && !userLng)) {
+            triggerNotification(describeGeoError(geoErr), "info");
           }
-        } else {
-          triggerNotification("A geolocalização por navegador não é suportada nesta máquina.", "info");
         }
+      } else if (!navigator.geolocation) {
+        triggerNotification("A geolocalização por navegador não é suportada nesta máquina.", "info");
+      }
+
+      // O check-in livre é, por definição, o ponto exato onde a pessoa está.
+      // Sem GPS não há como marcar o local certo no mapa, então ele é bloqueado.
+      if (isFreeCheckIn && (userLat === undefined || userLng === undefined)) {
+        setIsSubmittingCheckIn(false);
+        triggerNotification(
+          "Ative o GPS do aparelho para registrar o check-in livre: precisamos do ponto exato da ocorrência.",
+          "error",
+        );
+        return;
       }
 
       // Geocodificação aproximada baseada na rua, bairro e município selecionados
@@ -3037,53 +3096,59 @@ export default function App() {
       const stateCode = checkInEstadoUf || "AL";
       const cityName = checkInMunicipio;
 
-      try {
-        const queries = [
-          `${checkInRua}, ${checkInBairro}, ${cityName}, ${stateCode}, Brasil`,
-          `${checkInRua}, ${cityName}, ${stateCode}, Brasil`,
-          `${checkInBairro}, ${cityName}, ${stateCode}, Brasil`,
-          `${cityName}, ${stateCode}, Brasil`,
-        ];
+      if (isFreeCheckIn) {
+        // No check-in livre o pino é o ponto exato do aparelho: nada de
+        // aproximar pelo nome da rua, senão a ocorrência sai do lugar.
+        checkInCoords = { lat: userLat as number, lng: userLng as number };
+      } else {
+        try {
+          const queries = [
+            `${checkInRua}, ${checkInBairro}, ${cityName}, ${stateCode}, Brasil`,
+            `${checkInRua}, ${cityName}, ${stateCode}, Brasil`,
+            `${checkInBairro}, ${cityName}, ${stateCode}, Brasil`,
+            `${cityName}, ${stateCode}, Brasil`,
+          ];
 
-        let found = false;
-        for (let i = 0; i < queries.length; i++) {
-          const q = queries[i];
-          try {
-            const resp = await fetch(
-              `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`,
-            );
-            if (resp.ok) {
-              const data = await resp.json();
-              if (data && data.length > 0) {
-                const item = data[0];
-                checkInCoords = {
-                  lat: parseFloat(item.lat),
-                  lng: parseFloat(item.lon),
-                };
-                found = true;
-                break;
+          let found = false;
+          for (let i = 0; i < queries.length; i++) {
+            const q = queries[i];
+            try {
+              const resp = await fetch(
+                `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`,
+              );
+              if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.length > 0) {
+                  const item = data[0];
+                  checkInCoords = {
+                    lat: parseFloat(item.lat),
+                    lng: parseFloat(item.lon),
+                  };
+                  found = true;
+                  break;
+                }
               }
+            } catch (err) {
+              console.warn("Erro no geocoding do check-in:", err);
             }
-          } catch (err) {
-            console.warn("Erro no geocoding do check-in:", err);
           }
-        }
 
-        if (!found && selectedBairroObj) {
-          const rObj = selectedBairroObj.ruas.find(
-            (r) => r.name === checkInRua,
-          );
-          if (rObj) {
-            checkInCoords = { lat: rObj.lat, lng: rObj.lng };
-          } else {
-            checkInCoords = {
-              lat: selectedBairroObj.center.lat,
-              lng: selectedBairroObj.center.lng,
-            };
+          if (!found && selectedBairroObj) {
+            const rObj = selectedBairroObj.ruas.find(
+              (r) => r.name === checkInRua,
+            );
+            if (rObj) {
+              checkInCoords = { lat: rObj.lat, lng: rObj.lng };
+            } else {
+              checkInCoords = {
+                lat: selectedBairroObj.center.lat,
+                lng: selectedBairroObj.center.lng,
+              };
+            }
           }
+        } catch (err) {
+          console.error("Erro geral no geocoding do check-in:", err);
         }
-      } catch (err) {
-        console.error("Erro geral no geocoding do check-in:", err);
       }
 
       let uploadedPhotoUrl = checkInPhoto;
@@ -3117,6 +3182,14 @@ export default function App() {
         userLongitude: userLng,     // Real user physical device longitude
         createdAt: new Date().toISOString(),
         candidateId: checkInCandidateId || undefined,
+        mode: checkInMode,
+        priority: isFreeCheckIn
+          ? (checkInPriority as CheckInPriority)
+          : undefined,
+        missionId: !isFreeCheckIn ? activeMissionId || undefined : undefined,
+        missionTitle: !isFreeCheckIn
+          ? activeMission?.title || undefined
+          : undefined,
       };
 
       if (isSupabaseConfigured) {
@@ -3182,6 +3255,8 @@ export default function App() {
       setCheckInMunicipio("Maceió");
       setCheckInMunicipioIbgeId(2704302);
       setCheckInDistrictId(null);
+      setCheckInPriority("");
+      setActiveMissionId(null);
     };
 
     if (!authenticatedSupporter) {
@@ -3648,8 +3723,9 @@ export default function App() {
                     Check-in Realizado!
                   </h2>
                   <p className="text-sm text-slate-500 leading-relaxed max-w-xs mx-auto">
-                    Sua presença e foto foram marcadas com sucesso no mapa
-                    consolidado do comitê. Obrigado!
+                    {isFreeCheckIn
+                      ? "A ocorrência foi marcada no ponto exato do mapa consolidado do comitê. Obrigado!"
+                      : "Sua presença e foto foram marcadas com sucesso no mapa consolidado do comitê. Obrigado!"}
                   </p>
                 </div>
 
@@ -3673,6 +3749,35 @@ export default function App() {
                         : ""}
                     </strong>
                   </div>
+                  <div className="pt-3">
+                    <span className="text-[10px] text-black uppercase tracking-wider font-extrabold block">
+                      Modalidade
+                    </span>
+                    <strong className="text-slate-800 text-sm block mt-0.5">
+                      {isFreeCheckIn
+                        ? "Check-in livre (sem missão)"
+                        : activeMission
+                          ? `Missão: ${activeMission.title}`
+                          : "Check-in por missão"}
+                    </strong>
+                  </div>
+                  {isFreeCheckIn && selectedPriority && (
+                    <div className="pt-3">
+                      <span className="text-[10px] text-black uppercase tracking-wider font-extrabold block">
+                        Prioridade / Impacto
+                      </span>
+                      <strong
+                        className="text-sm mt-0.5 inline-flex items-center gap-1.5"
+                        style={{ color: selectedPriority.color }}
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: selectedPriority.color }}
+                        />
+                        {selectedPriority.label}
+                      </strong>
+                    </div>
+                  )}
                   {checkInPhoto && (
                     <div className="pt-3 flex items-center gap-3">
                       <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-200 shadow-3xs flex-shrink-0">
@@ -3712,7 +3817,9 @@ export default function App() {
                       Check-in
                     </h2>
                     <p className="text-sm text-slate-500 font-medium mt-1">
-                      Valide sua presença no local designado.
+                      {isFreeCheckIn
+                        ? "Registre o que você encontrou, no ponto exato."
+                        : "Valide sua presença no local designado."}
                     </p>
                   </div>
 
@@ -3936,8 +4043,93 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Seleção da Modalidade do Check-in */}
+                <div className="space-y-2 text-left">
+                  <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
+                    Modalidade do Check-in *
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 font-sans">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCheckInMode("missao")}
+                      className={`p-3.5 rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-98 ${
+                        !isFreeCheckIn
+                          ? "border-[#F58220] bg-orange-50/40 ring-2 ring-[#F58220]/15 shadow-2xs"
+                          : "border-slate-200 bg-white hover:border-slate-350"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                            !isFreeCheckIn
+                              ? "bg-[#F58220] text-white"
+                              : "bg-slate-100 text-slate-400"
+                          }`}
+                        >
+                          <Target className="w-4 h-4" />
+                        </span>
+                        <h5 className="font-extrabold text-[12px] text-slate-800 leading-tight">
+                          Tenho uma missão
+                        </h5>
+                        {!isFreeCheckIn && (
+                          <Check className="w-3.5 h-3.5 text-[#F58220] stroke-[3] ml-auto shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-1.5">
+                        Marque presença numa área ou ponto enviado pelo comitê.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCheckInMode("livre")}
+                      className={`p-3.5 rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-98 ${
+                        isFreeCheckIn
+                          ? "border-[#F58220] bg-orange-50/40 ring-2 ring-[#F58220]/15 shadow-2xs"
+                          : "border-slate-200 bg-white hover:border-slate-350"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                            isFreeCheckIn
+                              ? "bg-[#F58220] text-white"
+                              : "bg-slate-100 text-slate-400"
+                          }`}
+                        >
+                          <AlertCircle className="w-4 h-4" />
+                        </span>
+                        <h5 className="font-extrabold text-[12px] text-slate-800 leading-tight">
+                          Check-in livre
+                        </h5>
+                        {isFreeCheckIn && (
+                          <Check className="w-3.5 h-3.5 text-[#F58220] stroke-[3] ml-auto shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-1.5">
+                        Viu algo na rua e quer registrar agora, sem missão.
+                      </p>
+                    </button>
+                  </div>
+
+                  {isFreeCheckIn && (
+                    <div className="bg-orange-50/60 border border-orange-150 rounded-xl p-3 flex gap-2.5 items-start animate-in fade-in slide-in-from-top-1 duration-200 font-sans">
+                      <MapPin className="w-4 h-4 text-[#F58220] shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-slate-600 font-medium leading-relaxed">
+                        O pino vai para o{" "}
+                        <strong className="text-slate-800 font-extrabold">
+                          ponto exato onde você está agora
+                        </strong>
+                        , capturado pelo GPS do aparelho. Fique no local da
+                        ocorrência ao confirmar.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 {/* Lista Coesiva de Missões Ativas de Campo do Voluntário */}
-                {(() => {
+                {!isFreeCheckIn &&
+                  (() => {
                   if (!checkInCandidateId) {
                     return (
                       <div className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-5 text-center font-sans animate-in fade-in duration-200">
@@ -3985,9 +4177,17 @@ export default function App() {
                           momento.
                         </p>
                         <p className="text-[10px] text-slate-500 mt-1">
-                          Converse com seu coordenador para cadastrar novas
-                          missões e áreas no mapa do candidato!
+                          Sem missão você ainda pode registrar o que viu na rua:
+                          use o check-in livre.
                         </p>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectCheckInMode("livre")}
+                          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#F58220] hover:bg-[#E06E10] text-white text-[10px] font-extrabold uppercase tracking-wider rounded-lg transition-colors cursor-pointer active:scale-95"
+                        >
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          Fazer check-in livre
+                        </button>
                       </div>
                     );
                   }
@@ -4152,12 +4352,9 @@ export default function App() {
                 })()}
 
                 {/* Check-in Mission Linkage Feedback */}
-                {(() => {
-                  if (!activeMissionId) return null;
-                  const activeMission = [...areas, ...pins].find(
-                    (m) => m.id === activeMissionId,
-                  );
-                  if (!activeMission) return null;
+                {!isFreeCheckIn &&
+                  (() => {
+                  if (!activeMissionId || !activeMission) return null;
                   return (
                     <div className="bg-emerald-50 border border-emerald-150 rounded-xl p-3 text-left font-sans flex items-center justify-between animate-in slide-in-from-top-1 duration-150">
                       <div className="space-y-0.5">
@@ -4597,10 +4794,65 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Grau de Prioridade / Impacto (somente no check-in livre) */}
+                {isFreeCheckIn && (
+                  <div className="space-y-2 text-left animate-in fade-in duration-200">
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
+                      Grau de Prioridade / Impacto *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 font-sans">
+                      {CHECKIN_PRIORITIES.map((option) => {
+                        const isSelected = checkInPriority === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setCheckInPriority(option.value)}
+                            style={
+                              isSelected
+                                ? {
+                                    borderColor: option.color,
+                                    boxShadow: `0 0 0 2px ${option.color}22`,
+                                  }
+                                : undefined
+                            }
+                            className={`p-3 rounded-xl border text-left transition-all duration-150 cursor-pointer active:scale-98 ${
+                              isSelected
+                                ? "bg-white shadow-2xs"
+                                : "border-slate-200 bg-white hover:border-slate-350"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: option.color }}
+                              />
+                              <h5 className="font-extrabold text-[12px] text-slate-800 leading-none">
+                                {option.label}
+                              </h5>
+                              {isSelected && (
+                                <Check
+                                  className="w-3.5 h-3.5 stroke-[3] ml-auto shrink-0"
+                                  style={{ color: option.color }}
+                                />
+                              )}
+                            </div>
+                            <p className="text-[9.5px] text-slate-500 leading-snug mt-1.5">
+                              {option.description}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Upload de Foto */}
                 <div className="space-y-2 text-left">
                   <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
-                    Evidência Fotográfica (Opcional)
+                    {isFreeCheckIn
+                      ? "Foto da Ocorrência *"
+                      : "Evidência Fotográfica (Opcional)"}
                   </label>
 
                   {checkInPhoto ? (
@@ -7438,6 +7690,8 @@ export default function App() {
                         year: "numeric",
                       });
                       const isSelected = selectedId === checkIn.id;
+                      const isFree = checkIn.mode === "livre";
+                      const priority = getCheckInPriority(checkIn.priority);
 
                       return (
                         <div
@@ -7473,6 +7727,38 @@ export default function App() {
                             <p className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate uppercase tracking-tight">
                               📍 {checkIn.rua} — {checkIn.bairro}
                             </p>
+                            <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                              <span
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider border select-none ${
+                                  isFree
+                                    ? "bg-orange-50 text-orange-700 border-orange-150"
+                                    : "bg-indigo-50 text-indigo-700 border-indigo-100"
+                                }`}
+                              >
+                                {isFree ? "Check-in Livre" : "Missão"}
+                              </span>
+                              {priority && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider border select-none"
+                                  style={{
+                                    color: priority.color,
+                                    borderColor: `${priority.color}40`,
+                                    backgroundColor: `${priority.color}14`,
+                                  }}
+                                >
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{ backgroundColor: priority.color }}
+                                  />
+                                  Prioridade {priority.label}
+                                </span>
+                              )}
+                              {!isFree && checkIn.missionTitle && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-slate-50 text-slate-500 border border-slate-150 max-w-[140px] truncate">
+                                  {checkIn.missionTitle}
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-1.5 text-[9px] text-slate-400 font-medium mt-1">
                               <span>🕒 {formattedTime}</span>
                               <span>•</span>

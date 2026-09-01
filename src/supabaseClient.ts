@@ -53,8 +53,19 @@ create table if not exists check_ins (
   "userLatitude" double precision,
   "userLongitude" double precision,
   "createdAt" text,
-  "candidateId" text
+  "candidateId" text,
+  mode text,
+  priority text,
+  "missionId" text,
+  "missionTitle" text
 );
+
+-- Migração para bancos já existentes: adiciona as colunas do check-in livre
+-- (modalidade sem missão, com grau de prioridade/impacto).
+alter table check_ins add column if not exists mode text;
+alter table check_ins add column if not exists priority text;
+alter table check_ins add column if not exists "missionId" text;
+alter table check_ins add column if not exists "missionTitle" text;
 
 create table if not exists auth_users (
   email text primary key,
@@ -149,7 +160,9 @@ function normalizeFields<T>(obj: any): T {
     teamsize: 'teamSize',
     contactname: 'contactName',
     userlatitude: 'userLatitude',
-    userlongitude: 'userLongitude'
+    userlongitude: 'userLongitude',
+    missionid: 'missionId',
+    missiontitle: 'missionTitle'
   };
 
   for (const [lowerKey, camelKey] of Object.entries(mappings)) {
@@ -187,7 +200,9 @@ function prepareUpsertPayload(obj: any, table: string): any {
     teamSize: 'teamsize',
     contactName: 'contactname',
     userLatitude: 'userlatitude',
-    userLongitude: 'userlongitude'
+    userLongitude: 'userlongitude',
+    missionId: 'missionid',
+    missionTitle: 'missiontitle'
   };
 
   for (const [camelKey, lowerKey] of Object.entries(mappings)) {
