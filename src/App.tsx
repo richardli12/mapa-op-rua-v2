@@ -3,12 +3,15 @@ import {
   fetchCepStreets,
   fetchOsmStreets,
   mergeStreetLists,
+  reverseGeocode,
   StreetOption,
 } from "./services/streetSources";
 import {
+  candidateLocationText,
   CandidateLocation,
   resolveCandidateLocation,
 } from "./services/candidateLocation";
+import { fetchNexusData, fetchNexusTeam } from "./services/nexusApi";
 import {
   MapPin,
   Users,
@@ -228,6 +231,20 @@ const INITIAL_CANDIDATES: Candidate[] = [
   },
 ];
 
+/**
+ * Compara dois telefones ignorando máscara e código do país.
+ *
+ * O cadastro pode ter "82988887777" e a pessoa digitar com o 55 na frente, ou
+ * o contrário. Comparar pelo final resolve os dois casos sem confundir números
+ * diferentes, já que exige pelo menos 8 dígitos em comum.
+ */
+const samePhoneNumber = (a?: string | null, b?: string | null) => {
+  const digitsA = (a || "").replace(/\D/g, "");
+  const digitsB = (b || "").replace(/\D/g, "");
+  if (digitsA.length < 8 || digitsB.length < 8) return false;
+  return digitsA.endsWith(digitsB) || digitsB.endsWith(digitsA);
+};
+
 /** Compara nomes de município ignorando acento e caixa. */
 const normalizeCityName = (value: string) =>
   value
@@ -301,6 +318,18 @@ export default function App() {
   });
 
   // Helper to get Partido Badge, now accessible across the entire App component
+  /** Cor da tarja conforme a sigla, com um azul padrão para as demais. */
+  const partyBadgeColor = (initials: string) =>
+    initials === "SD"
+      ? "bg-orange-50 text-orange-600 border-orange-200 shadow-2xs font-extrabold"
+      : initials === "PP"
+        ? "bg-sky-50 text-sky-600 border-sky-200 shadow-2xs font-extrabold"
+        : initials === "PL"
+          ? "bg-blue-50 text-blue-600 border-blue-200 shadow-2xs font-extrabold"
+          : initials === "PT"
+            ? "bg-rose-50 text-rose-600 border-rose-200 shadow-2xs font-extrabold"
+            : "bg-blue-50 text-blue-700 border-blue-200 shadow-2xs font-extrabold";
+
   const getPartidoBadge = (cand: Candidate) => {
     if (!cand)
       return {
@@ -309,6 +338,22 @@ export default function App() {
         fullName: "",
         color: "bg-slate-100 text-slate-700 border-slate-200",
       };
+
+    // O Nexus entrega o partido de cada candidato, então quando esse vínculo
+    // existe não há nada a deduzir. Todo o resto abaixo é adivinhação pelo
+    // texto do cargo, mantida só para dados antigos que não têm o vínculo.
+    if (cand.partyId) {
+      const linked = parties.find((p) => p.id === cand.partyId);
+      if (linked) {
+        return {
+          name: linked.initials,
+          logo: linked.logo_url,
+          fullName: linked.name,
+          color: partyBadgeColor(linked.initials),
+        };
+      }
+    }
+
     const officeUpper = (cand.office || "").toUpperCase();
     const nameUpper = (cand.name || "").toUpperCase();
 
@@ -422,11 +467,6 @@ export default function App() {
   const [adminSubTab, setAdminSubTab] = useState<"candidates" | "parties">(
     "parties",
   );
-  const [isPartyModalOpen, setIsPartyModalOpen] = useState(false);
-  const [partyEditing, setPartyEditing] = useState<Party | null>(null);
-  const [partyName, setPartyName] = useState("");
-  const [partyInitials, setPartyInitials] = useState("");
-  const [partyLogoUrl, setPartyLogoUrl] = useState("");
   const [partySearch, setPartySearch] = useState("");
   const [inspectedParty, setInspectedParty] = useState<Party | null>(null);
   const [inspectedCandidate, setInspectedCandidate] =
@@ -624,7 +664,7 @@ export default function App() {
     const activeCand = tempCandidates.find((c: any) => c.id === matchedId);
     if (!activeCand) return defaultState;
 
-    const rawCity = activeCand.estado || activeCand.city || "";
+    const rawCity = candidateLocationText(activeCand);
     if (!rawCity) return defaultState;
 
     const UF_TO_STATE_NAME: { [key: string]: string } = {
@@ -889,62 +929,10 @@ export default function App() {
           if (fetchedCheckins.length > 0) setCheckIns(fetchedCheckins);
         }
 
-        // Also fetch candidates
-        try {
-          const candRes = await SupabaseService.fetchCandidates();
-          if (candRes.success && candRes.data) {
-            if (candRes.data.length > 0) {
-              setCandidates(candRes.data);
-            } else {
-              // Send default ones to Supabase
-              for (const cand of candidates) {
-                await SupabaseService.upsertCandidate(cand);
-              }
-            }
-          }
-        } catch (error) {
-          console.warn(
-            "Erro ao carregar candidatos do Supabase no mount:",
-            error,
-          );
-        }
+        // Candidatos e partidos não vêm mais do Supabase: a fonte é o Nexus,
+        // carregado no efeito logo abaixo.
 
-        // Also fetch parties
-        try {
-          const partyRes = await SupabaseService.fetchParties();
-          if (partyRes.success && partyRes.data) {
-            if (partyRes.data.length > 0) {
-              setParties(partyRes.data);
-            } else {
-              // Send default initial ones to Supabase
-              for (const p of INITIAL_PARTIES) {
-                await SupabaseService.upsertParty(p);
-              }
-              const partyResReloaded = await SupabaseService.fetchParties();
-              if (partyResReloaded.success && partyResReloaded.data) {
-                setParties(partyResReloaded.data);
-              }
-            }
-          }
-        } catch (error) {
-          console.warn(
-            "Erro ao carregar partidos do Supabase no mount:",
-            error,
-          );
-        }
-
-        // Also fetch supporters
-        try {
-          const supRes = await SupabaseService.fetchSupporters();
-          if (supRes.success && supRes.data) {
-            setSupporters(supRes.data);
-          }
-        } catch (error) {
-          console.warn(
-            "Erro ao carregar apoiadores do Supabase no mount:",
-            error,
-          );
-        }
+        // A Equipe também vem do Nexus, no efeito mais abaixo.
       } else if (res.error) {
         setSupabaseError(res.error);
         triggerNotification(res.error, "error");
@@ -1043,6 +1031,21 @@ export default function App() {
   }, []);
 
   // Coordinating map selecting interaction
+  /**
+   * Como o usuário vai informar o local do pin ou do raio.
+   *
+   * "ask" é a pergunta inicial; "search" abre o formulário de endereço;
+   * "map" tira o formulário da frente para ele clicar direto no mapa.
+   */
+  const [creationLocationMode, setCreationLocationMode] = useState<
+    "ask" | "search" | "map" | null
+  >(null);
+  const [isResolvingPickedAddress, setIsResolvingPickedAddress] =
+    useState(false);
+  const [pickedAddressLabel, setPickedAddressLabel] = useState<string | null>(
+    null,
+  );
+
   const [clickToPickCoords, setClickToPickCoords] = useState(false);
   const [coordsPickingMode, setCoordsPickingMode] = useState<"area" | "pin">(
     "area",
@@ -1154,7 +1157,7 @@ export default function App() {
 
     (async () => {
       const location = await resolveCandidateLocation(
-        candidate.estado || candidate.city,
+        candidateLocationText(candidate),
         controller.signal,
       );
       if (!active) return;
@@ -1207,6 +1210,33 @@ export default function App() {
     );
     return match?.ibgeId ?? null;
   }, [candidateLocation, brasilCities]);
+
+  /**
+   * O local do pin ou do raio já está definido? Depende do caminho escolhido:
+   * pela busca, quando bairro e rua estão preenchidos; pelo mapa, quando o
+   * ponto foi clicado.
+   */
+  const creationLocationReady =
+    creationLocationMode === "map"
+      ? !!pickedCoords
+      : creationLocationMode === "search"
+        ? !!(creationBairroName && creationRuaName)
+        : false;
+
+  /**
+   * Candidato do link de check-in compartilhado pelo mapa.
+   *
+   * O link precisa apontar para um candidato: é ele que identifica de quem é o
+   * check-in. Sem candidato em foco não há link a oferecer.
+   */
+  const shareCandidate =
+    selectedCandidateFilter !== "all"
+      ? candidates.find((c) => c.id === selectedCandidateFilter)
+      : undefined;
+
+  const shareCheckInUrl = shareCandidate
+    ? `${window.location.origin}/checkin/${slugify(shareCandidate.name)}`
+    : "";
 
   /** Ponto de partida do painel de endereço no mapa. */
   const mapDefaultLocation = candidateLocation
@@ -1605,7 +1635,7 @@ export default function App() {
     const activeCand = candidates.find((c) => c.id === checkInCandidateId);
     if (!activeCand) return;
 
-    const rawCity = activeCand.estado || activeCand.city || "";
+    const rawCity = candidateLocationText(activeCand);
     let uf = "AL";
 
     const UF_TO_STATE_NAME: { [key: string]: string } = {
@@ -1972,6 +2002,106 @@ export default function App() {
     type: "success" | "info" | "error";
   } | null>(null);
 
+  // Carrega partidos e candidatos do Nexus, a fonte oficial desses dados.
+  // A lista local só permanece se a consulta falhar, para o sistema não ficar
+  // vazio por causa de uma queda momentânea.
+  const [isLoadingNexus, setIsLoadingNexus] = useState(true);
+  const [nexusError, setNexusError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const { candidates: nexusCandidates, parties: nexusParties } =
+          await fetchNexusData(controller.signal);
+        if (!active) return;
+
+        setCandidates(nexusCandidates);
+        setParties(nexusParties);
+        setNexusError(null);
+      } catch (err: any) {
+        if (!active || err?.name === "AbortError") return;
+        console.error("Erro ao carregar dados do Nexus:", err);
+        setNexusError(err?.message || "Não foi possível consultar o Nexus.");
+      } finally {
+        if (active) setIsLoadingNexus(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, []);
+
+  // Equipes dos candidatos, também do Nexus.
+  //
+  // A equipe é consultada por candidato, então na tela de check-in só a do
+  // candidato daquele link é buscada — a página é pública e não faz sentido
+  // baixar a equipe de todo mundo ali.
+  useEffect(() => {
+    const targets =
+      currentUrlView === "checkin"
+        ? candidates.filter((c) => c.id === checkInCandidateId)
+        : candidates;
+
+    if (targets.length === 0) return;
+
+    let active = true;
+    const controller = new AbortController();
+
+    (async () => {
+      const collected: any[] = [];
+      const loadedIds = new Set<string>();
+
+      // Em lotes pequenos para não disparar dezenas de requisições de uma vez.
+      const BATCH = 4;
+      for (let i = 0; i < targets.length; i += BATCH) {
+        if (!active) return;
+        const batch = targets.slice(i, i + BATCH);
+        const results = await Promise.all(
+          batch.map(async (candidate) => {
+            try {
+              const team = await fetchNexusTeam(
+                candidate.id,
+                controller.signal,
+              );
+              return { id: candidate.id, team };
+            } catch (err) {
+              console.warn(
+                `Não foi possível carregar a Equipe de ${candidate.name}:`,
+                err,
+              );
+              return null;
+            }
+          }),
+        );
+
+        for (const result of results) {
+          if (!result) continue;
+          loadedIds.add(result.id);
+          collected.push(...result.team);
+        }
+      }
+
+      if (!active || loadedIds.size === 0) return;
+
+      // Só os candidatos consultados com sucesso são substituídos; os demais
+      // mantêm o que já estava carregado.
+      setSupporters((previous) => [
+        ...previous.filter((s: any) => !loadedIds.has(s.candidate_id)),
+        ...collected,
+      ]);
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [candidates, currentUrlView, checkInCandidateId]);
+
   // Save to localstorage on change
   useEffect(() => {
     localStorage.setItem("campaign_map_areas", JSON.stringify(areas));
@@ -2025,6 +2155,74 @@ export default function App() {
       setClickToPickCoords(false);
     }
   }, [pickedCoords]);
+
+  // Quem escolhe pelo mapa não passa pelos seletores de bairro e rua, então o
+  // endereço do ponto clicado é descoberto aqui. Sem isso o registro salvo
+  // ficaria sem bairro, e o bairro é usado na listagem e nos relatórios.
+  useEffect(() => {
+    if (creationLocationMode !== "map" || !pickedCoords) {
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    setIsResolvingPickedAddress(true);
+    setPickedAddressLabel(null);
+
+    (async () => {
+      const address = await reverseGeocode(
+        pickedCoords.lat,
+        pickedCoords.lng,
+        controller.signal,
+      );
+      if (!active) return;
+
+      setIsResolvingPickedAddress(false);
+      if (!address) return;
+
+      const bairro = address.suburb || "";
+      const rua = address.road || "";
+      const cidade = address.city || creationCityName || "";
+      const uf = address.uf || creationStateShortName || "";
+
+      if (bairro) {
+        setCreationBairroName(bairro);
+        if (coordsPickingMode === "area") setAreaBairro(bairro);
+      }
+      if (rua) setCreationRuaName(rua);
+
+      setPickedAddressLabel(
+        [rua, bairro, cidade && uf ? `${cidade} - ${uf}` : cidade]
+          .filter(Boolean)
+          .join(", ") || address.displayName,
+      );
+
+      // Mesmo preenchimento automático de título e descrição da via de busca,
+      // para os dois caminhos chegarem no mesmo lugar.
+      const local = rua || bairro;
+      if (!local) return;
+      if (coordsPickingMode === "area") {
+        setAreaTitle((current) => current || `Equipe - ${local}`);
+        setAreaDescription(
+          (current) =>
+            current ||
+            `Ações de panfletagem da equipe focadas na ${local}${bairro ? `, bairro ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${uf ? ` - ${uf}` : ""}.`,
+        );
+      } else {
+        setPinTitle((current) => current || `Ponto - ${local}`);
+        setPinDescription(
+          (current) =>
+            current ||
+            `Ponto estratégico de campanha política situado na ${local}${bairro ? `, ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${uf ? ` - ${uf}` : ""}.`,
+        );
+      }
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [creationLocationMode, pickedCoords]);
 
   // Handle when Bairro selection dropdown is changed in Area Form
   const handleBairroChange = (bairroName: string) => {
@@ -2237,6 +2435,7 @@ export default function App() {
     setAreaColor("#2563eb");
     setAreaTeamSize(10);
     setAreaContact("");
+    setAreaBairro("");
     setPickedCoords(null);
     setEditingAreaId(null);
     setAreaCandidateId("");
@@ -2244,6 +2443,9 @@ export default function App() {
     setCreationBairroName(null);
     setCreationRuaName(null);
     setCreationModalType(null);
+    setCreationLocationMode(null);
+    setPickedAddressLabel(null);
+    setIsResolvingPickedAddress(false);
     applyDefaultCreationLocation();
     setCreationDistrictId(null);
     setModalStateSearch("");
@@ -2340,6 +2542,9 @@ export default function App() {
     setCreationBairroName(null);
     setCreationRuaName(null);
     setCreationModalType(null);
+    setCreationLocationMode(null);
+    setPickedAddressLabel(null);
+    setIsResolvingPickedAddress(false);
     applyDefaultCreationLocation();
     setCreationDistrictId(null);
     setModalStateSearch("");
@@ -2467,6 +2672,7 @@ export default function App() {
     setIsSidebarOpen(false); // Do not open right sidebar
     setClickToPickCoords(false); // Do not start map clicking
     setCoordsPickingMode("area");
+    setCreationLocationMode("ask");
     setCreationModalType("area"); // Open modal in the center of the screen
   };
 
@@ -2483,6 +2689,7 @@ export default function App() {
     setIsSidebarOpen(false); // Do not open right sidebar
     setClickToPickCoords(false); // Do not start map clicking
     setCoordsPickingMode("pin");
+    setCreationLocationMode("ask");
     setCreationModalType("pin"); // Open modal in the center of the screen
   };
 
@@ -2499,7 +2706,7 @@ export default function App() {
     ) {
       return false;
     }
-    // Retringir missões atribuídas a membros específicos do Time Delta
+    // Retringir missões atribuídas a membros específicos da Equipe
     if (currentUrlView === "checkin" && authenticatedSupporter) {
       const assigned = a.assignedDeltas || a.center?.assignedDeltas || [];
       if (
@@ -2528,7 +2735,7 @@ export default function App() {
     ) {
       return false;
     }
-    // Retringir pinos táticos atribuídos a membros específicos do Time Delta
+    // Retringir pinos táticos atribuídos a membros específicos da Equipe
     if (currentUrlView === "checkin" && authenticatedSupporter) {
       const assigned = p.assignedDeltas || p.position?.assignedDeltas || [];
       if (
@@ -2989,6 +3196,50 @@ export default function App() {
           return;
         }
 
+        // A Equipe vem do Nexus, então é nela que o número é procurado
+        // primeiro. Só se não houver correspondência o fluxo antigo entra.
+        const teamMatch = supporters.find(
+          (member: any) =>
+            samePhoneNumber(member?.whatsapp, contactInput) &&
+            (!checkInCandidateId ||
+              String(member?.candidate_id) === String(checkInCandidateId)),
+        );
+
+        if (teamMatch) {
+          const authObj = {
+            id: teamMatch.id,
+            name: teamMatch.full_name,
+            full_name: teamMatch.full_name,
+            whatsapp: teamMatch.whatsapp,
+            image: teamMatch.image || "",
+            candidate_id: teamMatch.candidate_id,
+          };
+          setAuthenticatedSupporter(authObj);
+          localStorage.setItem("checkin_supporter", JSON.stringify(authObj));
+          setCheckInName(teamMatch.full_name);
+          if (teamMatch.candidate_id) {
+            setCheckInCandidateId(teamMatch.candidate_id);
+          }
+          triggerNotification(`Bem-vindo, ${teamMatch.full_name}!`, "success");
+          return;
+        }
+
+        // Número existe, mas na Equipe de outro candidato: dizer isso é mais
+        // útil do que um "não localizado" genérico.
+        const otherTeamMatch = supporters.find((member: any) =>
+          samePhoneNumber(member?.whatsapp, contactInput),
+        );
+        if (otherTeamMatch && checkInCandidateId) {
+          const currentCandidate = candidates.find(
+            (c) => c.id === checkInCandidateId,
+          );
+          triggerNotification(
+            `Este número não faz parte da Equipe de ${currentCandidate?.name || "este candidato"}.`,
+            "error",
+          );
+          return;
+        }
+
         if (!isSupabaseConfigured) {
           triggerNotification(
             "Supabase não configurado. Entrando em modo demonstração.",
@@ -3118,27 +3369,48 @@ export default function App() {
             animate={{ opacity: 1, scale: 1 }}
             className="flex flex-col items-center mb-6 text-center select-none"
           >
-            {partyInfo ? (
+            {activeCandidate ? (
               <>
-                <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-slate-100 mb-3">
-                  {partyInfo.logo ? (
+                {/* A tela de check-in é do candidato, então quem aparece é ele.
+                    O partido fica na linha de baixo, junto do pleito. */}
+                <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-slate-100 mb-3 overflow-hidden relative">
+                  {activeCandidate.image && (
                     <img
-                      src={partyInfo.logo}
-                      alt={`Logo ${partyInfo.name}`}
-                      className="w-full h-full object-contain rounded-full"
+                      src={activeCandidate.image}
+                      alt={activeCandidate.name}
+                      className="w-full h-full object-cover rounded-full"
                       referrerPolicy="no-referrer"
+                      // Foto fora do ar cai nas iniciais, em vez de deixar o
+                      // texto alternativo aparecendo dentro do círculo.
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        const fallback = e.currentTarget
+                          .nextElementSibling as HTMLElement | null;
+                        fallback?.classList.remove("hidden");
+                      }}
                     />
-                  ) : (
-                    <div className="w-full h-full rounded-full bg-[#0D233A] flex items-center justify-center text-white font-extrabold text-xl">
-                      {partyInfo.name}
-                    </div>
                   )}
+                  <div
+                    className={`w-full h-full rounded-full bg-[#0D233A] flex items-center justify-center text-white font-extrabold text-2xl ${
+                      activeCandidate.image ? "hidden" : ""
+                    }`}
+                  >
+                    {activeCandidate.name
+                      .split(" ")
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((part) => part[0])
+                      .join("")
+                      .toUpperCase()}
+                  </div>
                 </div>
                 <h1 className="font-extrabold text-[#0D233A] text-[32px] tracking-tight leading-none font-sans">
-                  {partyInfo.fullName || partyInfo.name}
+                  {activeCandidate.name}
                 </h1>
                 <p className="text-[11px] font-black tracking-[0.22em] text-[#5A6E85] uppercase mt-2.5 font-sans">
-                  Eleições 2026
+                  {partyInfo?.name
+                    ? `${partyInfo.name} • Eleições 2026`
+                    : "Eleições 2026"}
                 </p>
               </>
             ) : (
@@ -4708,7 +4980,7 @@ export default function App() {
     const q = candSearch.toLowerCase();
     const filteredCandidates = candidates.filter((c) => {
       const nameMatch = c.name?.toLowerCase().includes(q) || false;
-      const cityMatch = (c.estado || c.city || "")?.toLowerCase().includes(q) || false;
+      const cityMatch = candidateLocationText(c)?.toLowerCase().includes(q) || false;
       const officeMatch = c.office?.toLowerCase().includes(q) || false;
       return nameMatch || cityMatch || officeMatch;
     });
@@ -4720,7 +4992,7 @@ export default function App() {
     const pendingCount = 0;
     const uniqueCities = new Set(
       candidates
-        .map((c) => (c.estado || c.city || "").toLowerCase().trim())
+        .map((c) => candidateLocationText(c).toLowerCase().trim())
         .filter(Boolean),
     ).size;
 
@@ -4778,106 +5050,6 @@ export default function App() {
       return nameMatch || initialsMatch;
     });
 
-    const handleOpenCreatePartyModal = () => {
-      setPartyEditing(null);
-      setPartyName("");
-      setPartyInitials("");
-      setPartyLogoUrl("");
-      setIsPartyModalOpen(true);
-    };
-
-    const handleOpenEditPartyModal = (party: Party) => {
-      setPartyEditing(party);
-      setPartyName(party.name);
-      setPartyInitials(party.initials);
-      setPartyLogoUrl(party.logo_url || "");
-      setIsPartyModalOpen(true);
-    };
-
-    const handleSavePartySubmit = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!partyName.trim() || !partyInitials.trim()) {
-        triggerNotification(
-          "O nome do partido e a sigla são obrigatórios.",
-          "error",
-        );
-        return;
-      }
-
-      const payload = {
-        name: partyName.trim(),
-        initials: partyInitials.trim().toUpperCase(),
-        logo_url:
-          partyLogoUrl.trim() ||
-          "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/SD_LOGO.png",
-      };
-
-      if (isSupabaseConfigured) {
-        triggerNotification("Salvando partido no Supabase...", "info");
-        const res = await SupabaseService.upsertParty({
-          id: partyEditing?.id,
-          ...payload,
-        });
-        if (res.success) {
-          triggerNotification("Partido salvo com sucesso no banco!", "success");
-          const reload = await SupabaseService.fetchParties();
-          if (reload.success && reload.data) {
-            setParties(reload.data);
-          } else {
-            const updatedId =
-              res.data?.id || partyEditing?.id || "party-" + Date.now();
-            setParties((prev) => {
-              const existing = prev.find((p) => p.id === partyEditing?.id);
-              if (existing) {
-                return prev.map((p) =>
-                  p.id === partyEditing?.id
-                    ? { ...p, ...payload, id: updatedId }
-                    : p,
-                );
-              } else {
-                return [...prev, { ...payload, id: updatedId }];
-              }
-            });
-          }
-        } else {
-          triggerNotification(`Erro Supabase: ${res.error}`, "error");
-        }
-      } else {
-        const updatedId = partyEditing?.id || "party-" + Date.now();
-        setParties((prev) => {
-          const existing = prev.find((p) => p.id === partyEditing?.id);
-          if (existing) {
-            return prev.map((p) =>
-              p.id === partyEditing?.id
-                ? { ...p, ...payload, id: updatedId }
-                : p,
-            );
-          } else {
-            return [...prev, { ...payload, id: updatedId }];
-          }
-        });
-        triggerNotification("Partido salvo localmente!", "success");
-      }
-      setIsPartyModalOpen(false);
-    };
-
-    const handleDeleteParty = async (id: string, initials: string) => {
-      if (confirm(`Deseja realmente remover o partido ${initials}?`)) {
-        if (isSupabaseConfigured) {
-          triggerNotification("Excluindo partido do Supabase...", "info");
-          const res = await SupabaseService.deleteParty(id);
-          if (res.success) {
-            setParties((prev) => prev.filter((p) => p.id !== id));
-            triggerNotification("Partido excluído com sucesso!", "success");
-          } else {
-            triggerNotification(`Erro Supabase: ${res.error}`, "error");
-          }
-        } else {
-          setParties((prev) => prev.filter((p) => p.id !== id));
-          triggerNotification("Partido removido localmente!", "info");
-        }
-      }
-    };
 
     const handleOpenCreateModal = () => {
       setCandidateEditing(null);
@@ -5088,7 +5260,7 @@ export default function App() {
             <p className="text-[#8492A6] text-xs font-semibold mt-1">
               {inspectedParty
                 ? `Inspecionando os candidatos associados ao partido ${inspectedParty.name} (${inspectedParty.initials})`
-                : "Cadastre as siglas partidárias parceiras de sua campanha eleitoral"}
+                : "Siglas partidárias parceiras, sincronizadas do Nexus"}
             </p>
           </div>
 
@@ -5131,15 +5303,7 @@ export default function App() {
                   <span>Novo Candidato</span>
                 </button>
               </>
-            ) : (
-              <button
-                onClick={handleOpenCreatePartyModal}
-                className="px-5 h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl shadow-lg border border-emerald-700/30 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Novo Partido</span>
-              </button>
-            )}
+            ) : null}
 
             {/* LOG OUT BADGE */}
             {!inspectedParty && (
@@ -5482,12 +5646,12 @@ export default function App() {
                                   }
                                   setInspectedCandidate(cand);
                                   triggerNotification(
-                                    `Inspecionando time Delta de: ${cand.name}`,
+                                    `Inspecionando a Equipe de: ${cand.name}`,
                                     "info",
                                   );
                                 }}
                                 className="p-1.5 h-8 w-8 hover:bg-[#E0F2FE] text-slate-400 hover:text-sky-600 border border-transparent hover:border-[#BAE6FD] rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                title="Inspecionar Time Delta (Olho)"
+                                title="Inspecionar Equipe"
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
@@ -5627,7 +5791,7 @@ export default function App() {
                               inspectedParty.initials.toUpperCase()
                             );
                           })
-                          .map((c) => (c.estado || c.city || "").toLowerCase().trim())
+                          .map((c) => candidateLocationText(c).toLowerCase().trim())
                           .filter(Boolean),
                       ).size
                     }
@@ -5714,7 +5878,7 @@ export default function App() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
                     <span className="text-slate-400 font-bold text-[9.5px] uppercase tracking-wider">
-                      Integrantes Time Delta
+                      Integrantes da Equipe
                     </span>
                     <h3 className="text-2xl font-black text-[#0D233A] mt-1">
                       {
@@ -5790,7 +5954,7 @@ export default function App() {
                     <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                       <div>
                         <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
-                          <span>🚀 Equipe Multiplicadora (Time Delta)</span>
+                          <span>🚀 Equipe</span>
                         </h4>
                         <p className="text-[10px] text-slate-400 font-bold mt-0.5">
                           Gerenciamento e comunicação com mobilizadores ativos
@@ -5802,7 +5966,7 @@ export default function App() {
                         className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-xl flex items-center gap-1 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
                       >
                         <PlusCircle className="w-3.5 h-3.5" />
-                        <span>Novo Delta</span>
+                        <span>Novo Integrante</span>
                       </button>
                     </div>
 
@@ -5810,7 +5974,7 @@ export default function App() {
                     {isAddingSupporter && (
                       <div className="p-5 bg-emerald-50/50 border-b border-slate-100">
                         <h5 className="text-xs font-black text-emerald-800 uppercase tracking-wider mb-3">
-                          Novo Delta do Time Delta
+                          Novo Integrante da Equipe
                         </h5>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
@@ -5913,7 +6077,7 @@ export default function App() {
                         <thead>
                           <tr className="bg-[#FAFBFD] border-b border-slate-100">
                             <th className="py-3 px-6 text-[9.5px] uppercase font-black text-[#8492A6]">
-                              Delta
+                              Integrante
                             </th>
                             <th className="py-3 px-6 text-[9.5px] uppercase font-black text-[#8492A6]">
                               WhatsApp
@@ -5934,7 +6098,7 @@ export default function App() {
                                 colSpan={3}
                                 className="py-12 text-center text-slate-400 font-bold text-xs uppercase tracking-widest bg-slate-50/20"
                               >
-                                Nenhum delta registrado no Time Delta
+                                Nenhum integrante registrado na Equipe
                               </td>
                             </tr>
                           ) : (
@@ -5981,7 +6145,7 @@ export default function App() {
                                           onClick={async () => {
                                             if (
                                               confirm(
-                                                `Remover multiplicador ${sup.full_name} do Time Delta?`,
+                                                `Remover ${sup.full_name} da Equipe?`,
                                               )
                                             ) {
                                               setSupporters((prev) =>
@@ -6009,7 +6173,7 @@ export default function App() {
                                             }
                                           }}
                                           className="p-1 h-7 w-7 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md border border-transparent hover:border-rose-100 flex items-center justify-center transition-all cursor-pointer"
-                                          title="Remover do Time Delta"
+                                          title="Remover da Equipe"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -6157,7 +6321,7 @@ export default function App() {
                           c.name
                             .toLowerCase()
                             .includes(partySearch.toLowerCase()) ||
-                          (c.estado || c.city || "")
+                          candidateLocationText(c)
                             .toLowerCase()
                             .includes(partySearch.toLowerCase()) ||
                           (c.office || "")
@@ -6186,7 +6350,7 @@ export default function App() {
                               c.name
                                 .toLowerCase()
                                 .includes(partySearch.toLowerCase()) ||
-                              (c.estado || c.city || "")
+                              candidateLocationText(c)
                                 .toLowerCase()
                                 .includes(partySearch.toLowerCase()) ||
                               (c.office || "")
@@ -6234,7 +6398,7 @@ export default function App() {
                                   <div className="flex flex-col text-slate-600 font-bold text-[13px]">
                                     <div className="flex items-center gap-1.5 text-slate-700">
                                       <MapPin className="w-3.5 h-3.5 text-[#8492A6]" />
-                                      <span>{cand.estado || cand.city}</span>
+                                      <span>{candidateLocationText(cand)}</span>
                                     </div>
                                     {cand.neighborhood && (
                                       <span className="text-[10.5px] text-[#8492A6] font-semibold mt-0.5 ml-5">
@@ -6351,12 +6515,12 @@ export default function App() {
                                       onClick={() => {
                                         setInspectedCandidate(cand);
                                         triggerNotification(
-                                          `Inspecionando time Delta de: ${cand.name}`,
+                                          `Inspecionando a Equipe de: ${cand.name}`,
                                           "info",
                                         );
                                       }}
                                       className="p-1.5 h-8 w-8 hover:bg-[#E0F2FE] text-slate-400 hover:text-sky-600 border border-transparent hover:border-[#BAE6FD] rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                      title="Inspecionar Time Delta (Olho)"
+                                      title="Inspecionar Equipe"
                                     >
                                       <Eye className="w-4 h-4" />
                                     </button>
@@ -6396,11 +6560,24 @@ export default function App() {
         ) : (
           /* PARTIES MASTER CARDS GRID - ALIGNED TO ATTACHED SCREENSHOT STRUCTURE */
           <div className="flex flex-col flex-1 gap-6">
+            {nexusError && (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl px-5 py-3.5 mb-4">
+                <p className="text-xs font-bold text-rose-700">
+                  Não foi possível carregar os dados do Nexus
+                </p>
+                <p className="text-[11px] text-rose-600 mt-1 leading-snug">
+                  {nexusError}
+                </p>
+              </div>
+            )}
+
             {filteredParties.length === 0 ? (
               <div className="bg-white border border-slate-200 rounded-3xl p-16 text-center shadow-sm flex flex-col items-center justify-center min-h-[300px]">
                 <Building2 className="w-12 h-12 text-slate-300 mb-4" />
                 <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">
-                  Nenhum partido político cadastrado
+                  {isLoadingNexus
+                    ? "Carregando partidos do Nexus..."
+                    : "Nenhum partido político encontrado"}
                 </span>
               </div>
             ) : (
@@ -6422,7 +6599,7 @@ export default function App() {
                   });
                   const partyCitiesCount = new Set(
                     partyCandidates
-                      .map((c) => (c.estado || c.city || "").toLowerCase().trim())
+                      .map((c) => candidateLocationText(c).toLowerCase().trim())
                       .filter(Boolean),
                   ).size;
 
@@ -6476,18 +6653,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Top Actions: Delete Party */}
-                        <div className="flex items-center ml-auto">
-                          <button
-                            onClick={() =>
-                              handleDeleteParty(party.id, party.initials)
-                            }
-                            className="p-1.5 rounded-xl text-slate-300 hover:text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            title="Remover Partido"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
                       </div>
 
                       {/* MIDDLE QUADRO DE MÉTRICAS (Duplo bloco de status do Printout) */}
@@ -6523,13 +6688,6 @@ export default function App() {
                         </div>
 
                         <button
-                          onClick={() => handleOpenEditPartyModal(party)}
-                          className="text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-[#015FC9] cursor-pointer transition-all"
-                        >
-                          Editar
-                        </button>
-
-                        <button
                           onClick={() => setInspectedParty(party)}
                           className="text-[11px] font-black uppercase tracking-wider text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer transition-all hover:translate-x-0.5 group/btn"
                         >
@@ -6547,7 +6705,7 @@ export default function App() {
             <div className="py-4.5 px-6 border border-slate-200 rounded-3xl bg-[#FAFBFD] flex justify-between items-center shadow-3xs mt-2">
               <span className="text-[#8492A6] text-xs font-bold font-sans">
                 Mostrando {filteredParties.length} de {parties.length} partidos
-                políticos cadastrados
+                políticos
               </span>
             </div>
           </div>
@@ -6740,162 +6898,6 @@ export default function App() {
         )}
 
         {/* MODAL: CREATE AND EDIT PARTY */}
-        {isPartyModalOpen && (
-          <div className="fixed inset-0 bg-[#0c1322]/40 backdrop-blur-xs flex items-center justify-center z-[11000] p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-white rounded-3xl w-full max-w-lg shadow-3xl overflow-hidden border border-slate-100 font-sans flex flex-col max-h-[90vh]"
-            >
-              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-black text-slate-800">
-                    {partyEditing
-                      ? "Editar Partido Político"
-                      : "Cadastrar Novo Partido"}
-                  </h3>
-                  <p className="text-[10px] uppercase tracking-widest text-[#8492A6] font-bold mt-0.5">
-                    {partyEditing
-                      ? "Atualize as informações do partido"
-                      : "Insira uma nova sigla partidária parceira"}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setIsPartyModalOpen(false)}
-                  className="p-2 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-full transition-all cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <form
-                onSubmit={handleSavePartySubmit}
-                className="flex-1 overflow-y-auto p-6 space-y-4"
-              >
-                {/* Nome do Partido */}
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    Nome Oficial do Partido
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={partyName}
-                    onChange={(e) => setPartyName(e.target.value)}
-                    placeholder="Ex: Partido Social Democrático"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-[#015FC9] focus:bg-white focus:border-[#015FC9]"
-                  />
-                </div>
-
-                {/* Sigla */}
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    Sigla (Siglas em Letras Maiúsculas)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={partyInitials}
-                    onChange={(e) => setPartyInitials(e.target.value)}
-                    placeholder="Ex: PSD"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-[#015FC9] focus:bg-white focus:border-[#015FC9] uppercase"
-                  />
-                </div>
-
-                {/* Logo URL */}
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    URL da Logo do Partido (Opcional)
-                  </label>
-                  <input
-                    type="url"
-                    value={partyLogoUrl}
-                    onChange={(e) => setPartyLogoUrl(e.target.value)}
-                    placeholder="Ex: https://link-da-imagem.png"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-[#015FC9] focus:bg-white focus:border-[#015FC9]"
-                  />
-                  <p className="text-[10px] text-zinc-400 font-medium">
-                    Deixe em branco para usar uma sigla de texto ou um escudo
-                    padrão neutro.
-                  </p>
-                </div>
-
-                {/* Sugestões de Logo pré-fabricadas */}
-                <div className="space-y-2 pt-2">
-                  <label className="block text-[9px] uppercase font-extrabold tracking-wider text-slate-400">
-                    Logos Oficiais Prontas de Demonstração:
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      {
-                        name: "MDB",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/MDB_LOGO.png",
-                      },
-                      {
-                        name: "SD",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/SD_LOGO.png",
-                      },
-                      {
-                        name: "PP",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PP_LOGO.png",
-                      },
-                      {
-                        name: "PL",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PL_LOGO.png",
-                      },
-                      {
-                        name: "PT",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PT_LOGO.png",
-                      },
-                      {
-                        name: "PSD",
-                        url: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PSD_LOGO.png",
-                      },
-                    ].map((preset, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setPartyInitials(preset.name);
-                          setPartyLogoUrl(preset.url);
-                          if (!partyName) {
-                            setPartyName(`Partido ${preset.name}`);
-                          }
-                        }}
-                        className="px-2.5 py-1 text-[9px] font-extrabold uppercase bg-slate-100 hover:bg-emerald-600 hover:text-white rounded-md transition-all cursor-pointer border border-[#E1E8ED] flex items-center gap-1"
-                      >
-                        <img
-                          src={preset.url}
-                          alt={preset.name}
-                          className="w-3.5 h-3.5 rounded-full object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                        <span>{preset.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Form Buttons */}
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3 font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setIsPartyModalOpen(false)}
-                    className="px-5 py-3 border border-slate-200 text-[#5A6E85] text-xs uppercase font-extrabold tracking-wider rounded-xl hover:bg-slate-50 transition-all cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs uppercase font-extrabold tracking-wider rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer"
-                  >
-                    Salvar Partido
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
 
         {/* MODAL: CANDIDATE DETAIL VIEW */}
         {candViewDetail && (
@@ -7262,6 +7264,9 @@ export default function App() {
           <button
             onClick={() => {
               setClickToPickCoords(false);
+              // Com o formulário aberto, cancelar devolve à pergunta inicial em
+              // vez de deixar a pessoa num passo sem saída.
+              if (creationModalType) setCreationLocationMode("ask");
               triggerNotification("Seleção de coordenadas suspensa.", "info");
             }}
             className="px-3 py-1 bg-red-650 hover:bg-red-700 bg-red-600 text-[10px] text-white rounded-full font-bold transition-all border border-red-500 cursor-pointer"
@@ -7854,7 +7859,7 @@ export default function App() {
                             </div>
                           )}
 
-                          {/* Membros do Time Delta Atribuídos */}
+                          {/* Membros da Equipe Atribuídos */}
                           {(() => {
                             const assignedIds =
                               area.assignedDeltas ||
@@ -8177,7 +8182,7 @@ export default function App() {
                             "{pin.description || "Sem descrição cadastrada."}"
                           </p>
 
-                          {/* Membros do Time Delta Atribuídos para PINS */}
+                          {/* Membros da Equipe Atribuídos para PINS */}
                           {(() => {
                             const assignedIds =
                               pin.assignedDeltas ||
@@ -8441,7 +8446,7 @@ export default function App() {
 
       {/* CENTER RE-DESIGNED CREATION MODAL */}
       <AnimatePresence>
-        {creationModalType && (
+        {creationModalType && !clickToPickCoords && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -8464,7 +8469,11 @@ export default function App() {
                       : "Criar Ponto Estratégico (PIN)"}
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Planeje a localização ideal selecionando o bairro e rua.
+                    {creationLocationMode === "map"
+                      ? "Local definido pelo ponto clicado no mapa."
+                      : creationLocationMode === "search"
+                        ? "Planeje a localização ideal selecionando o bairro e rua."
+                        : "Primeiro, escolha como quer definir o local."}
                   </p>
                 </div>
                 <button
@@ -8488,7 +8497,123 @@ export default function App() {
                 }}
                 className="space-y-4"
               >
+                {/* 0. COMO INFORMAR O LOCAL */}
+                {creationLocationMode === "ask" && (
+                  <div className="space-y-3 animate-in fade-in slide-in-from-top-1.5 duration-200">
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center font-extrabold text-[10px] text-indigo-600">
+                        1
+                      </div>
+                      <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none">
+                        Como definir o local?
+                      </h4>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setCreationLocationMode("search")}
+                      className="w-full text-left p-4 bg-white border border-slate-200 rounded-2xl hover:border-indigo-400 hover:bg-indigo-50/40 transition-all cursor-pointer flex items-start gap-3 shadow-2xs"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+                        <Search className="w-4 h-4 text-indigo-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-indigo-950 leading-tight">
+                          Pesquisar o endereço
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1 leading-snug">
+                          Escolha estado, município, bairro e rua nos seletores.
+                        </p>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreationLocationMode("map");
+                        startCoordinatesPicking(
+                          creationModalType === "area" ? "area" : "pin",
+                        );
+                      }}
+                      className="w-full text-left p-4 bg-white border border-slate-200 rounded-2xl hover:border-emerald-400 hover:bg-emerald-50/40 transition-all cursor-pointer flex items-start gap-3 shadow-2xs"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
+                        <MapPin className="w-4 h-4 text-emerald-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-indigo-950 leading-tight">
+                          Escolher no mapa
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1 leading-snug">
+                          Clique direto no ponto exato onde a ação acontece.
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                )}
+
+                {/* 1B. LOCAL ESCOLHIDO PELO MAPA */}
+                {creationLocationMode === "map" && (
+                  <div className="space-y-3 p-4 bg-emerald-50/40 border border-emerald-100 rounded-2xl animate-in fade-in slide-in-from-top-1.5 duration-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-5 h-5 rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center font-extrabold text-[10px] text-emerald-700 shrink-0">
+                          1
+                        </div>
+                        <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none truncate">
+                          Local escolhido no mapa
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCreationLocationMode("ask")}
+                        className="text-[10px] uppercase font-bold tracking-wider text-slate-400 hover:text-slate-600 transition-colors cursor-pointer shrink-0"
+                      >
+                        Trocar
+                      </button>
+                    </div>
+
+                    {pickedCoords ? (
+                      <>
+                        <div className="bg-white border border-emerald-100 rounded-xl p-3">
+                          {isResolvingPickedAddress ? (
+                            <p className="text-xs text-slate-400 italic">
+                              Identificando o endereço do ponto...
+                            </p>
+                          ) : (
+                            <p className="text-xs font-semibold text-slate-700 leading-snug">
+                              {pickedAddressLabel ||
+                                "Endereço não identificado para este ponto."}
+                            </p>
+                          )}
+                          <p className="text-[10px] text-slate-400 font-mono mt-1.5">
+                            {pickedCoords.lat.toFixed(5)},{" "}
+                            {pickedCoords.lng.toFixed(5)}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            startCoordinatesPicking(
+                              creationModalType === "area" ? "area" : "pin",
+                            )
+                          }
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-all cursor-pointer"
+                        >
+                          Escolher outro ponto
+                        </button>
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-500 leading-snug">
+                        Nenhum ponto selecionado ainda.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* 1. SELEÇÃO DE BAIRRO E RUA (SEMPRE APARECE NO MEIO DA TELA PRIMEIRO) */}
+                {creationLocationMode === "search" && (
                 <div className="space-y-3.5 p-4 bg-slate-50/50 border border-slate-100 rounded-2xl">
                   <div className="flex items-center gap-2 mb-1">
                     <div className="w-5 h-5 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center font-extrabold text-[10px] text-indigo-600">
@@ -8902,8 +9027,10 @@ export default function App() {
                   )}
                 </div>
 
-                {/* 2. DADOS ADICIONAIS SÓ APÓS SELECIONAR BAIRRO E RUA */}
-                {creationBairroName && creationRuaName ? (
+                )}
+
+                {/* 2. DADOS ADICIONAIS SÓ APÓS O LOCAL ESTAR DEFINIDO */}
+                {creationLocationReady ? (
                   <div className="space-y-4 animate-in fade-in slide-in-from-top-1.5 duration-200">
                     <div className="border-t border-slate-100 pt-3">
                       <div className="flex items-center gap-2 mb-3">
@@ -9028,7 +9155,7 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Associar Candidato & Seleção de Membros do Time Delta */}
+                        {/* Associar Candidato & Seleção de Membros da Equipe */}
                         <div className="space-y-3 pt-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                           {selectedCandidateFilter === "all" && (
                             <div>
@@ -9055,7 +9182,7 @@ export default function App() {
 
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
-                              Direcionar Missão ao Time Delta do Candidato
+                              Direcionar Missão à Equipe do Candidato
                             </label>
                             <p className="text-[10px] text-slate-500 font-medium mb-1 leading-tight">
                               Selecione os membros que devem receber esta
@@ -9073,8 +9200,8 @@ export default function App() {
                               if (!activeCandId) {
                                 return (
                                   <div className="text-[10px] text-slate-400 italic bg-white p-2 rounded-xl border border-slate-150 text-center">
-                                    Selecione um candidato acima para carregar o
-                                    seu Time Delta.
+                                    Selecione um candidato acima para carregar a
+                                    sua Equipe.
                                   </div>
                                 );
                               }
@@ -9082,7 +9209,7 @@ export default function App() {
                               if (candidatesDeltas.length === 0) {
                                 return (
                                   <div className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-xl font-semibold text-center">
-                                    Nenhum integrante cadastrado no Time Delta
+                                    Nenhum integrante cadastrado na Equipe
                                     deste candidato.
                                   </div>
                                 );
@@ -9236,7 +9363,7 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Associar Candidato & Seleção de Membros do Time Delta para PIN */}
+                        {/* Associar Candidato & Seleção de Membros da Equipe para PIN */}
                         <div className="space-y-3 pt-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                           {selectedCandidateFilter === "all" && (
                             <div>
@@ -9263,7 +9390,7 @@ export default function App() {
 
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
-                              Direcionar Missão ao Time Delta do Candidato
+                              Direcionar Missão à Equipe do Candidato
                             </label>
                             <p className="text-[10px] text-slate-500 font-medium mb-1 leading-tight">
                               Selecione os membros que devem receber esta
@@ -9281,8 +9408,8 @@ export default function App() {
                               if (!activeCandId) {
                                 return (
                                   <div className="text-[10px] text-slate-400 italic bg-white p-2 rounded-xl border border-slate-150 text-center">
-                                    Selecione um candidato acima para carregar o
-                                    seu Time Delta.
+                                    Selecione um candidato acima para carregar a
+                                    sua Equipe.
                                   </div>
                                 );
                               }
@@ -9290,7 +9417,7 @@ export default function App() {
                               if (candidatesDeltas.length === 0) {
                                 return (
                                   <div className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-xl font-semibold text-center">
-                                    Nenhum integrante cadastrado no Time Delta
+                                    Nenhum integrante cadastrado na Equipe
                                     deste candidato.
                                   </div>
                                 );
@@ -9396,8 +9523,11 @@ export default function App() {
                 ) : (
                   <div className="py-6 text-center select-none">
                     <p className="text-xs text-slate-400 animate-pulse">
-                      Escolha o Bairro e a Rua acima para prosseguir com os
-                      dados da criação
+                      {creationLocationMode === "map"
+                        ? "Clique no mapa para definir o local e prosseguir com os dados da criação"
+                        : creationLocationMode === "search"
+                          ? "Escolha o Bairro e a Rua acima para prosseguir com os dados da criação"
+                          : "Escolha acima como quer definir o local da ação"}
                     </p>
                   </div>
                 )}
@@ -9462,17 +9592,18 @@ export default function App() {
                 </label>
                 <div className="flex gap-2">
                   <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-mono text-xs text-slate-600 truncate select-all">
-                    {window.location.origin}/checkin
+                    {shareCheckInUrl || `${window.location.origin}/checkin/...`}
                   </div>
                   <button
                     type="button"
+                    disabled={!shareCheckInUrl}
                     onClick={() => {
-                      const shareUrl = `${window.location.origin}/checkin`;
+                      if (!shareCheckInUrl) return;
                       navigator.clipboard
-                        .writeText(shareUrl)
+                        .writeText(shareCheckInUrl)
                         .then(() => {
                           triggerNotification(
-                            "Link de check-in copiado!",
+                            `Link de check-in de ${shareCandidate?.name} copiado!`,
                             "success",
                           );
                         })
@@ -9480,11 +9611,30 @@ export default function App() {
                           triggerNotification("Erro ao copiar link.", "error");
                         });
                     }}
-                    className="px-4 bg-indigo-600 hover:bg-indigo-700 hover:text-white border border-indigo-750 text-white font-bold text-xs rounded-xl cursor-pointer transition-colors whitespace-nowrap active:scale-95 shadow-md hover:shadow-lg"
+                    className={`px-4 border font-bold text-xs rounded-xl transition-colors whitespace-nowrap shadow-md ${
+                      shareCheckInUrl
+                        ? "bg-indigo-600 hover:bg-indigo-700 border-indigo-750 text-white cursor-pointer active:scale-95 hover:shadow-lg"
+                        : "bg-slate-200 border-slate-200 text-slate-400 cursor-not-allowed"
+                    }`}
                   >
                     Copiar
                   </button>
                 </div>
+
+                {shareCandidate ? (
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Os check-ins feitos por este link entram como{" "}
+                    <span className="font-bold text-slate-600">
+                      {shareCandidate.name}
+                    </span>
+                    .
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-amber-600 font-semibold leading-snug">
+                    Selecione um candidato no filtro do mapa para gerar o link.
+                    Sem candidato, o check-in não teria a quem ser atribuído.
+                  </p>
+                )}
               </div>
 
               {/* Botão de Simulação Instantânea */}
@@ -9503,9 +9653,14 @@ export default function App() {
                   onClick={() => {
                     setIsShareModalOpen(false);
                     setCurrentUrlView("checkin");
+                    // A simulação abre no candidato em foco, como o link real
+                    if (shareCandidate) setCheckInCandidateId(shareCandidate.id);
                     // Atualizar url temporariamente sem dar reload
                     const url = new URL(window.location.href);
                     url.searchParams.set("view", "checkin");
+                    if (shareCandidate) {
+                      url.searchParams.set("candidate", shareCandidate.id);
+                    }
                     window.history.pushState({}, "", url.toString());
                   }}
                   className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-sm hover:shadow-md transition-colors whitespace-nowrap active:scale-95"

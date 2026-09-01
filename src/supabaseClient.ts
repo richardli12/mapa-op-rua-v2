@@ -361,7 +361,7 @@ export const SupabaseService = {
         return { success: true, supporter: data[0] };
       }
 
-      return { success: false, error: 'WhatsApp não credenciado na lista do Time Delta.' };
+      return { success: false, error: 'WhatsApp não credenciado na lista da Equipe.' };
     } catch (err: any) {
       console.error('Erro ao buscar delta no Supabase:', err);
       return { success: false, error: err.message || 'Erro inesperado ao verificar o WhatsApp.' };
@@ -426,7 +426,7 @@ export const SupabaseService = {
       return { success: true, data };
     } catch (err: any) {
       console.error('Erro ao atualizar delta no Supabase:', err);
-      return { success: false, error: err.message || 'Erro ao salvar dados do delta.' };
+      return { success: false, error: err.message || 'Erro ao salvar dados do integrante da Equipe.' };
     }
   },
 
