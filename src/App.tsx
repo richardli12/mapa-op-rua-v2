@@ -4286,20 +4286,6 @@ export default function App() {
                 </div>
                 )}
 
-                {/* Aviso do ponto exato, valendo com ou sem seletor na tela */}
-                {isFreeCheckIn && (
-                  <div className="bg-orange-50/60 border border-orange-150 rounded-xl p-3 flex gap-2.5 items-start animate-in fade-in duration-200 font-sans text-left">
-                    <MapPin className="w-4 h-4 text-[#F58220] shrink-0 mt-0.5" />
-                    <p className="text-[10px] text-slate-600 font-medium leading-relaxed">
-                      O pino vai para o{" "}
-                      <strong className="text-slate-800 font-extrabold">
-                        ponto exato onde você está agora
-                      </strong>
-                      , capturado pelo GPS do aparelho. Fique no local da
-                      ocorrência ao confirmar.
-                    </p>
-                  </div>
-                )}
 
                 {/* Lista Coesiva de Missões Ativas de Campo do Voluntário */}
                 {!isFreeCheckIn &&
