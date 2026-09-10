@@ -53,8 +53,23 @@ create table if not exists check_ins (
   "userLatitude" double precision,
   "userLongitude" double precision,
   "createdAt" text,
-  "candidateId" text
+  "candidateId" text,
+  mode text,
+  priority text,
+  "missionId" text,
+  "missionTitle" text,
+  media jsonb
 );
+
+-- Migração para bancos já existentes: adiciona as colunas do check-in livre
+-- (modalidade sem missão, com grau de prioridade/impacto).
+alter table check_ins add column if not exists mode text;
+alter table check_ins add column if not exists priority text;
+alter table check_ins add column if not exists "missionId" text;
+alter table check_ins add column if not exists "missionTitle" text;
+
+-- Varias fotos e videos por check-in (a coluna photo segue guardando a primeira foto).
+alter table check_ins add column if not exists media jsonb;
 
 create table if not exists auth_users (
   email text primary key,
@@ -86,6 +101,12 @@ create table if not exists time_delta (
   candidate_id uuid references candidates(id),
   image text
 );
+
+-- Realtime: sem isso o Supabase nao emite os eventos e o pino so aparece
+-- depois de recarregar a pagina.
+alter publication supabase_realtime add table check_ins;
+alter publication supabase_realtime add table panfletagem_areas;
+alter publication supabase_realtime add table campaign_pins;
 
 -- Ativar RLS ou desativar conforme sua necessidade. Por padrão, se você quiser ler/escrever anonimamente,
 -- pode desabilitar RLS ou criar políticas de leitura e gravação para todos.
@@ -138,6 +159,11 @@ export async function detectTableCasing() {
   }
 }
 
+/** Converte as colunas cruas do Postgres para o formato camelCase do app. */
+export function normalizeRecord<T>(obj: any): T {
+  return normalizeFields<T>(obj);
+}
+
 function normalizeFields<T>(obj: any): T {
   if (!obj || typeof obj !== 'object') return obj;
   const result: any = { ...obj };
@@ -149,7 +175,9 @@ function normalizeFields<T>(obj: any): T {
     teamsize: 'teamSize',
     contactname: 'contactName',
     userlatitude: 'userLatitude',
-    userlongitude: 'userLongitude'
+    userlongitude: 'userLongitude',
+    missionid: 'missionId',
+    missiontitle: 'missionTitle'
   };
 
   for (const [lowerKey, camelKey] of Object.entries(mappings)) {
@@ -187,7 +215,9 @@ function prepareUpsertPayload(obj: any, table: string): any {
     teamSize: 'teamsize',
     contactName: 'contactname',
     userLatitude: 'userlatitude',
-    userLongitude: 'userlongitude'
+    userLongitude: 'userlongitude',
+    missionId: 'missionid',
+    missionTitle: 'missiontitle'
   };
 
   for (const [camelKey, lowerKey] of Object.entries(mappings)) {
@@ -452,12 +482,16 @@ export const SupabaseService = {
     }
   },
 
-  async uploadImage(file: File) {
+  /** Envia uma foto ou um vídeo do check-in para o Storage e devolve a URL pública. */
+  async uploadMedia(file: File) {
     if (!supabase) {
       return { success: false, url: null, error: 'Supabase não configurado.' };
     }
     try {
-      const fileExt = file.name.split('.').pop() || 'png';
+      const isVideo = file.type.startsWith('video/');
+      const nameExt = file.name.includes('.') ? file.name.split('.').pop() : '';
+      // A câmera de alguns aparelhos manda o arquivo sem extensão no nome.
+      const fileExt = nameExt || (isVideo ? 'mp4' : 'jpg');
       const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
       const filePath = `check_ins/${fileName}`;
 
@@ -465,7 +499,8 @@ export const SupabaseService = {
         .from('imagens')
         .upload(filePath, file, {
           cacheControl: '3600',
-          upsert: false
+          upsert: false,
+          contentType: file.type || undefined
         });
 
       if (error) throw error;
@@ -477,7 +512,11 @@ export const SupabaseService = {
       return { success: true, url: publicUrl, error: null };
     } catch (err: any) {
       console.error('Erro de upload no Supabase Storage:', err);
-      return { success: false, url: null, error: err.message || 'Falha no upload da imagem.' };
+      return {
+        success: false,
+        url: null,
+        error: err.message || 'Falha no upload do arquivo.'
+      };
     }
   },
 

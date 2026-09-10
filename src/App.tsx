@@ -52,6 +52,7 @@ import {
   ArrowRight,
   LogOut,
   Camera,
+  Video,
   Image,
   Instagram,
   Mail,
@@ -71,12 +72,22 @@ import {
   PIN_ICONS,
   Candidate,
   Party,
+  CheckInMode,
+  CheckInPriority,
+  CHECKIN_PRIORITIES,
+  getCheckInPriority,
+  CheckInMedia,
+  CheckInMediaType,
+  CHECKIN_MAX_MEDIA,
+  CHECKIN_MAX_IMAGE_BYTES,
+  CHECKIN_MAX_VIDEO_BYTES,
 } from "./types";
 import {
   SupabaseService,
   isSupabaseConfigured,
   SUPABASE_SQL_SETUP,
   supabase,
+  normalizeRecord,
 } from "./supabaseClient";
 
 const INITIAL_PARTIES: Party[] = [
@@ -187,6 +198,23 @@ const INITIAL_PINS: CampaignPin[] = [
     date: "2026-06-25",
   },
 ];
+
+/** Lê um arquivo como data URL, usado quando o Storage não está disponível. */
+function readFileAsDataUrl(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve((reader.result as string) || null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Fotos e vídeos de um check-in, já unificando os registros antigos que só têm photo. */
+function getCheckInMedia(checkIn: CheckIn): CheckInMedia[] {
+  if (checkIn.media && checkIn.media.length > 0) return checkIn.media;
+  if (checkIn.photo) return [{ url: checkIn.photo, type: 'image' }];
+  return [];
+}
 
 // Mock inicial de check-ins para Maceió
 const INITIAL_CHECK_INS: CheckIn[] = [
@@ -608,10 +636,24 @@ export default function App() {
   });
   const [checkInBairro, setCheckInBairro] = useState("");
   const [checkInRua, setCheckInRua] = useState("");
-  const [checkInPhoto, setCheckInPhoto] = useState<string | null>(null);
-  const [checkInFile, setCheckInFile] = useState<File | null>(null);
+  // Fotos e vídeos anexados ao check-in. previewUrl é só para exibir na tela;
+  // o que vai para o banco é a URL devolvida pelo Storage no envio.
+  type CheckInMediaDraft = {
+    id: string;
+    type: CheckInMediaType;
+    previewUrl: string;
+    file: File;
+  };
+  const [checkInMediaDrafts, setCheckInMediaDrafts] = useState<
+    CheckInMediaDraft[]
+  >([]);
   const [checkInSuccess, setCheckInSuccess] = useState(false);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
+  // Modalidade do check-in: por missão enviada pelo comitê ou livre (sem missão).
+  const [checkInMode, setCheckInMode] = useState<CheckInMode>("missao");
+  const [checkInPriority, setCheckInPriority] = useState<CheckInPriority | "">(
+    "",
+  );
   const initialCheckInState = (() => {
     let slug = "";
     if (typeof window !== "undefined") {
@@ -955,7 +997,9 @@ export default function App() {
         (payload: any) => {
           console.log("Sincronização em Tempo Real (Check-In):", payload);
           if (payload.eventType === "INSERT") {
-            const newCheckIn = payload.new as CheckIn;
+            // O payload vem com os nomes crus das colunas; sem normalizar, o
+            // candidateId some e o pino não passa no filtro do mapa.
+            const newCheckIn = normalizeRecord<CheckIn>(payload.new);
             setCheckIns((prev) => {
               if (prev.some((c) => c.id === newCheckIn.id)) return prev;
               return [newCheckIn, ...prev];
@@ -965,7 +1009,7 @@ export default function App() {
               "success",
             );
           } else if (payload.eventType === "UPDATE") {
-            const updatedCheckIn = payload.new as CheckIn;
+            const updatedCheckIn = normalizeRecord<CheckIn>(payload.new);
             setCheckIns((prev) =>
               prev.map((c) =>
                 c.id === updatedCheckIn.id ? updatedCheckIn : c,
@@ -983,13 +1027,13 @@ export default function App() {
         (payload: any) => {
           console.log("Sincronização em Tempo Real (Área):", payload);
           if (payload.eventType === "INSERT") {
-            const newArea = payload.new as PanfletagemArea;
+            const newArea = normalizeRecord<PanfletagemArea>(payload.new);
             setAreas((prev) => {
               if (prev.some((a) => a.id === newArea.id)) return prev;
               return [...prev, newArea];
             });
           } else if (payload.eventType === "UPDATE") {
-            const updatedArea = payload.new as PanfletagemArea;
+            const updatedArea = normalizeRecord<PanfletagemArea>(payload.new);
             setAreas((prev) =>
               prev.map((a) => (a.id === updatedArea.id ? updatedArea : a)),
             );
@@ -1005,13 +1049,13 @@ export default function App() {
         (payload: any) => {
           console.log("Sincronização em Tempo Real (Marcação):", payload);
           if (payload.eventType === "INSERT") {
-            const newPin = payload.new as CampaignPin;
+            const newPin = normalizeRecord<CampaignPin>(payload.new);
             setPins((prev) => {
               if (prev.some((p) => p.id === newPin.id)) return prev;
               return [...prev, newPin];
             });
           } else if (payload.eventType === "UPDATE") {
-            const updatedPin = payload.new as CampaignPin;
+            const updatedPin = normalizeRecord<CampaignPin>(payload.new);
             setPins((prev) =>
               prev.map((p) => (p.id === updatedPin.id ? updatedPin : p)),
             );
@@ -2112,7 +2156,13 @@ export default function App() {
   }, [pins]);
 
   useEffect(() => {
-    localStorage.setItem("campaign_map_checkins", JSON.stringify(checkIns));
+    try {
+      localStorage.setItem("campaign_map_checkins", JSON.stringify(checkIns));
+    } catch (err) {
+      // Vários check-ins com fotos embutidas (modo local, sem Storage) estouram
+      // a cota do navegador. O cache local se perde, mas o app segue rodando.
+      console.warn("Não foi possível guardar os check-ins no navegador:", err);
+    }
   }, [checkIns]);
 
   useEffect(() => {
@@ -2835,6 +2885,37 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  // Quantas missões o integrante logado tem atribuídas no candidato escolhido.
+  const userMissionCount = (() => {
+    if (!checkInCandidateId || !authenticatedSupporter?.id) return 0;
+    const isMine = (assigned: any) =>
+      Array.isArray(assigned) && assigned.includes(authenticatedSupporter.id);
+    const mineAreas = areas.filter(
+      (a) =>
+        a.active &&
+        a.candidateId === checkInCandidateId &&
+        isMine(a.assignedDeltas || a.center?.assignedDeltas),
+    ).length;
+    const minePins = pins.filter(
+      (p) =>
+        p.active &&
+        p.candidateId === checkInCandidateId &&
+        isMine(p.assignedDeltas || p.position?.assignedDeltas),
+    ).length;
+    return mineAreas + minePins;
+  })();
+  const hasAssignedMissions = userMissionCount > 0;
+
+  // Sem missão atribuída não há escolha a fazer: o check-in livre é o único
+  // caminho, então o app já entra nele em vez de oferecer um botão.
+  useEffect(() => {
+    if (currentUrlView !== "checkin") return;
+    if (!hasAssignedMissions && checkInMode !== "livre") {
+      setCheckInMode("livre");
+      setActiveMissionId(null);
+    }
+  }, [currentUrlView, hasAssignedMissions, checkInMode]);
+
   // Funções para manipulação de check-in
   const handleCheckInBairroChange = (bName: string) => {
     setCheckInBairro(bName);
@@ -2842,19 +2923,59 @@ export default function App() {
   };
 
   const handleCheckInFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        triggerNotification("A imagem deve ter menos de 5MB.", "error");
-        return;
+    const picked: File[] = e.target.files ? Array.from(e.target.files) : [];
+    // O input é limpo aqui para permitir escolher o mesmo arquivo de novo.
+    e.target.value = "";
+    if (picked.length === 0) return;
+
+    setCheckInMediaDrafts((prev) => {
+      const accepted: CheckInMediaDraft[] = [];
+      let full = false;
+      let tooBig = false;
+
+      for (const file of picked) {
+        if (prev.length + accepted.length >= CHECKIN_MAX_MEDIA) {
+          full = true;
+          break;
+        }
+        const isVideo = file.type.startsWith("video/");
+        const limit = isVideo
+          ? CHECKIN_MAX_VIDEO_BYTES
+          : CHECKIN_MAX_IMAGE_BYTES;
+        if (file.size > limit) {
+          tooBig = true;
+          continue;
+        }
+        accepted.push({
+          id: "media_" + Math.random().toString(36).substr(2, 9),
+          type: isVideo ? "video" : "image",
+          previewUrl: URL.createObjectURL(file),
+          file,
+        });
       }
-      setCheckInFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setCheckInPhoto(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
+
+      if (tooBig) {
+        triggerNotification(
+          "Cada foto deve ter até 5MB e cada vídeo até 50MB.",
+          "error",
+        );
+      }
+      if (full) {
+        triggerNotification(
+          `Você pode anexar no máximo ${CHECKIN_MAX_MEDIA} arquivos por check-in.`,
+          "info",
+        );
+      }
+      return accepted.length > 0 ? [...prev, ...accepted] : prev;
+    });
+  };
+
+  const handleRemoveCheckInMedia = (id: string) => {
+    setCheckInMediaDrafts((prev) => {
+      const target = prev.find((m) => m.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((m) => m.id !== id);
+    });
   };
 
   if (currentUrlView === "checkin") {
@@ -2974,6 +3095,23 @@ export default function App() {
       r.name.toLowerCase().includes(checkInRuaSearch.toLowerCase()),
     );
 
+    // Modalidade 2: check-in livre, sem missão enviada pelo comitê.
+    const isFreeCheckIn = checkInMode === "livre";
+    const activeMission = activeMissionId
+      ? [...areas, ...pins].find((m) => m.id === activeMissionId)
+      : undefined;
+    const selectedPriority = getCheckInPriority(checkInPriority);
+
+    const handleSelectCheckInMode = (mode: CheckInMode) => {
+      setCheckInMode(mode);
+      if (mode === "livre") {
+        // Um registro livre não pertence a nenhuma missão.
+        setActiveMissionId(null);
+      } else {
+        setCheckInPriority("");
+      }
+    };
+
     const handleCheckInSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!checkInName.trim()) {
@@ -2995,6 +3133,20 @@ export default function App() {
         triggerNotification("Selecione a rua onde você está.", "error");
         return;
       }
+      if (isFreeCheckIn && !checkInPriority) {
+        triggerNotification(
+          "Informe o grau de prioridade/impacto da ocorrência.",
+          "error",
+        );
+        return;
+      }
+      if (isFreeCheckIn && checkInMediaDrafts.length === 0) {
+        triggerNotification(
+          "Tire a foto do local para registrar o check-in livre.",
+          "error",
+        );
+        return;
+      }
 
       setIsSubmittingCheckIn(true);
 
@@ -3002,34 +3154,53 @@ export default function App() {
       let userLat: number | undefined = prefetchedLatitude;
       let userLng: number | undefined = prefetchedLongitude;
 
-      if (!userLat || !userLng) {
-        if (navigator.geolocation) {
-          try {
-            const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-              navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: true,
-                timeout: 5000,
-              });
-            });
-            userLat = pos.coords.latitude;
-            userLng = pos.coords.longitude;
-            setPrefetchedLatitude(userLat);
-            setPrefetchedLongitude(userLng);
-          } catch (geoErr: any) {
-            console.warn("Could not capture user exact position on submit:", geoErr);
-            let errorMsg = "Não foi possível obter sua localização exata por GPS.";
-            if (geoErr.code === 1) {
-              errorMsg = "Permissão de localização negada pelo navegador. Ative o acesso ao GPS para capturar a geolocalização física real.";
-            } else if (geoErr.code === 2) {
-              errorMsg = "Sinal de GPS fraco ou indisponível no dispositivo.";
-            } else if (geoErr.code === 3) {
-              errorMsg = "Tempo esgotado para obter a localização via GPS.";
-            }
-            triggerNotification(errorMsg, "info");
+      const requestPosition = (options: PositionOptions) =>
+        new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, options);
+        });
+
+      const describeGeoError = (geoErr: any) => {
+        if (geoErr?.code === 1)
+          return "Permissão de localização negada pelo navegador. Ative o acesso ao GPS para capturar a geolocalização física real.";
+        if (geoErr?.code === 2)
+          return "Sinal de GPS fraco ou indisponível no dispositivo.";
+        if (geoErr?.code === 3)
+          return "Tempo esgotado para obter a localização via GPS.";
+        return "Não foi possível obter sua localização exata por GPS.";
+      };
+
+      // No check-in livre a posição precisa ser a de agora — a pessoa pode ter
+      // andado depois que a tela abriu, e o pino vai exatamente onde ela está.
+      if (navigator.geolocation && (isFreeCheckIn || !userLat || !userLng)) {
+        try {
+          const pos = await requestPosition({
+            enableHighAccuracy: true,
+            timeout: isFreeCheckIn ? 15000 : 5000,
+            maximumAge: isFreeCheckIn ? 0 : 60000,
+          });
+          userLat = pos.coords.latitude;
+          userLng = pos.coords.longitude;
+          setPrefetchedLatitude(userLat);
+          setPrefetchedLongitude(userLng);
+        } catch (geoErr: any) {
+          console.warn("Could not capture user exact position on submit:", geoErr);
+          if (!isFreeCheckIn || (!userLat && !userLng)) {
+            triggerNotification(describeGeoError(geoErr), "info");
           }
-        } else {
-          triggerNotification("A geolocalização por navegador não é suportada nesta máquina.", "info");
         }
+      } else if (!navigator.geolocation) {
+        triggerNotification("A geolocalização por navegador não é suportada nesta máquina.", "info");
+      }
+
+      // O check-in livre é, por definição, o ponto exato onde a pessoa está.
+      // Sem GPS não há como marcar o local certo no mapa, então ele é bloqueado.
+      if (isFreeCheckIn && (userLat === undefined || userLng === undefined)) {
+        setIsSubmittingCheckIn(false);
+        triggerNotification(
+          "Ative o GPS do aparelho para registrar o check-in livre: precisamos do ponto exato da ocorrência.",
+          "error",
+        );
+        return;
       }
 
       // Geocodificação aproximada baseada na rua, bairro e município selecionados
@@ -3037,72 +3208,112 @@ export default function App() {
       const stateCode = checkInEstadoUf || "AL";
       const cityName = checkInMunicipio;
 
-      try {
-        const queries = [
-          `${checkInRua}, ${checkInBairro}, ${cityName}, ${stateCode}, Brasil`,
-          `${checkInRua}, ${cityName}, ${stateCode}, Brasil`,
-          `${checkInBairro}, ${cityName}, ${stateCode}, Brasil`,
-          `${cityName}, ${stateCode}, Brasil`,
-        ];
-
-        let found = false;
-        for (let i = 0; i < queries.length; i++) {
-          const q = queries[i];
-          try {
-            const resp = await fetch(
-              `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`,
-            );
-            if (resp.ok) {
-              const data = await resp.json();
-              if (data && data.length > 0) {
-                const item = data[0];
-                checkInCoords = {
-                  lat: parseFloat(item.lat),
-                  lng: parseFloat(item.lon),
-                };
-                found = true;
-                break;
-              }
-            }
-          } catch (err) {
-            console.warn("Erro no geocoding do check-in:", err);
-          }
-        }
-
-        if (!found && selectedBairroObj) {
-          const rObj = selectedBairroObj.ruas.find(
-            (r) => r.name === checkInRua,
-          );
-          if (rObj) {
-            checkInCoords = { lat: rObj.lat, lng: rObj.lng };
-          } else {
-            checkInCoords = {
-              lat: selectedBairroObj.center.lat,
-              lng: selectedBairroObj.center.lng,
-            };
-          }
-        }
-      } catch (err) {
-        console.error("Erro geral no geocoding do check-in:", err);
-      }
-
-      let uploadedPhotoUrl = checkInPhoto;
-
-      if (isSupabaseConfigured && checkInFile) {
+      if (isFreeCheckIn) {
+        // No check-in livre o pino é o ponto exato do aparelho: nada de
+        // aproximar pelo nome da rua, senão a ocorrência sai do lugar.
+        checkInCoords = { lat: userLat as number, lng: userLng as number };
+      } else {
         try {
-          const uploadRes = await SupabaseService.uploadImage(checkInFile);
-          if (uploadRes.success && uploadRes.url) {
-            uploadedPhotoUrl = uploadRes.url;
-          } else {
-            console.warn(
-              "Upload falhou, usando imagem local:",
-              uploadRes.error,
-            );
+          const queries = [
+            `${checkInRua}, ${checkInBairro}, ${cityName}, ${stateCode}, Brasil`,
+            `${checkInRua}, ${cityName}, ${stateCode}, Brasil`,
+            `${checkInBairro}, ${cityName}, ${stateCode}, Brasil`,
+            `${cityName}, ${stateCode}, Brasil`,
+          ];
+
+          let found = false;
+          for (let i = 0; i < queries.length; i++) {
+            const q = queries[i];
+            try {
+              const resp = await fetch(
+                `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`,
+              );
+              if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.length > 0) {
+                  const item = data[0];
+                  checkInCoords = {
+                    lat: parseFloat(item.lat),
+                    lng: parseFloat(item.lon),
+                  };
+                  found = true;
+                  break;
+                }
+              }
+            } catch (err) {
+              console.warn("Erro no geocoding do check-in:", err);
+            }
           }
-        } catch (uploadErr) {
-          console.error("Erro ao fazer upload da foto:", uploadErr);
+
+          if (!found && selectedBairroObj) {
+            const rObj = selectedBairroObj.ruas.find(
+              (r) => r.name === checkInRua,
+            );
+            if (rObj) {
+              checkInCoords = { lat: rObj.lat, lng: rObj.lng };
+            } else {
+              checkInCoords = {
+                lat: selectedBairroObj.center.lat,
+                lng: selectedBairroObj.center.lng,
+              };
+            }
+          }
+        } catch (err) {
+          console.error("Erro geral no geocoding do check-in:", err);
         }
       }
+
+      // Sobe cada foto/vídeo anexado e guarda a URL pública devolvida.
+      const uploadedMedia: CheckInMedia[] = [];
+      let failedUploads = 0;
+
+      for (const draft of checkInMediaDrafts) {
+        let resolvedUrl: string | null = null;
+
+        if (isSupabaseConfigured) {
+          try {
+            const uploadRes = await SupabaseService.uploadMedia(draft.file);
+            if (uploadRes.success && uploadRes.url) {
+              resolvedUrl = uploadRes.url;
+            } else {
+              console.warn("Upload falhou:", uploadRes.error);
+            }
+          } catch (uploadErr) {
+            console.error("Erro ao fazer upload do arquivo:", uploadErr);
+          }
+        }
+
+        if (!resolvedUrl) {
+          if (draft.type === "image") {
+            // Sem Storage o que sobra é embutir a imagem no próprio registro.
+            resolvedUrl = await readFileAsDataUrl(draft.file);
+          } else {
+            // Vídeo em base64 estoura o localStorage, então ele não é embutido.
+            failedUploads += 1;
+            continue;
+          }
+        }
+
+        if (resolvedUrl) {
+          uploadedMedia.push({ url: resolvedUrl, type: draft.type });
+        } else {
+          failedUploads += 1;
+        }
+      }
+
+      if (failedUploads > 0) {
+        triggerNotification(
+          `${failedUploads} arquivo(s) não puderam ser enviados. Vídeos precisam do Supabase configurado.`,
+          "info",
+        );
+      }
+
+      // A coluna photo continua com a primeira foto, para os registros antigos
+      // e para as telas que mostram uma miniatura só.
+      const uploadedPhotoUrl =
+        uploadedMedia.find((m) => m.type === "image")?.url ||
+        uploadedMedia[0]?.url ||
+        null;
 
       const newCheckIn: CheckIn = {
         id: "checkin_" + Math.random().toString(36).substr(2, 9),
@@ -3112,11 +3323,20 @@ export default function App() {
         municipio: checkInMunicipio,
         estado: checkInEstado,
         photo: uploadedPhotoUrl || undefined,
+        media: uploadedMedia.length > 0 ? uploadedMedia : undefined,
         coordinates: checkInCoords, // Dropdown selection coordinates for the map
         userLatitude: userLat,      // Real user physical device latitude
         userLongitude: userLng,     // Real user physical device longitude
         createdAt: new Date().toISOString(),
         candidateId: checkInCandidateId || undefined,
+        mode: checkInMode,
+        priority: isFreeCheckIn
+          ? (checkInPriority as CheckInPriority)
+          : undefined,
+        missionId: !isFreeCheckIn ? activeMissionId || undefined : undefined,
+        missionTitle: !isFreeCheckIn
+          ? activeMission?.title || undefined
+          : undefined,
       };
 
       if (isSupabaseConfigured) {
@@ -3175,13 +3395,15 @@ export default function App() {
       setCheckInName(sName);
       setCheckInBairro("");
       setCheckInRua("");
-      setCheckInPhoto(null);
-      setCheckInFile(null);
+      checkInMediaDrafts.forEach((m) => URL.revokeObjectURL(m.previewUrl));
+      setCheckInMediaDrafts([]);
       setCheckInSuccess(false);
       setCheckInCandidateId("");
       setCheckInMunicipio("Maceió");
       setCheckInMunicipioIbgeId(2704302);
       setCheckInDistrictId(null);
+      setCheckInPriority("");
+      setActiveMissionId(null);
     };
 
     if (!authenticatedSupporter) {
@@ -3648,8 +3870,9 @@ export default function App() {
                     Check-in Realizado!
                   </h2>
                   <p className="text-sm text-slate-500 leading-relaxed max-w-xs mx-auto">
-                    Sua presença e foto foram marcadas com sucesso no mapa
-                    consolidado do comitê. Obrigado!
+                    {isFreeCheckIn
+                      ? "A ocorrência foi marcada no ponto exato do mapa consolidado do comitê. Obrigado!"
+                      : "Sua presença e foto foram marcadas com sucesso no mapa consolidado do comitê. Obrigado!"}
                   </p>
                 </div>
 
@@ -3673,16 +3896,68 @@ export default function App() {
                         : ""}
                     </strong>
                   </div>
-                  {checkInPhoto && (
-                    <div className="pt-3 flex items-center gap-3">
-                      <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-200 shadow-3xs flex-shrink-0">
-                        <img
-                          src={checkInPhoto}
-                          className="w-full h-full object-cover"
+                  <div className="pt-3">
+                    <span className="text-[10px] text-black uppercase tracking-wider font-extrabold block">
+                      Modalidade
+                    </span>
+                    <strong className="text-slate-800 text-sm block mt-0.5">
+                      {isFreeCheckIn
+                        ? "Check-in livre (sem missão)"
+                        : activeMission
+                          ? `Missão: ${activeMission.title}`
+                          : "Check-in por missão"}
+                    </strong>
+                  </div>
+                  {isFreeCheckIn && selectedPriority && (
+                    <div className="pt-3">
+                      <span className="text-[10px] text-black uppercase tracking-wider font-extrabold block">
+                        Prioridade / Impacto
+                      </span>
+                      <strong
+                        className="text-sm mt-0.5 inline-flex items-center gap-1.5"
+                        style={{ color: selectedPriority.color }}
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: selectedPriority.color }}
                         />
+                        {selectedPriority.label}
+                      </strong>
+                    </div>
+                  )}
+                  {checkInMediaDrafts.length > 0 && (
+                    <div className="pt-3 space-y-2">
+                      <div className="flex gap-2 flex-wrap">
+                        {checkInMediaDrafts.map((item) => (
+                          <div
+                            key={item.id}
+                            className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-200 shadow-3xs flex-shrink-0 bg-slate-100"
+                          >
+                            {item.type === "video" ? (
+                              <>
+                                <video
+                                  src={item.previewUrl}
+                                  className="w-full h-full object-cover"
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                />
+                                <span className="absolute inset-0 flex items-center justify-center bg-slate-900/35 text-white">
+                                  <Video className="w-4 h-4" />
+                                </span>
+                              </>
+                            ) : (
+                              <img
+                                src={item.previewUrl}
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+                          </div>
+                        ))}
                       </div>
-                      <span className="text-xs text-slate-500 font-semibold font-sans">
-                        Foto anexada e enviada!
+                      <span className="text-xs text-slate-500 font-semibold font-sans block">
+                        {checkInMediaDrafts.length} arquivo(s) anexado(s) e
+                        enviado(s)!
                       </span>
                     </div>
                   )}
@@ -3712,7 +3987,9 @@ export default function App() {
                       Check-in
                     </h2>
                     <p className="text-sm text-slate-500 font-medium mt-1">
-                      Valide sua presença no local designado.
+                      {isFreeCheckIn
+                        ? "Registre o que você encontrou, no ponto exato."
+                        : "Valide sua presença no local designado."}
                     </p>
                   </div>
 
@@ -3936,8 +4213,83 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Seleção da Modalidade: só faz sentido com missão atribuída */}
+                {hasAssignedMissions && (
+                <div className="space-y-2 text-left">
+                  <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
+                    Modalidade do Check-in *
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 font-sans">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCheckInMode("missao")}
+                      className={`p-3.5 rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-98 ${
+                        !isFreeCheckIn
+                          ? "border-[#F58220] bg-orange-50/40 ring-2 ring-[#F58220]/15 shadow-2xs"
+                          : "border-slate-200 bg-white hover:border-slate-350"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                            !isFreeCheckIn
+                              ? "bg-[#F58220] text-white"
+                              : "bg-slate-100 text-slate-400"
+                          }`}
+                        >
+                          <Target className="w-4 h-4" />
+                        </span>
+                        <h5 className="font-extrabold text-[12px] text-slate-800 leading-tight">
+                          Tenho uma missão
+                        </h5>
+                        {!isFreeCheckIn && (
+                          <Check className="w-3.5 h-3.5 text-[#F58220] stroke-[3] ml-auto shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-1.5">
+                        Marque presença numa área ou ponto enviado pelo comitê.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCheckInMode("livre")}
+                      className={`p-3.5 rounded-2xl border text-left transition-all duration-150 cursor-pointer active:scale-98 ${
+                        isFreeCheckIn
+                          ? "border-[#F58220] bg-orange-50/40 ring-2 ring-[#F58220]/15 shadow-2xs"
+                          : "border-slate-200 bg-white hover:border-slate-350"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                            isFreeCheckIn
+                              ? "bg-[#F58220] text-white"
+                              : "bg-slate-100 text-slate-400"
+                          }`}
+                        >
+                          <AlertCircle className="w-4 h-4" />
+                        </span>
+                        <h5 className="font-extrabold text-[12px] text-slate-800 leading-tight">
+                          Check-in livre
+                        </h5>
+                        {isFreeCheckIn && (
+                          <Check className="w-3.5 h-3.5 text-[#F58220] stroke-[3] ml-auto shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-1.5">
+                        Viu algo na rua e quer registrar agora, sem missão.
+                      </p>
+                    </button>
+                  </div>
+
+                </div>
+                )}
+
+
                 {/* Lista Coesiva de Missões Ativas de Campo do Voluntário */}
-                {(() => {
+                {!isFreeCheckIn &&
+                  (() => {
                   if (!checkInCandidateId) {
                     return (
                       <div className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-5 text-center font-sans animate-in fade-in duration-200">
@@ -3977,19 +4329,9 @@ export default function App() {
 
                   const totalUserMissions = userAreas.length + userPins.length;
 
+                  // Sem missão a tela já está em modo livre; nada a mostrar aqui.
                   if (totalUserMissions === 0) {
-                    return (
-                      <div className="bg-amber-50/45 border border-amber-100 rounded-2xl p-4 text-center font-sans">
-                        <p className="text-xs text-amber-600 font-bold">
-                          Nenhuma missão de campo pendente para o seu perfil no
-                          momento.
-                        </p>
-                        <p className="text-[10px] text-slate-500 mt-1">
-                          Converse com seu coordenador para cadastrar novas
-                          missões e áreas no mapa do candidato!
-                        </p>
-                      </div>
-                    );
+                    return null;
                   }
 
                   return (
@@ -4152,12 +4494,9 @@ export default function App() {
                 })()}
 
                 {/* Check-in Mission Linkage Feedback */}
-                {(() => {
-                  if (!activeMissionId) return null;
-                  const activeMission = [...areas, ...pins].find(
-                    (m) => m.id === activeMissionId,
-                  );
-                  if (!activeMission) return null;
+                {!isFreeCheckIn &&
+                  (() => {
+                  if (!activeMissionId || !activeMission) return null;
                   return (
                     <div className="bg-emerald-50 border border-emerald-150 rounded-xl p-3 text-left font-sans flex items-center justify-between animate-in slide-in-from-top-1 duration-150">
                       <div className="space-y-0.5">
@@ -4597,54 +4936,130 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Upload de Foto */}
-                <div className="space-y-2 text-left">
-                  <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
-                    Evidência Fotográfica (Opcional)
-                  </label>
-
-                  {checkInPhoto ? (
-                    <div className="p-3.5 bg-slate-50 border border-slate-150 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-3">
-                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0 shadow-3xs font-sans">
-                          <img
-                            src={checkInPhoto}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div>
-                          <span className="text-xs font-bold text-slate-700 block">
-                            Foto anexada
-                          </span>
-                          <span className="text-[10px] text-emerald-500 font-bold block mt-0.5">
-                            Pronta para envio
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCheckInPhoto(null);
-                          setCheckInFile(null);
-                        }}
-                        className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] uppercase font-bold rounded-lg transition-colors cursor-pointer font-sans"
-                      >
-                        Remover
-                      </button>
+                {/* Grau de Prioridade / Impacto (somente no check-in livre) */}
+                {isFreeCheckIn && (
+                  <div className="space-y-2 text-left animate-in fade-in duration-200">
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
+                      Grau de Prioridade / Impacto *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 font-sans">
+                      {CHECKIN_PRIORITIES.map((option) => {
+                        const isSelected = checkInPriority === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setCheckInPriority(option.value)}
+                            style={
+                              isSelected
+                                ? {
+                                    borderColor: option.color,
+                                    boxShadow: `0 0 0 2px ${option.color}22`,
+                                  }
+                                : undefined
+                            }
+                            className={`p-3 rounded-xl border text-left transition-all duration-150 cursor-pointer active:scale-98 ${
+                              isSelected
+                                ? "bg-white shadow-2xs"
+                                : "border-slate-200 bg-white hover:border-slate-350"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: option.color }}
+                              />
+                              <h5 className="font-extrabold text-[12px] text-slate-800 leading-none">
+                                {option.label}
+                              </h5>
+                              {isSelected && (
+                                <Check
+                                  className="w-3.5 h-3.5 stroke-[3] ml-auto shrink-0"
+                                  style={{ color: option.color }}
+                                />
+                              )}
+                            </div>
+                            <p className="text-[9.5px] text-slate-500 leading-snug mt-1.5">
+                              {option.description}
+                            </p>
+                          </button>
+                        );
+                      })}
                     </div>
-                  ) : (
-                    <div className="pb-1 font-sans">
-                      {/* Hidden input used standardly via label */}
+                  </div>
+                )}
+
+                {/* Fotos e Vídeos */}
+                <div className="space-y-2.5 text-left">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
+                      {isFreeCheckIn
+                        ? "Fotos e Vídeos da Ocorrência *"
+                        : "Evidência Fotográfica (Opcional)"}
+                    </label>
+                    <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider font-sans shrink-0">
+                      {checkInMediaDrafts.length}/{CHECKIN_MAX_MEDIA}
+                    </span>
+                  </div>
+
+                  {/* Miniaturas do que já foi anexado */}
+                  {checkInMediaDrafts.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 font-sans animate-in fade-in duration-200">
+                      {checkInMediaDrafts.map((item) => (
+                        <div
+                          key={item.id}
+                          className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-3xs group"
+                        >
+                          {item.type === "video" ? (
+                            <video
+                              src={item.previewUrl}
+                              className="w-full h-full object-cover"
+                              muted
+                              playsInline
+                              preload="metadata"
+                            />
+                          ) : (
+                            <img
+                              src={item.previewUrl}
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+
+                          {item.type === "video" && (
+                            <span className="absolute bottom-1 left-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-900/70 text-white text-[8px] font-extrabold uppercase tracking-wider">
+                              <Video className="w-2.5 h-2.5" />
+                              Vídeo
+                            </span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCheckInMedia(item.id)}
+                            title="Remover"
+                            className="absolute top-1 right-1 w-6 h-6 rounded-full bg-slate-900/65 hover:bg-rose-600 text-white flex items-center justify-center transition-colors cursor-pointer active:scale-95"
+                          >
+                            <X className="w-3.5 h-3.5 stroke-[3]" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Botões de captura */}
+                  {checkInMediaDrafts.length < CHECKIN_MAX_MEDIA ? (
+                    <div className="font-sans">
+                      {/* Um input só: a própria câmera do aparelho decide entre
+                          foto e vídeo, e o tipo do arquivo é detectado no envio. */}
                       <input
                         id="checkin-camera-input"
                         type="file"
-                        accept="image/*"
+                        accept="image/*,video/*"
                         capture="environment"
+                        multiple
                         onChange={handleCheckInFileChange}
                         className="sr-only"
                       />
 
-                      {/* Camera Button */}
                       <label
                         htmlFor="checkin-camera-input"
                         className="flex flex-col items-center justify-center p-6 bg-white border border-dashed border-slate-300 hover:border-[#F58220] hover:bg-orange-50/5 transition-all rounded-2xl cursor-pointer text-center group min-h-[140px] shadow-3xs"
@@ -4653,13 +5068,25 @@ export default function App() {
                           <Camera className="w-6 h-6 stroke-[2]" />
                         </div>
                         <span className="text-sm font-bold text-slate-700 group-hover:text-[#F58220] transition-colors leading-tight">
-                          Tirar Foto
+                          {checkInMediaDrafts.length > 0
+                            ? "Anexar mais"
+                            : "Tirar Foto ou Gravar Vídeo"}
                         </span>
                         <span className="text-[10px] text-slate-400 font-bold mt-1.5 uppercase tracking-wider">
-                          Apenas fotos tiradas na hora pela câmera (Máximo 5MB)
+                          Foto até 5MB • Vídeo até 50MB
                         </span>
                       </label>
+
+                      <p className="text-[9.5px] text-slate-400 font-semibold mt-2 leading-snug text-center">
+                        Pode anexar até {CHECKIN_MAX_MEDIA} arquivos entre fotos
+                        e vídeos.
+                      </p>
                     </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 font-bold bg-slate-50 border border-slate-150 rounded-xl p-3 text-center font-sans">
+                      Limite de {CHECKIN_MAX_MEDIA} arquivos atingido. Remova um
+                      para anexar outro.
+                    </p>
                   )}
                 </div>
 
@@ -7438,6 +7865,13 @@ export default function App() {
                         year: "numeric",
                       });
                       const isSelected = selectedId === checkIn.id;
+                      const isFree = checkIn.mode === "livre";
+                      const priority = getCheckInPriority(checkIn.priority);
+                      const media = getCheckInMedia(checkIn);
+                      const cover = media.find((m) => m.type === "image");
+                      const videoCount = media.filter(
+                        (m) => m.type === "video",
+                      ).length;
 
                       return (
                         <div
@@ -7452,15 +7886,22 @@ export default function App() {
                           }}
                         >
                           {/* Foto de Check-in em Miniatura */}
-                          <div className="w-12 h-12 rounded-lg bg-emerald-100/30 border border-emerald-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
-                            {checkIn.photo ? (
+                          <div className="w-12 h-12 rounded-lg bg-emerald-100/30 border border-emerald-100 flex-shrink-0 overflow-hidden flex items-center justify-center relative">
+                            {cover ? (
                               <img
-                                src={checkIn.photo}
+                                src={cover.url}
                                 className="w-full h-full object-cover"
                                 referrerPolicy="no-referrer"
                               />
+                            ) : videoCount > 0 ? (
+                              <Video className="w-5 h-5 text-emerald-600" />
                             ) : (
                               <Users className="w-5 h-5 text-emerald-600 animate-pulse" />
+                            )}
+                            {media.length > 1 && (
+                              <span className="absolute bottom-0 right-0 px-1 py-px bg-slate-900/75 text-white text-[8px] font-extrabold rounded-tl-md leading-tight">
+                                {media.length}
+                              </span>
                             )}
                           </div>
 
@@ -7473,6 +7914,44 @@ export default function App() {
                             <p className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate uppercase tracking-tight">
                               📍 {checkIn.rua} — {checkIn.bairro}
                             </p>
+                            <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                              <span
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider border select-none ${
+                                  isFree
+                                    ? "bg-orange-50 text-orange-700 border-orange-150"
+                                    : "bg-indigo-50 text-indigo-700 border-indigo-100"
+                                }`}
+                              >
+                                {isFree ? "Check-in Livre" : "Missão"}
+                              </span>
+                              {priority && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider border select-none"
+                                  style={{
+                                    color: priority.color,
+                                    borderColor: `${priority.color}40`,
+                                    backgroundColor: `${priority.color}14`,
+                                  }}
+                                >
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{ backgroundColor: priority.color }}
+                                  />
+                                  Prioridade {priority.label}
+                                </span>
+                              )}
+                              {videoCount > 0 && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-100 select-none">
+                                  <Video className="w-2.5 h-2.5" />
+                                  {videoCount} vídeo{videoCount > 1 ? "s" : ""}
+                                </span>
+                              )}
+                              {!isFree && checkIn.missionTitle && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-slate-50 text-slate-500 border border-slate-150 max-w-[140px] truncate">
+                                  {checkIn.missionTitle}
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-1.5 text-[9px] text-slate-400 font-medium mt-1">
                               <span>🕒 {formattedTime}</span>
                               <span>•</span>

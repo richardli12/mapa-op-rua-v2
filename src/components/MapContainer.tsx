@@ -11,8 +11,8 @@ import {
   mergeStreetLists,
   StreetOption,
 } from '../services/streetSources';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate } from '../types';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation } from 'lucide-react';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, getCheckInPriority } from '../types';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
 const normalizeText = (text: string): string => {
@@ -1334,25 +1334,37 @@ export default function MapContainer({
     if (!checkIns) return;
 
     checkIns.forEach(checkIn => {
-      // Ícone do bonequinho verde ("bonequinho verde") para todos os check-ins
+      // Check-in por missão usa o bonequinho verde de sempre. O check-in livre
+      // vira um alerta pintado com a cor do grau de prioridade informado.
+      const isFree = checkIn.mode === 'livre';
+      const priority = getCheckInPriority(checkIn.priority);
+      const markerColor = isFree ? (priority?.color || '#f97316') : '#10b981';
+      const markerIcon = isFree
+        ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>
+            <path d="M12 9v4"/>
+            <path d="M12 17h.01"/>
+          </svg>`
+        : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>`;
+
       const avatarHtml = `
         <div style="
           width: 38px;
           height: 38px;
           border-radius: 50%;
-          background: #10b981;
+          background: ${markerColor};
           border: 3px solid white;
-          box-shadow: 0 4px 10px rgba(16, 185, 129, 0.4);
+          box-shadow: 0 4px 10px ${markerColor}66;
           display: flex;
           align-items: center;
           justify-content: center;
           color: white;
           transition: all 0.2s ease;
         ">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
-            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
+          ${markerIcon}
         </div>
       `;
 
@@ -1370,18 +1382,38 @@ export default function MapContainer({
       const marker = L.marker([checkIn.coordinates.lat, checkIn.coordinates.lng], { icon: checkInIcon });
 
       const dateText = new Date(checkIn.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' • ' + new Date(checkIn.createdAt).toLocaleDateString([], { day: '2-digit', month: '2-digit' });
-      const photoHtml = checkIn.photo ? `
+
+      const media = checkIn.media && checkIn.media.length > 0
+        ? checkIn.media
+        : checkIn.photo
+          ? [{ url: checkIn.photo, type: 'image' as const }]
+          : [];
+      const coverImage = media.find(m => m.type === 'image');
+      const videoCount = media.filter(m => m.type === 'video').length;
+
+      const countHtml = media.length > 1
+        ? `<p class="text-[9px] text-slate-500 font-bold mt-1">📎 ${media.length} arquivos${videoCount > 0 ? ` • ${videoCount} vídeo${videoCount > 1 ? 's' : ''}` : ''}</p>`
+        : videoCount > 0
+          ? `<p class="text-[9px] text-slate-500 font-bold mt-1">🎬 Vídeo anexado</p>`
+          : '';
+
+      const photoHtml = coverImage ? `
         <div class="mt-2 rounded-lg overflow-hidden border border-slate-100 max-w-[150px] max-h-[100px] shadow-2xs">
-          <img src="${checkIn.photo}" class="w-full h-full object-cover animate-in fade-in duration-300" />
+          <img src="${coverImage.url}" class="w-full h-full object-cover animate-in fade-in duration-300" />
         </div>
       ` : '';
 
+      const headerHtml = isFree
+        ? `<p class="font-extrabold uppercase tracking-wider text-[9px] mb-0.5" style="color:${markerColor}">⚠️ Check-in Livre${priority ? ` • Prioridade ${priority.label}` : ''}</p>`
+        : `<p class="font-extrabold text-emerald-600 uppercase tracking-wider text-[9px] mb-0.5">✅ Check-in de Voluntário</p>`;
+
       marker.bindTooltip(`
         <div class="px-2.5 py-2 font-sans text-xs min-w-[160px]">
-          <p class="font-extrabold text-emerald-600 uppercase tracking-wider text-[9px] mb-0.5">✅ Check-in de Voluntário</p>
+          ${headerHtml}
           <p class="font-bold text-slate-900 text-sm">${checkIn.name}</p>
           <p class="text-[10px] text-slate-500 font-semibold mt-0.5">📍 ${checkIn.rua}, ${checkIn.bairro}</p>
           <p class="text-[9px] text-slate-400 mt-1 font-medium bg-slate-50 border border-slate-100 p-1 rounded inline-block">🕒 ${dateText}</p>
+          ${countHtml}
           <p class="text-[8px] text-slate-400 font-bold uppercase mt-1">💡 Clique para ver detalhes</p>
           ${photoHtml}
         </div>
@@ -1869,7 +1901,9 @@ export default function MapContainer({
                 </div>
                 <div>
                   <h3 className="font-extrabold text-[11px] uppercase tracking-wider text-emerald-100 leading-none">Detalhes do Check-in</h3>
-                  <p className="text-xs font-semibold text-emerald-50 mt-0.5">Voluntário Registrado</p>
+                  <p className="text-xs font-semibold text-emerald-50 mt-0.5">
+                    {selectedCheckInForModal.mode === 'livre' ? 'Registro Livre (sem missão)' : 'Voluntário Registrado'}
+                  </p>
                 </div>
               </div>
               <button
@@ -1884,7 +1918,44 @@ export default function MapContainer({
 
             {/* Conteúdo rolável */}
             <div className="p-6 overflow-y-auto space-y-5 text-left font-sans">
-              
+
+              {/* Modalidade e grau de prioridade/impacto */}
+              {(() => {
+                const isFree = selectedCheckInForModal.mode === 'livre';
+                const priority = getCheckInPriority(selectedCheckInForModal.priority);
+                return (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border ${
+                        isFree
+                          ? 'bg-orange-50 text-orange-700 border-orange-200'
+                          : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                      }`}
+                    >
+                      {isFree ? 'Check-in Livre' : 'Check-in por Missão'}
+                    </span>
+                    {priority && (
+                      <span
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border"
+                        style={{
+                          color: priority.color,
+                          borderColor: `${priority.color}40`,
+                          backgroundColor: `${priority.color}14`
+                        }}
+                      >
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: priority.color }} />
+                        Prioridade {priority.label}
+                      </span>
+                    )}
+                    {!isFree && selectedCheckInForModal.missionTitle && (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-50 text-slate-600 border border-slate-150">
+                        {selectedCheckInForModal.missionTitle}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Seção principal de identificação */}
               <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-xl flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
@@ -1957,19 +2028,11 @@ export default function MapContainer({
                           Capturado com Sucesso
                         </span>
                       </div>
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${selectedCheckInForModal.userLatitude},${selectedCheckInForModal.userLongitude}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[10px] font-bold text-amber-700 hover:text-amber-800 underline flex items-center gap-1 transition-colors"
-                      >
-                        Ver no Google Maps →
-                      </a>
                     </div>
                     
                     <div className="bg-white/90 p-3.5 rounded-xl border border-slate-100 space-y-3 shadow-3xs text-xs font-sans text-slate-700">
                       <div>
-                        <span className="text-[9px] font-bold text-slate-400 uppercase block select-none">Endereço Completo (Resolvido via GPS)</span>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block select-none">Endereço Completo</span>
                         {isReverseGeocoding ? (
                           <div className="flex items-center gap-1.5 text-indigo-600 font-semibold mt-1">
                             <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0"/>
@@ -2011,9 +2074,15 @@ export default function MapContainer({
                         </div>
                       </div>
 
-                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[9px] font-mono text-slate-400">
-                        <span>Lat/Lng exata do dispositivo: {selectedCheckInForModal.userLatitude.toFixed(6)}, {selectedCheckInForModal.userLongitude.toFixed(6)}</span>
-                      </div>
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${selectedCheckInForModal.userLatitude},${selectedCheckInForModal.userLongitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 w-full py-3 bg-[#F58220] hover:bg-[#E06E10] active:bg-[#C05D10] text-white font-extrabold text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md hover:shadow-lg active:scale-98 flex items-center justify-center gap-2 no-underline"
+                      >
+                        <Navigation className="w-4 h-4 stroke-[2.5]" />
+                        Abrir no Google Maps
+                      </a>
                     </div>
                   </div>
                 ) : (
@@ -2025,25 +2094,54 @@ export default function MapContainer({
                 )}
               </div>
 
-              {/* Imagem em destaque */}
-              <div>
-                <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">Imagem de Comprovação</p>
-                {selectedCheckInForModal.photo ? (
-                  <div className="shadow-inner border border-slate-150 rounded-2xl overflow-hidden max-h-64 sm:max-h-80 bg-slate-50 flex items-center justify-center relative group">
-                    <img
-                      referrerPolicy="no-referrer"
-                      src={selectedCheckInForModal.photo}
-                      alt="Foto anexada ao check-in"
-                      className="w-full h-full object-cover max-h-64 sm:max-h-80 animate-in fade-in zoom-in-95 duration-500 hover:scale-105 transition-transform cursor-pointer"
-                    />
+              {/* Fotos e vídeos anexados */}
+              {(() => {
+                const media = selectedCheckInForModal.media && selectedCheckInForModal.media.length > 0
+                  ? selectedCheckInForModal.media
+                  : selectedCheckInForModal.photo
+                    ? [{ url: selectedCheckInForModal.photo, type: 'image' as const }]
+                    : [];
+
+                return (
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                      Imagens de Comprovação{media.length > 1 ? ` (${media.length})` : ''}
+                    </p>
+                    {media.length > 0 ? (
+                      <div className={media.length > 1 ? 'grid grid-cols-2 gap-2.5' : ''}>
+                        {media.map((item, index) => (
+                          <div
+                            key={`${item.url}-${index}`}
+                            className="shadow-inner border border-slate-150 rounded-2xl overflow-hidden bg-slate-50 flex items-center justify-center relative"
+                          >
+                            {item.type === 'video' ? (
+                              <video
+                                src={item.url}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className="w-full h-full object-cover max-h-64 sm:max-h-80 bg-black"
+                              />
+                            ) : (
+                              <img
+                                referrerPolicy="no-referrer"
+                                src={item.url}
+                                alt="Arquivo anexado ao check-in"
+                                className="w-full h-full object-cover max-h-64 sm:max-h-80 animate-in fade-in zoom-in-95 duration-500"
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center gap-1.5 select-none">
+                        <User className="w-8 h-8 text-slate-300" />
+                        <p className="text-xs text-slate-400 font-semibold" id="no-photo-attached-text">Nenhuma foto foi anexada neste check-in.</p>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center gap-1.5 select-none">
-                    <User className="w-8 h-8 text-slate-300" />
-                    <p className="text-xs text-slate-400 font-semibold" id="no-photo-attached-text">Nenhuma foto foi anexada neste check-in.</p>
-                  </div>
-                )}
-              </div>
+                );
+              })()}
 
             </div>
 

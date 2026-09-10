@@ -28,6 +28,45 @@ export interface CampaignPin {
   assignedDeltas?: string[]; // Array de IDs ou WhatsApps atribuídos do Time Delta
 }
 
+/**
+ * Modalidades de check-in disponíveis no app de campo:
+ * - 'missao': o integrante da equipe marca presença numa missão/área enviada pelo comitê.
+ * - 'livre':  o integrante encontrou algo em campo (um buraco na rua, um poste apagado)
+ *             e registra por conta própria, sem missão atribuída.
+ */
+export type CheckInMode = 'missao' | 'livre';
+
+/** Grau de prioridade/impacto informado no check-in livre. */
+export type CheckInPriority = 'baixa' | 'media' | 'alta' | 'urgente';
+
+export const CHECKIN_PRIORITIES: {
+  value: CheckInPriority;
+  label: string;
+  description: string;
+  color: string;
+}[] = [
+  { value: 'baixa', label: 'Baixa', description: 'Pode ser resolvido sem pressa.', color: '#10b981' },
+  { value: 'media', label: 'Média', description: 'Precisa entrar na fila de serviço.', color: '#f59e0b' },
+  { value: 'alta', label: 'Alta', description: 'Atrapalha a rotina do bairro.', color: '#f97316' },
+  { value: 'urgente', label: 'Urgente', description: 'Risco imediato à população.', color: '#dc2626' }
+];
+
+export function getCheckInPriority(value?: string) {
+  return CHECKIN_PRIORITIES.find(p => p.value === value);
+}
+
+export type CheckInMediaType = 'image' | 'video';
+
+/** Cada foto ou vídeo anexado ao check-in. */
+export interface CheckInMedia {
+  url: string;
+  type: CheckInMediaType;
+}
+
+export const CHECKIN_MAX_MEDIA = 6;
+export const CHECKIN_MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+export const CHECKIN_MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50 MB
+
 export interface CheckIn {
   id: string;
   name: string;
@@ -35,12 +74,17 @@ export interface CheckIn {
   rua: string;
   municipio?: string;
   estado?: string;
-  photo?: string; // string Base64 da imagem enviada
+  photo?: string; // primeira foto do check-in (mantido para os registros antigos)
+  media?: CheckInMedia[]; // todas as fotos e vídeos anexados
   coordinates: { lat: number; lng: number };
   userLatitude?: number;  // Localização física exata capturada no check-in
   userLongitude?: number; // Localização física exata capturada no check-in
   createdAt: string;
   candidateId?: string; // ID do candidato associado
+  mode?: CheckInMode; // Modalidade do check-in (missão enviada x registro livre)
+  priority?: CheckInPriority; // Grau de prioridade/impacto (check-in livre)
+  missionId?: string; // Área ou ponto vinculado quando o check-in é de missão
+  missionTitle?: string; // Título da missão no momento do check-in
 }
 
 export interface BairroData {
