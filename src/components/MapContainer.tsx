@@ -12,7 +12,8 @@ import {
   StreetOption,
 } from '../services/streetSources';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, getCheckInPriority } from '../types';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, getCheckInPriority } from '../types';
+import { buildOperationIconSvg } from '../operationIcons';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
 const normalizeText = (text: string): string => {
@@ -291,26 +292,15 @@ interface MapContainerProps {
   candidates?: Candidate[];
   mapFilter?: 'all' | 'checkins' | 'markers';
   onMapFilterChange?: (filter: 'all' | 'checkins' | 'markers') => void;
+  /** Tipos de Operação cadastrados, usados para achar o ícone de cada ponto. */
+  operationTypes?: OperationType[];
 }
 
-const getSvgIconString = (type: string) => {
-  switch (type) {
-    case 'flag':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M5 21V4.4a1.2 1.2 0 0 1 1-1.2A10.8 10.8 0 0 1 12 5a10.8 10.8 0 0 0 6-1.8 1.2 1.2 0 0 1 2 1v10.2a1.2 1.2 0 0 1-1 1.2 10.8 10.8 0 0 1-6-1.8 10.8 10.8 0 0 0-6 1.8"/><path d="M5 21h-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
-    case 'megaphone':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="m3 11 18-5v12L3 13v-2z"/><path d="M11.6 16.8 a3 3 0 0 1-5.8-1.6"/></svg>`;
-    case 'star':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`;
-    case 'group':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
-    case 'home':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>`;
-    case 'sound':
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 2v20c-1.5 0-3-2.5-3-5.5s1.5-5.5 3-5.5V2z"/><path d="M18 8a6 6 0 0 1 0 8"/></svg>`;
-    default:
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><circle cx="12" cy="12" r="10"/></svg>`;
-  }
-};
+/**
+ * Ícone do marcador, vindo da mesma lista que o restante do sistema usa.
+ * `type` é a chave do ícone do Tipo de Operação cadastrado pelo usuário.
+ */
+const getSvgIconString = (type: string) => buildOperationIconSvg(type, 16);
 
 const getCustomPinIcon = (color: string, iconType: string, isSelected: boolean) => {
   const scaledSize = isSelected ? 44 : 36;
@@ -391,7 +381,8 @@ export default function MapContainer({
   selectedCandidateId,
   candidates,
   mapFilter: propMapFilter,
-  onMapFilterChange
+  onMapFilterChange,
+  operationTypes = []
 }: MapContainerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -1290,7 +1281,11 @@ export default function MapContainer({
       if (!pin.active) return;
 
       const isSelected = pin.id === selectedId;
-      const customIcon = getCustomPinIcon(pin.color, pin.iconType, isSelected);
+      // pin.iconType guarda o id do Tipo de Operação; o desenho vem do tipo.
+      // Se o tipo foi apagado, o próprio id ainda serve de chave de ícone
+      // (é o caso dos pontos antigos, cujo id já era 'flag', 'star'...).
+      const operationType = operationTypes.find(t => t.id === pin.iconType);
+      const customIcon = getCustomPinIcon(pin.color, operationType?.icon || pin.iconType, isSelected);
 
       const marker = L.marker([pin.position.lat, pin.position.lng], {
         icon: customIcon,
@@ -1317,7 +1312,7 @@ export default function MapContainer({
 
       pinsGroup.addLayer(marker);
     });
-  }, [pins, selectedId, mapFilter]);
+  }, [pins, selectedId, mapFilter, operationTypes]);
 
   // Render Check-ins
   useEffect(() => {

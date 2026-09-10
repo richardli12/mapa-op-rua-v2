@@ -20,12 +20,48 @@ export interface CampaignPin {
   description: string;
   position: { lat: number; lng: number; assignedDeltas?: string[] };
   color: string;
-  iconType: 'flag' | 'megaphone' | 'star' | 'group' | 'home' | 'sound';
+  /** Id do Tipo de Operação (ver OperationType). Fica solto de propósito: os tipos são cadastrados pelo próprio usuário. */
+  iconType: string;
   active: boolean;
   createdAt: string;
   date?: string;
   candidateId?: string; // ID do candidato associado
   assignedDeltas?: string[]; // Array de IDs ou WhatsApps atribuídos do Time Delta
+}
+
+/**
+ * Tipo de Operação de um ponto no mapa.
+ *
+ * Os tipos não são fixos no código: quem opera o sistema cadastra, edita e
+ * apaga os seus próprios. Os padrões abaixo servem só como ponto de partida
+ * de uma instalação nova — e os ids dos seis primeiros são os mesmos que os
+ * pontos antigos já gravaram, então nada do que está no mapa se perde.
+ */
+export interface OperationType {
+  id: string;
+  label: string;
+  /** Chave do ícone em operationIcons.ts. */
+  icon: string;
+  /** Cor sugerida ao criar um ponto deste tipo. */
+  color: string;
+  createdAt?: string;
+}
+
+export const DEFAULT_OPERATION_TYPES: OperationType[] = [
+  { id: 'flag', label: 'Base Operacional', icon: 'flag', color: '#2563eb' },
+  { id: 'group', label: 'Reunião de Equipe', icon: 'group', color: '#7c3aed' },
+  { id: 'star', label: 'Evento / Ação', icon: 'star', color: '#ca8a04' },
+  { id: 'megaphone', label: 'Divulgação', icon: 'megaphone', color: '#ea580c' },
+  { id: 'home', label: 'Visita / Atendimento', icon: 'home', color: '#16a34a' },
+  { id: 'sound', label: 'Veículo de Som', icon: 'sound', color: '#0891b2' }
+];
+
+/** Busca um tipo pelo id, tolerando pontos gravados com um tipo já apagado. */
+export function findOperationType(
+  types: OperationType[],
+  id?: string
+): OperationType | undefined {
+  return types.find(t => t.id === id);
 }
 
 /**
@@ -120,15 +156,6 @@ export const PRESET_COLORS = [
   { name: 'Rosa Mobilização', value: '#db2777' },
   { name: 'Teal Gestão', value: '#0d9488' }
 ];
-
-export const PIN_ICONS = [
-  { type: 'flag', label: 'Bandeira / Comitê' },
-  { type: 'megaphone', label: 'MegaFone / Caminhada' },
-  { type: 'star', label: 'Destaque / Evento' },
-  { type: 'group', label: 'Apoio de Lideranças' },
-  { type: 'home', label: 'Casa de Apoio' },
-  { type: 'sound', label: 'Carro de Som' }
-] as const;
 
 export interface Candidate {
   id: string; // uuid
