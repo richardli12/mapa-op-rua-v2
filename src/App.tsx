@@ -59,10 +59,13 @@ import {
   PlusCircle,
   ChevronLeft,
   Target,
+  Brain,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
 import OperationIcon from "./components/OperationIcon";
+import ConfirmDialog, { ConfirmRequest } from "./components/ConfirmDialog";
+import MindMapPanel from "./components/MindMapPanel";
 import { OPERATION_ICONS } from "./operationIcons";
 import {
   PanfletagemArea,
@@ -354,6 +357,20 @@ export default function App() {
   const [opTypeIcon, setOpTypeIcon] = useState("flag");
   const [opTypeColor, setOpTypeColor] = useState("#2563eb");
 
+  /**
+   * Pedido de confirmação em aberto.
+   *
+   * Tudo o que antes chamava o `confirm()` do navegador passa por aqui, para
+   * a pergunta aparecer no meio da tela com a cara do sistema.
+   */
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(
+    null,
+  );
+
+  // Mapa Mental embutido (metade da tela ou tela cheia).
+  const [isMindMapOpen, setIsMindMapOpen] = useState(false);
+  const [isMindMapFullscreen, setIsMindMapFullscreen] = useState(false);
+
   const [adminTab, setAdminTab] = useState<"candidates" | "map">("candidates");
   const [selectedCandidateFilter, setSelectedCandidateFilter] =
     useState<string>("all");
@@ -606,41 +623,24 @@ export default function App() {
   const [loginWhatsapp, setLoginWhatsapp] = useState("");
   const [isVerifyingLogin, setIsVerifyingLogin] = useState(false);
 
-  // Dialog de confirmação customizado no centro da tela
-  const [customConfirm, setCustomConfirm] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-    onCancel?: () => void;
-    confirmText?: string;
-    cancelText?: string;
-  } | null>(null);
-
+  /** Atalho no formato antigo, hoje em cima do mesmo balão de confirmação. */
   const showConfirm = (
     title: string,
     message: string,
     onConfirm: () => void,
     options?: {
-      onCancel?: () => void;
       confirmText?: string;
       cancelText?: string;
+      tone?: "danger" | "default";
     },
   ) => {
-    setCustomConfirm({
-      isOpen: true,
+    askConfirmation({
       title,
       message,
-      onConfirm: () => {
-        onConfirm();
-        setCustomConfirm(null);
-      },
-      onCancel: () => {
-        if (options?.onCancel) options.onCancel();
-        setCustomConfirm(null);
-      },
-      confirmText: options?.confirmText || "Confirmar",
-      cancelText: options?.cancelText || "Cancelar",
+      onConfirm,
+      confirmLabel: options?.confirmText,
+      cancelLabel: options?.cancelText,
+      tone: options?.tone,
     });
   };
 
@@ -2259,6 +2259,20 @@ export default function App() {
     localStorage.setItem("operation_types", JSON.stringify(operationTypes));
   }, [operationTypes]);
 
+  /**
+   * Pergunta antes de uma ação sem volta, num balão do próprio sistema.
+   * O corpo da ação vai em `onConfirm` e só roda se a pessoa confirmar.
+   */
+  const askConfirmation = (request: ConfirmRequest) =>
+    setConfirmRequest(request);
+
+  const closeConfirmation = () => setConfirmRequest(null);
+
+  const closeMindMap = () => {
+    setIsMindMapOpen(false);
+    setIsMindMapFullscreen(false);
+  };
+
   // Show dynamic system notification
   const triggerNotification = (
     text: string,
@@ -2698,28 +2712,34 @@ export default function App() {
     }
 
     const usedBy = pins.filter((p) => p.iconType === id).length;
-    const warning = usedBy
-      ? `\n\n${usedBy} ponto(s) já usam este tipo e vão ficar sem tipo definido.`
-      : "";
 
-    if (!confirm(`Excluir o tipo "${type.label}"?${warning}`)) return;
+    askConfirmation({
+      title: "Excluir tipo de operação",
+      message: `O tipo "${type.label}" sai da lista e deixa de aparecer nos formulários.`,
+      details: usedBy
+        ? `${usedBy} ponto(s) usam este tipo e vão ficar sem tipo definido.`
+        : undefined,
+      confirmLabel: "Excluir tipo",
+      onConfirm: () => {
+        setOperationTypes((prev) => prev.filter((t) => t.id !== id));
 
-    setOperationTypes((prev) => prev.filter((t) => t.id !== id));
+        if (isSupabaseConfigured) {
+          SupabaseService.deleteOperationType(id).then((res) => {
+            if (!res.success)
+              triggerNotification(`Supabase: ${res.error}`, "error");
+          });
+        }
 
-    if (isSupabaseConfigured) {
-      SupabaseService.deleteOperationType(id).then((res) => {
-        if (!res.success) triggerNotification(`Supabase: ${res.error}`, "error");
-      });
-    }
+        // O formulário aberto não pode continuar apontando para um tipo que sumiu.
+        if (pinIconType === id) {
+          const fallback = operationTypes.find((t) => t.id !== id);
+          if (fallback) setPinIconType(fallback.id);
+        }
+        if (editingOperationTypeId === id) resetOperationTypeForm();
 
-    // O formulário aberto não pode continuar apontando para um tipo que sumiu.
-    if (pinIconType === id) {
-      const fallback = operationTypes.find((t) => t.id !== id);
-      if (fallback) setPinIconType(fallback.id);
-    }
-    if (editingOperationTypeId === id) resetOperationTypeForm();
-
-    triggerNotification("Tipo de operação excluído.", "info");
+        triggerNotification("Tipo de operação excluído.", "info");
+      },
+    });
   };
 
   /** Troca do tipo no formulário do ponto: a cor do tipo vira a cor sugerida. */
@@ -2868,31 +2888,47 @@ export default function App() {
   };
 
   const deleteArea = (id: string) => {
-    if (confirm("Tem certeza que deseja excluir esta área de panfletagem?")) {
-      setAreas((prev) => prev.filter((a) => a.id !== id));
-      if (selectedId === id) setSelectedId(null);
-      if (isSupabaseConfigured) {
-        SupabaseService.deleteArea(id).then((res) => {
-          if (!res.success)
-            triggerNotification(`Supabase: ${res.error}`, "error");
-        });
-      }
-      triggerNotification("Área de panfletagem removida", "success");
-    }
+    const area = areas.find((a) => a.id === id);
+    askConfirmation({
+      title: "Excluir área de trabalho",
+      message: area
+        ? `A área "${area.title}" sai do mapa junto com a missão enviada à equipe.`
+        : "Esta área sai do mapa junto com a missão enviada à equipe.",
+      confirmLabel: "Excluir área",
+      onConfirm: () => {
+        setAreas((prev) => prev.filter((a) => a.id !== id));
+        if (selectedId === id) setSelectedId(null);
+        if (isSupabaseConfigured) {
+          SupabaseService.deleteArea(id).then((res) => {
+            if (!res.success)
+              triggerNotification(`Supabase: ${res.error}`, "error");
+          });
+        }
+        triggerNotification("Área de panfletagem removida", "success");
+      },
+    });
   };
 
   const deletePin = (id: string) => {
-    if (confirm("Deseja realmente remover este ponto estratégico?")) {
-      setPins((prev) => prev.filter((p) => p.id !== id));
-      if (selectedId === id) setSelectedId(null);
-      if (isSupabaseConfigured) {
-        SupabaseService.deletePin(id).then((res) => {
-          if (!res.success)
-            triggerNotification(`Supabase: ${res.error}`, "error");
-        });
-      }
-      triggerNotification("Ponto estratégico removido", "success");
-    }
+    const pin = pins.find((p) => p.id === id);
+    askConfirmation({
+      title: "Remover ponto estratégico",
+      message: pin
+        ? `O ponto "${pin.title}" sai do mapa e da lista da equipe.`
+        : "Este ponto sai do mapa e da lista da equipe.",
+      confirmLabel: "Remover ponto",
+      onConfirm: () => {
+        setPins((prev) => prev.filter((p) => p.id !== id));
+        if (selectedId === id) setSelectedId(null);
+        if (isSupabaseConfigured) {
+          SupabaseService.deletePin(id).then((res) => {
+            if (!res.success)
+              triggerNotification(`Supabase: ${res.error}`, "error");
+          });
+        }
+        triggerNotification("Ponto estratégico removido", "success");
+      },
+    });
   };
 
   const startEditArea = (area: PanfletagemArea) => {
@@ -5339,60 +5375,8 @@ export default function App() {
         {/* Espaçador inferior */}
         <div className="hidden md:block flex-1" />
 
-        {/* Custom Confirm Dialog Modal */}
-        <AnimatePresence>
-          {customConfirm && customConfirm.isOpen && (
-            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 text-left">
-              {/* Backdrop */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={customConfirm.onCancel}
-                className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs"
-              />
-
-              {/* Modal Box */}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 15 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                transition={{ type: "spring", duration: 0.4 }}
-                className="bg-white rounded-3xl p-6 shadow-2xl max-w-sm w-full relative z-10 border border-slate-100 text-center overflow-hidden flex flex-col items-center gap-4"
-              >
-                <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center text-amber-500 shadow-3xs">
-                  <AlertCircle className="w-8 h-8 animate-pulse" />
-                </div>
-
-                <div>
-                  <h4 className="text-base font-black text-slate-800 tracking-tight leading-tight">
-                    {customConfirm.title}
-                  </h4>
-                  <p className="text-xs text-slate-500 font-medium leading-relaxed mt-2 px-1">
-                    {customConfirm.message}
-                  </p>
-                </div>
-
-                <div className="flex gap-2.5 w-full mt-2">
-                  <button
-                    type="button"
-                    onClick={customConfirm.onCancel}
-                    className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-[11px] uppercase tracking-wider rounded-2xl cursor-pointer transition-all active:scale-95"
-                  >
-                    {customConfirm.cancelText || "Cancelar"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={customConfirm.onConfirm}
-                    className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] uppercase tracking-wider rounded-2xl cursor-pointer transition-all active:scale-95 shadow-md shadow-rose-500/10"
-                  >
-                    {customConfirm.confirmText || "Confirmar"}
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
+        {/* Confirmação no meio da tela, com a cara do sistema */}
+        <ConfirmDialog request={confirmRequest} onClose={closeConfirmation} />
       </div>
     );
   }
@@ -5805,22 +5789,27 @@ export default function App() {
       }
     };
 
-    const handleDeleteCandidate = async (id: string, name: string) => {
-      if (confirm(`Deseja realmente remover o candidato ${name}?`)) {
-        if (isSupabaseConfigured) {
-          triggerNotification("Excluindo candidato do Supabase...", "info");
-          const res = await SupabaseService.deleteCandidate(id);
-          if (res.success) {
-            setCandidates((prev) => prev.filter((c) => c.id !== id));
-            triggerNotification("Candidato deletado com sucesso!", "success");
+    const handleDeleteCandidate = (id: string, name: string) => {
+      askConfirmation({
+        title: "Remover candidato",
+        message: `${name} sai do painel junto com o mapa isolado dele.`,
+        confirmLabel: "Remover candidato",
+        onConfirm: async () => {
+          if (isSupabaseConfigured) {
+            triggerNotification("Excluindo candidato do Supabase...", "info");
+            const res = await SupabaseService.deleteCandidate(id);
+            if (res.success) {
+              setCandidates((prev) => prev.filter((c) => c.id !== id));
+              triggerNotification("Candidato deletado com sucesso!", "success");
+            } else {
+              triggerNotification(`Erro Supabase: ${res.error}`, "error");
+            }
           } else {
-            triggerNotification(`Erro Supabase: ${res.error}`, "error");
+            setCandidates((prev) => prev.filter((c) => c.id !== id));
+            triggerNotification("Candidato removido localmente!", "info");
           }
-        } else {
-          setCandidates((prev) => prev.filter((c) => c.id !== id));
-          triggerNotification("Candidato removido localmente!", "info");
-        }
-      }
+        },
+      });
     };
 
     const handleToggleStatus = async (cand: Candidate) => {
@@ -5849,6 +5838,12 @@ export default function App() {
 
     return (
       <div className="min-h-screen w-screen bg-[#EBF1F6] text-slate-800 flex flex-col p-6 sm:p-10 font-sans selection:bg-blue-600 selection:text-white overflow-y-auto">
+        {/* Confirmação no meio da tela, com a cara do sistema */}
+        <ConfirmDialog
+          request={confirmRequest}
+          onClose={closeConfirmation}
+        />
+
         {/* Toast Notification HUD */}
         <AnimatePresence>
           {notification && (
@@ -5957,18 +5952,21 @@ export default function App() {
             {!inspectedParty && (
               <button
                 onClick={() => {
-                  if (
-                    confirm(
-                      "Deseja realmente pulsar para encerrar a sessão administrativa?",
-                    )
-                  ) {
-                    setAdminUser(null);
-                    localStorage.removeItem("auth_admin_user");
-                    triggerNotification(
-                      "Sessão encerrada com sucesso.",
-                      "info",
-                    );
-                  }
+                  askConfirmation({
+                    title: "Encerrar sessão",
+                    message:
+                      "Você sai do painel administrativo e volta para a tela de login.",
+                    confirmLabel: "Encerrar sessão",
+                    tone: "default",
+                    onConfirm: () => {
+                      setAdminUser(null);
+                      localStorage.removeItem("auth_admin_user");
+                      triggerNotification(
+                        "Sessão encerrada com sucesso.",
+                        "info",
+                      );
+                    },
+                  });
                 }}
                 className="p-3 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-slate-200 rounded-2xl shadow-sm transition-all cursor-pointer"
                 title="Sair do painel"
@@ -6790,35 +6788,36 @@ export default function App() {
 
                                         {/* DELETE REMOVE MULTIPLIER BUTTON */}
                                         <button
-                                          onClick={async () => {
-                                            if (
-                                              confirm(
-                                                `Remover ${sup.full_name} da Equipe?`,
-                                              )
-                                            ) {
-                                              setSupporters((prev) =>
-                                                prev.filter(
-                                                  (s) => s.id !== sup.id,
-                                                ),
-                                              );
-                                              if (isSupabaseConfigured) {
-                                                const delRes =
-                                                  await SupabaseService.deleteSupporter(
-                                                    sup.id,
-                                                  );
-                                                if (delRes.success) {
+                                          onClick={() => {
+                                            askConfirmation({
+                                              title: "Remover da Equipe",
+                                              message: `${sup.full_name} deixa de receber as missões deste candidato.`,
+                                              confirmLabel: "Remover",
+                                              onConfirm: async () => {
+                                                setSupporters((prev) =>
+                                                  prev.filter(
+                                                    (s) => s.id !== sup.id,
+                                                  ),
+                                                );
+                                                if (isSupabaseConfigured) {
+                                                  const delRes =
+                                                    await SupabaseService.deleteSupporter(
+                                                      sup.id,
+                                                    );
+                                                  if (delRes.success) {
+                                                    triggerNotification(
+                                                      "Multiplicador removido!",
+                                                      "success",
+                                                    );
+                                                  }
+                                                } else {
                                                   triggerNotification(
-                                                    "Multiplicador removido!",
-                                                    "success",
+                                                    "Multiplicador removido localmente!",
+                                                    "info",
                                                   );
                                                 }
-                                              } else {
-                                                triggerNotification(
-                                                  "Multiplicador removido localmente!",
-                                                  "info",
-                                                );
-                                              }
-                                            }
+                                              },
+                                            });
                                           }}
                                           className="p-1 h-7 w-7 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md border border-transparent hover:border-rose-100 flex items-center justify-center transition-all cursor-pointer"
                                           title="Remover da Equipe"
@@ -7668,6 +7667,9 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-50 font-sans text-slate-800">
+      {/* Confirmação no meio da tela, com a cara do sistema */}
+      <ConfirmDialog request={confirmRequest} onClose={closeConfirmation} />
+
       {/* Toast Notification HUD */}
       <AnimatePresence>
         {notification && (
@@ -7705,7 +7707,13 @@ export default function App() {
 
       {/* Botão de Voltar para Candidatos (Top Right) */}
       {adminUser && adminTab === "map" && (
-        <div className="absolute top-4 right-4 z-[1000] font-sans">
+        <div
+          className={`absolute top-4 z-[1000] font-sans transition-all duration-300 ${
+            isMindMapOpen && !isMindMapFullscreen
+              ? "right-[calc(50%+1rem)]"
+              : "right-4"
+          }`}
+        >
           <button
             onClick={() => {
               setAdminTab("candidates");
@@ -7783,6 +7791,31 @@ export default function App() {
           <Layers className="w-5 h-5" />
           <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
             Visualização
+          </span>
+        </button>
+
+        <div className="w-8 h-[1px] bg-slate-800/50" />
+
+        {/* Button 5: Mapa Mental (iframe embutido) */}
+        <button
+          onClick={() => {
+            if (isMindMapOpen) {
+              closeMindMap();
+              return;
+            }
+            setIsMindMapOpen(true);
+            setIsFilterDropdownOpen(false);
+          }}
+          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative ${
+            isMindMapOpen
+              ? "bg-fuchsia-600 hover:bg-fuchsia-500 border border-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20"
+              : "bg-fuchsia-900/80 hover:bg-fuchsia-800 border border-fuchsia-700 text-fuchsia-200"
+          }`}
+          title="Mapa Mental"
+        >
+          <Brain className="w-5 h-5" />
+          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
+            Mapa Mental
           </span>
         </button>
 
@@ -8202,30 +8235,33 @@ export default function App() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (
-                                  confirm(
-                                    `Remover check-in de ${checkIn.name}?`,
-                                  )
-                                ) {
-                                  setCheckIns((prev) =>
-                                    prev.filter((c) => c.id !== checkIn.id),
-                                  );
-                                  if (isSupabaseConfigured) {
-                                    SupabaseService.deleteCheckIn(
-                                      checkIn.id,
-                                    ).then((res) => {
-                                      if (!res.success)
-                                        triggerNotification(
-                                          `Supabase: ${res.error}`,
-                                          "error",
-                                        );
-                                    });
-                                  }
-                                  triggerNotification(
-                                    "Check-in de voluntário removido!",
-                                    "info",
-                                  );
-                                }
+                                askConfirmation({
+                                  title: "Remover check-in",
+                                  message: `O registro de ${checkIn.name} sai do mapa e do histórico.`,
+                                  details:
+                                    "As fotos e vídeos anexados a ele também deixam de aparecer.",
+                                  confirmLabel: "Remover check-in",
+                                  onConfirm: () => {
+                                    setCheckIns((prev) =>
+                                      prev.filter((c) => c.id !== checkIn.id),
+                                    );
+                                    if (isSupabaseConfigured) {
+                                      SupabaseService.deleteCheckIn(
+                                        checkIn.id,
+                                      ).then((res) => {
+                                        if (!res.success)
+                                          triggerNotification(
+                                            `Supabase: ${res.error}`,
+                                            "error",
+                                          );
+                                      });
+                                    }
+                                    triggerNotification(
+                                      "Check-in de voluntário removido!",
+                                      "info",
+                                    );
+                                  },
+                                });
                               }}
                               className="p-1 px-1.5 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-lg transition-colors cursor-pointer"
                               title="Remover check-in"
@@ -10964,60 +11000,13 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Custom Confirm Dialog Modal */}
-      <AnimatePresence>
-        {customConfirm && customConfirm.isOpen && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={customConfirm.onCancel}
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs"
-            />
-
-            {/* Modal Box */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              transition={{ type: "spring", duration: 0.4 }}
-              className="bg-white rounded-3xl p-6 shadow-2xl max-w-sm w-full relative z-10 border border-slate-100 text-center overflow-hidden flex flex-col items-center gap-4"
-            >
-              <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center text-amber-500 shadow-3xs">
-                <AlertCircle className="w-8 h-8 animate-pulse" />
-              </div>
-
-              <div>
-                <h4 className="text-base font-black text-slate-800 tracking-tight leading-tight">
-                  {customConfirm.title}
-                </h4>
-                <p className="text-xs text-slate-500 font-medium leading-relaxed mt-2 px-1">
-                  {customConfirm.message}
-                </p>
-              </div>
-
-              <div className="flex gap-2.5 w-full mt-2">
-                <button
-                  type="button"
-                  onClick={customConfirm.onCancel}
-                  className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-[11px] uppercase tracking-wider rounded-2xl cursor-pointer transition-all active:scale-95"
-                >
-                  {customConfirm.cancelText || "Cancelar"}
-                </button>
-                <button
-                  type="button"
-                  onClick={customConfirm.onConfirm}
-                  className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] uppercase tracking-wider rounded-2xl cursor-pointer transition-all active:scale-95 shadow-md shadow-rose-500/10"
-                >
-                  {customConfirm.confirmText || "Confirmar"}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Mapa Mental: metade direita da tela, ou tela cheia */}
+      <MindMapPanel
+        open={isMindMapOpen}
+        fullscreen={isMindMapFullscreen}
+        onToggleFullscreen={() => setIsMindMapFullscreen((prev) => !prev)}
+        onClose={closeMindMap}
+      />
     </div>
   );
 }
