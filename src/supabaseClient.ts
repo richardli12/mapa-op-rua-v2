@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, Party } from './types';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, Party, OperationType } from './types';
 
 const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
@@ -39,6 +39,15 @@ create table if not exists campaign_pins (
   "createdAt" text,
   date text,
   "candidateId" text
+);
+
+-- Tipos de Operação: a lista é do usuário, que cria, edita e apaga os seus.
+create table if not exists operation_types (
+  id text primary key,
+  label text not null,
+  icon text,
+  color text,
+  "createdAt" text
 );
 
 create table if not exists check_ins (
@@ -108,10 +117,19 @@ alter publication supabase_realtime add table check_ins;
 alter publication supabase_realtime add table panfletagem_areas;
 alter publication supabase_realtime add table campaign_pins;
 
+-- O add table estoura se a tabela já estiver na publicação; aqui isso é
+-- só um aviso, não um motivo para o script inteiro parar.
+do $$
+begin
+  alter publication supabase_realtime add table operation_types;
+exception when others then null;
+end $$;
+
 -- Ativar RLS ou desativar conforme sua necessidade. Por padrão, se você quiser ler/escrever anonimamente,
 -- pode desabilitar RLS ou criar políticas de leitura e gravação para todos.
 alter table panfletagem_areas disable row level security;
 alter table campaign_pins disable row level security;
+alter table operation_types disable row level security;
 alter table check_ins disable row level security;
 alter table auth_users disable row level security;
 alter table candidates disable row level security;
@@ -310,6 +328,57 @@ export const SupabaseService = {
       return { success: true };
     } catch (err: any) {
       console.error('Erro ao deletar área no Supabase:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Tipos de Operação cadastrados pelo usuário. */
+  async fetchOperationTypes() {
+    if (!supabase) return { success: false, data: [] as OperationType[] };
+    try {
+      const { data, error } = await supabase
+        .from('operation_types')
+        .select('*');
+      if (error) throw error;
+      const rows = (data || []).map(row => normalizeFields<OperationType>(row));
+      return { success: true, data: rows };
+    } catch (err: any) {
+      console.warn('Erro ao buscar tipos de operação no Supabase:', err);
+      return { success: false, error: err.message, data: [] as OperationType[] };
+    }
+  },
+
+  async upsertOperationType(type: OperationType) {
+    if (!supabase) return { success: false };
+    try {
+      const { error } = await supabase
+        .from('operation_types')
+        .upsert({
+          id: type.id,
+          label: type.label,
+          icon: type.icon,
+          color: type.color,
+          createdAt: type.createdAt || new Date().toISOString()
+        });
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao salvar tipo de operação no Supabase:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  async deleteOperationType(id: string) {
+    if (!supabase) return { success: false };
+    try {
+      const { error } = await supabase
+        .from('operation_types')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao deletar tipo de operação no Supabase:', err);
       return { success: false, error: err.message };
     }
   },

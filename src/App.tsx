@@ -62,6 +62,8 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
+import OperationIcon from "./components/OperationIcon";
+import { OPERATION_ICONS } from "./operationIcons";
 import {
   PanfletagemArea,
   CampaignPin,
@@ -69,7 +71,8 @@ import {
   BairroData,
   MACEIO_BAIRROS,
   PRESET_COLORS,
-  PIN_ICONS,
+  OperationType,
+  DEFAULT_OPERATION_TYPES,
   Candidate,
   Party,
   CheckInMode,
@@ -292,6 +295,14 @@ const slugify = (text: string) => {
     .replace(/-+/g, "-"); // remove hifens repetidos
 };
 
+/** Iniciais do nome, usadas quando o integrante não tem foto cadastrada. */
+const getInitials = (name?: string) => {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 export default function App() {
   // Primary state loaded from LocalStorage
   const [areas, setAreas] = useState<PanfletagemArea[]>(() => {
@@ -313,6 +324,35 @@ export default function App() {
     const saved = localStorage.getItem("campaign_candidates");
     return saved ? JSON.parse(saved) : INITIAL_CANDIDATES;
   });
+
+  /**
+   * Tipos de Operação.
+   *
+   * A lista é do usuário: ele cria, edita e apaga os tipos que fazem sentido
+   * para a operação dele. Os padrões só aparecem numa instalação nova.
+   */
+  const [operationTypes, setOperationTypes] = useState<OperationType[]>(() => {
+    const saved = localStorage.getItem("operation_types");
+    if (!saved) return DEFAULT_OPERATION_TYPES;
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) && parsed.length > 0
+        ? parsed
+        : DEFAULT_OPERATION_TYPES;
+    } catch {
+      return DEFAULT_OPERATION_TYPES;
+    }
+  });
+
+  // Gerenciador de Tipos de Operação (modal de cadastro)
+  const [isOperationTypesModalOpen, setIsOperationTypesModalOpen] =
+    useState(false);
+  const [editingOperationTypeId, setEditingOperationTypeId] = useState<
+    string | null
+  >(null);
+  const [opTypeLabel, setOpTypeLabel] = useState("");
+  const [opTypeIcon, setOpTypeIcon] = useState("flag");
+  const [opTypeColor, setOpTypeColor] = useState("#2563eb");
 
   const [adminTab, setAdminTab] = useState<"candidates" | "map">("candidates");
   const [selectedCandidateFilter, setSelectedCandidateFilter] =
@@ -985,6 +1025,43 @@ export default function App() {
     loadAllFromSupabase();
   }, []); // Only on mount
 
+  // Tipos de Operação vindos do Supabase.
+  // Banco vazio (primeiro acesso) recebe a lista padrão para que a instalação
+  // já comece utilizável; a partir daí quem manda é o que está gravado lá.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    let active = true;
+
+    (async () => {
+      const res = await SupabaseService.fetchOperationTypes();
+      if (!active) return;
+
+      if (!res.success) return;
+
+      if (res.data.length === 0) {
+        for (const type of DEFAULT_OPERATION_TYPES) {
+          await SupabaseService.upsertOperationType({
+            ...type,
+            createdAt: new Date().toISOString(),
+          });
+        }
+        if (active) setOperationTypes(DEFAULT_OPERATION_TYPES);
+        return;
+      }
+
+      setOperationTypes(
+        [...res.data].sort((a, b) =>
+          (a.label || "").localeCompare(b.label || "", "pt-BR"),
+        ),
+      );
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Escuta em Realtime das alterações do Supabase para manter tudo sincronizado de forma instantânea
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -1170,9 +1247,10 @@ export default function App() {
   const [pinTitle, setPinTitle] = useState("");
   const [pinDescription, setPinDescription] = useState("");
   const [pinColor, setPinColor] = useState("#ea580c");
-  const [pinIconType, setPinIconType] = useState<
-    "flag" | "megaphone" | "star" | "group" | "home" | "sound"
-  >("flag");
+  // Id do Tipo de Operação escolhido para o ponto.
+  const [pinIconType, setPinIconType] = useState<string>(
+    DEFAULT_OPERATION_TYPES[0].id,
+  );
   const [pinDate, setPinDate] = useState("");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [pinCandidateId, setPinCandidateId] = useState<string>("");
@@ -2177,6 +2255,10 @@ export default function App() {
     localStorage.setItem("campaign_supporters", JSON.stringify(supporters));
   }, [supporters]);
 
+  useEffect(() => {
+    localStorage.setItem("operation_types", JSON.stringify(operationTypes));
+  }, [operationTypes]);
+
   // Show dynamic system notification
   const triggerNotification = (
     text: string,
@@ -2508,6 +2590,145 @@ export default function App() {
     setModalRuaDropdownOpen(false);
   };
 
+  /* ------------------------------------------------------------------ *
+   * Tipos de Operação — cadastro do usuário
+   * ------------------------------------------------------------------ */
+
+  /** Tipo de um ponto, ou undefined se o tipo foi apagado depois. */
+  const getOperationType = (id?: string) =>
+    operationTypes.find((t) => t.id === id);
+
+  /** Rótulo do tipo para exibição, com uma saída digna para tipos apagados. */
+  const operationTypeLabel = (id?: string) =>
+    getOperationType(id)?.label || "Sem tipo definido";
+
+  /** Chave do ícone do tipo; o id antigo serve de reserva. */
+  const operationTypeIcon = (id?: string) =>
+    getOperationType(id)?.icon || id || "pin";
+
+  const resetOperationTypeForm = () => {
+    setEditingOperationTypeId(null);
+    setOpTypeLabel("");
+    setOpTypeIcon("flag");
+    setOpTypeColor("#2563eb");
+  };
+
+  const openOperationTypesManager = () => {
+    resetOperationTypeForm();
+    setIsOperationTypesModalOpen(true);
+  };
+
+  const startEditOperationType = (type: OperationType) => {
+    setEditingOperationTypeId(type.id);
+    setOpTypeLabel(type.label);
+    setOpTypeIcon(type.icon);
+    setOpTypeColor(type.color);
+  };
+
+  const saveOperationType = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const label = opTypeLabel.trim();
+    if (!label) {
+      triggerNotification("Dê um nome ao tipo de operação!", "error");
+      return;
+    }
+
+    const duplicated = operationTypes.some(
+      (t) =>
+        t.id !== editingOperationTypeId &&
+        t.label.trim().toLowerCase() === label.toLowerCase(),
+    );
+    if (duplicated) {
+      triggerNotification("Já existe um tipo de operação com esse nome.", "error");
+      return;
+    }
+
+    const saved: OperationType = editingOperationTypeId
+      ? {
+          ...(operationTypes.find((t) => t.id === editingOperationTypeId) as OperationType),
+          label,
+          icon: opTypeIcon,
+          color: opTypeColor,
+        }
+      : {
+          id: "op_" + Math.random().toString(36).substr(2, 9),
+          label,
+          icon: opTypeIcon,
+          color: opTypeColor,
+          createdAt: new Date().toISOString(),
+        };
+
+    setOperationTypes((prev) =>
+      editingOperationTypeId
+        ? prev.map((t) => (t.id === editingOperationTypeId ? saved : t))
+        : [...prev, saved],
+    );
+
+    if (isSupabaseConfigured) {
+      SupabaseService.upsertOperationType(saved).then((res) => {
+        if (!res.success) triggerNotification(`Supabase: ${res.error}`, "error");
+      });
+    }
+
+    triggerNotification(
+      editingOperationTypeId
+        ? "Tipo de operação atualizado!"
+        : "Novo tipo de operação criado!",
+      "success",
+    );
+
+    // Trocar o nome de um tipo já usado não deve deixar o formulário aberto
+    // apontando para um rótulo velho.
+    if (editingOperationTypeId === pinIconType) setPinColor(saved.color);
+
+    resetOperationTypeForm();
+  };
+
+  const deleteOperationType = (id: string) => {
+    const type = operationTypes.find((t) => t.id === id);
+    if (!type) return;
+
+    if (operationTypes.length <= 1) {
+      triggerNotification(
+        "Mantenha ao menos um tipo de operação cadastrado.",
+        "error",
+      );
+      return;
+    }
+
+    const usedBy = pins.filter((p) => p.iconType === id).length;
+    const warning = usedBy
+      ? `\n\n${usedBy} ponto(s) já usam este tipo e vão ficar sem tipo definido.`
+      : "";
+
+    if (!confirm(`Excluir o tipo "${type.label}"?${warning}`)) return;
+
+    setOperationTypes((prev) => prev.filter((t) => t.id !== id));
+
+    if (isSupabaseConfigured) {
+      SupabaseService.deleteOperationType(id).then((res) => {
+        if (!res.success) triggerNotification(`Supabase: ${res.error}`, "error");
+      });
+    }
+
+    // O formulário aberto não pode continuar apontando para um tipo que sumiu.
+    if (pinIconType === id) {
+      const fallback = operationTypes.find((t) => t.id !== id);
+      if (fallback) setPinIconType(fallback.id);
+    }
+    if (editingOperationTypeId === id) resetOperationTypeForm();
+
+    triggerNotification("Tipo de operação excluído.", "info");
+  };
+
+  /** Troca do tipo no formulário do ponto: a cor do tipo vira a cor sugerida. */
+  const handlePinTypeChange = (id: string) => {
+    setPinIconType(id);
+    const type = getOperationType(id);
+    if (type?.color) setPinColor(type.color);
+  };
+
   // Submit and Form actions for Strategic Pin
   const savePin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2582,8 +2803,8 @@ export default function App() {
   const resetPinForm = () => {
     setPinTitle("");
     setPinDescription("");
-    setPinColor("#ea580c");
-    setPinIconType("flag");
+    setPinColor(operationTypes[0]?.color || "#ea580c");
+    setPinIconType(operationTypes[0]?.id || DEFAULT_OPERATION_TYPES[0].id);
     setPinDate("");
     setPickedCoords(null);
     setEditingPinId(null);
@@ -4476,7 +4697,7 @@ export default function App() {
                                   <Target className="w-3.5 h-3.5 text-orange-500 shrink-0" />
                                   Foco:{" "}
                                   <strong className="text-slate-700 font-extrabold">
-                                    {pin.iconType.toUpperCase()}
+                                    {operationTypeLabel(pin.iconType)}
                                   </strong>
                                 </span>
                                 <span
@@ -8446,24 +8667,51 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Icon type */}
+                    {/* Tipo de operação */}
                     <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Tipo de Marcador
-                      </label>
-                      <select
-                        value={pinIconType}
-                        onChange={(e) => setPinIconType(e.target.value as any)}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-slate-800 shadow-2xs"
-                      >
-                        <option value="flag">🚩 Bandeira / Comitê</option>
-                        <option value="megaphone">
-                          📣 Carro de Som / Alto Falante
-                        </option>
-                        <option value="star">⭐ Evento / Comício</option>
-                        <option value="group">👥 Reunião de Liderança</option>
-                        <option value="home">🏠 Residência Apoiadora</option>
-                      </select>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400">
+                          Tipo de Operação
+                        </label>
+                        <button
+                          type="button"
+                          onClick={openOperationTypesManager}
+                          className="text-[10px] uppercase font-bold tracking-wider text-orange-600 hover:text-orange-700 transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <PenTool className="w-3 h-3" />
+                          Gerenciar
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-2xs"
+                          style={{
+                            backgroundColor:
+                              getOperationType(pinIconType)?.color || pinColor,
+                          }}
+                        >
+                          <OperationIcon
+                            icon={operationTypeIcon(pinIconType)}
+                            size={16}
+                          />
+                        </div>
+                        <select
+                          value={pinIconType}
+                          onChange={(e) => handlePinTypeChange(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-slate-800 shadow-2xs cursor-pointer"
+                        >
+                          {!getOperationType(pinIconType) && (
+                            <option value={pinIconType}>
+                              Sem tipo definido
+                            </option>
+                          )}
+                          {operationTypes.map((type) => (
+                            <option key={type.id} value={type.id}>
+                              {type.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
                     {/* Color selection */}
@@ -8577,32 +8825,17 @@ export default function App() {
                                 className="p-1 px-1.5 rounded-lg text-white font-bold flex-shrink-0 mt-0.5 text-xs shadow-2xs"
                                 style={{ backgroundColor: pin.color }}
                               >
-                                {pin.iconType === "flag" && (
-                                  <Flag className="w-3.5 h-3.5" />
-                                )}
-                                {pin.iconType === "megaphone" && (
-                                  <Megaphone className="w-3.5 h-3.5" />
-                                )}
-                                {pin.iconType === "star" && (
-                                  <Star className="w-3.5 h-3.5" />
-                                )}
-                                {pin.iconType === "group" && (
-                                  <Users className="w-3.5 h-3.5" />
-                                )}
-                                {pin.iconType === "home" && (
-                                  <Home className="w-3.5 h-3.5" />
-                                )}
-                                {pin.iconType === "sound" && (
-                                  <Volume2 className="w-3.5 h-3.5" />
-                                )}
+                                <OperationIcon
+                                  icon={operationTypeIcon(pin.iconType)}
+                                  size={14}
+                                />
                               </div>
                               <div>
                                 <h5 className="font-bold text-sm text-slate-900 group-hover:text-indigo-600 transition-colors leading-tight">
                                   {pin.title}
                                 </h5>
-                                <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide font-mono">
-                                  Lat: {pin.position.lat.toFixed(4)} | Lng:{" "}
-                                  {pin.position.lng.toFixed(4)}
+                                <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide font-semibold">
+                                  {operationTypeLabel(pin.iconType)}
                                 </p>
                               </div>
                             </div>
@@ -8886,6 +9119,7 @@ export default function App() {
           onCoordsPicked={(coords) => {
             setPickedCoords(coords);
           }}
+          operationTypes={operationTypes}
           tempPlacementCoords={pickedCoords}
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor
@@ -8922,6 +9156,246 @@ export default function App() {
           }}
         />
       </div>
+
+      {/* GERENCIADOR DE TIPOS DE OPERAÇÃO */}
+      <AnimatePresence>
+        {isOperationTypesModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[3500]"
+          >
+            <motion.div
+              initial={{ scale: 0.92, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.92, y: 15 }}
+              transition={{ type: "spring", damping: 25, stiffness: 250 }}
+              className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-5 relative text-slate-800"
+            >
+              <div className="flex justify-between items-start gap-3 pb-3 border-b border-slate-100">
+                <div>
+                  <h3 className="font-extrabold text-indigo-950 text-base leading-tight">
+                    Tipos de Operação
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-snug">
+                    Crie, edite e exclua os tipos que a sua operação usa no
+                    mapa.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOperationTypesModalOpen(false);
+                    resetOperationTypeForm();
+                  }}
+                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer shrink-0"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Formulário de criação / edição */}
+              <form
+                onSubmit={saveOperationType}
+                className="space-y-3.5 p-4 bg-slate-50/70 border border-slate-100 rounded-2xl"
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-2xs"
+                    style={{ backgroundColor: opTypeColor }}
+                  >
+                    <OperationIcon icon={opTypeIcon} size={16} />
+                  </div>
+                  <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none">
+                    {editingOperationTypeId
+                      ? "Editar tipo"
+                      : "Novo tipo de operação"}
+                  </h4>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
+                    Nome do tipo *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Vistoria de Iluminação"
+                    value={opTypeLabel}
+                    onChange={(e) => setOpTypeLabel(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">
+                    Ícone no mapa
+                  </label>
+                  <div className="grid grid-cols-7 sm:grid-cols-10 gap-1.5 bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
+                    {OPERATION_ICONS.map((icon) => {
+                      const isActive = icon.key === opTypeIcon;
+                      return (
+                        <button
+                          type="button"
+                          key={icon.key}
+                          title={icon.label}
+                          onClick={() => setOpTypeIcon(icon.key)}
+                          className={`aspect-square rounded-lg flex items-center justify-center border transition-all cursor-pointer ${
+                            isActive
+                              ? "border-transparent text-white shadow-xs scale-105"
+                              : "border-slate-150 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                          }`}
+                          style={
+                            isActive
+                              ? { backgroundColor: opTypeColor }
+                              : undefined
+                          }
+                        >
+                          <OperationIcon icon={icon.key} size={15} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
+                    Cor padrão
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 items-center shadow-2xs">
+                      <input
+                        type="color"
+                        value={opTypeColor}
+                        onChange={(e) => setOpTypeColor(e.target.value)}
+                        className="w-8 h-8 rounded-lg cursor-pointer border-none bg-transparent shrink-0"
+                      />
+                      <span className="text-[10px] font-mono font-medium text-slate-500 px-1 uppercase">
+                        {opTypeColor}
+                      </span>
+                    </div>
+                    {PRESET_COLORS.map((preset) => (
+                      <button
+                        type="button"
+                        key={preset.value}
+                        title={preset.name}
+                        onClick={() => setOpTypeColor(preset.value)}
+                        className={`w-6 h-6 rounded-full border-2 transition-all cursor-pointer ${
+                          opTypeColor.toLowerCase() ===
+                          preset.value.toLowerCase()
+                            ? "border-slate-800 scale-110"
+                            : "border-white shadow-2xs hover:scale-105"
+                        }`}
+                        style={{ backgroundColor: preset.value }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 justify-end pt-1">
+                  {editingOperationTypeId && (
+                    <button
+                      type="button"
+                      onClick={resetOperationTypeForm}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl cursor-pointer transition-colors shadow-3xs"
+                    >
+                      Cancelar edição
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer active:scale-95"
+                  >
+                    {editingOperationTypeId ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        <span>Salvar alterações</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                        <span>Adicionar tipo</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+              {/* Lista dos tipos cadastrados */}
+              <div className="space-y-2">
+                <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none">
+                  Cadastrados ({operationTypes.length})
+                </h4>
+
+                {operationTypes.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                    Nenhum tipo cadastrado ainda.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {operationTypes.map((type) => {
+                      const usedBy = pins.filter(
+                        (p) => p.iconType === type.id,
+                      ).length;
+                      const isEditing = editingOperationTypeId === type.id;
+                      return (
+                        <div
+                          key={type.id}
+                          className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-all ${
+                            isEditing
+                              ? "border-indigo-300 bg-indigo-50/50"
+                              : "border-slate-100 bg-white hover:border-slate-200"
+                          }`}
+                          style={{
+                            borderLeftWidth: "5px",
+                            borderLeftColor: type.color,
+                          }}
+                        >
+                          <div
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0 shadow-2xs"
+                            style={{ backgroundColor: type.color }}
+                          >
+                            <OperationIcon icon={type.icon} size={15} />
+                          </div>
+                          <div className="min-w-0 flex-grow">
+                            <p className="text-xs font-bold text-slate-800 truncate leading-tight">
+                              {type.label}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-medium leading-none mt-1">
+                              {usedBy === 0
+                                ? "Nenhum ponto usa este tipo"
+                                : `${usedBy} ponto${usedBy > 1 ? "s" : ""} no mapa`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => startEditOperationType(type)}
+                              title="Editar"
+                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteOperationType(type.id)}
+                              title="Excluir"
+                              className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* CENTER RE-DESIGNED CREATION MODAL */}
       <AnimatePresence>
@@ -9065,10 +9539,6 @@ export default function App() {
                                 "Endereço não identificado para este ponto."}
                             </p>
                           )}
-                          <p className="text-[10px] text-slate-400 font-mono mt-1.5">
-                            {pickedCoords.lat.toFixed(5)},{" "}
-                            {pickedCoords.lng.toFixed(5)}
-                          </p>
                         </div>
 
                         <button
@@ -9735,16 +10205,56 @@ export default function App() {
                                             <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
                                           )}
                                         </div>
-                                        <div className="truncate text-ellipsis">
-                                          <p className="text-[11px] leading-tight font-bold truncate">
-                                            {delta.full_name ||
-                                              delta.nome_completo ||
-                                              delta.nome}
-                                          </p>
-                                          <p className="text-[9px] text-slate-400 font-mono leading-none">
-                                            {delta.whatsapp}
-                                          </p>
-                                        </div>
+                                        {(() => {
+                                          const deltaName =
+                                            delta.full_name ||
+                                            delta.nome_completo ||
+                                            delta.nome ||
+                                            "Integrante";
+                                          const deltaPhoto =
+                                            delta.image ||
+                                            delta.foto_url ||
+                                            delta.photo ||
+                                            "";
+                                          return (
+                                            <>
+                                              <div
+                                                className={`w-7 h-7 rounded-full overflow-hidden shrink-0 border flex items-center justify-center ${
+                                                  isSelected
+                                                    ? "border-indigo-300 bg-indigo-100"
+                                                    : "border-slate-200 bg-slate-100"
+                                                }`}
+                                              >
+                                                {deltaPhoto ? (
+                                                  <img
+                                                    src={deltaPhoto}
+                                                    alt={deltaName}
+                                                    className="w-full h-full object-cover"
+                                                    loading="lazy"
+                                                    onError={(e) => {
+                                                      // Foto quebrada volta para as iniciais.
+                                                      (
+                                                        e.currentTarget as HTMLImageElement
+                                                      ).style.display = "none";
+                                                    }}
+                                                  />
+                                                ) : (
+                                                  <span className="text-[9px] font-extrabold text-slate-500 uppercase">
+                                                    {getInitials(deltaName)}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="truncate text-ellipsis">
+                                                <p className="text-[11px] leading-tight font-bold truncate">
+                                                  {deltaName}
+                                                </p>
+                                                <p className="text-[9px] text-slate-400 font-mono leading-none">
+                                                  {delta.whatsapp}
+                                                </p>
+                                              </div>
+                                            </>
+                                          );
+                                        })()}
                                       </button>
                                     );
                                   })}
@@ -9771,30 +10281,54 @@ export default function App() {
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-3">
                           <div>
-                            <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                              Marcador / Tipo
-                            </label>
-                            <select
-                              value={pinIconType}
-                              onChange={(e) =>
-                                setPinIconType(e.target.value as any)
-                              }
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
-                            >
-                              <option value="flag">🚩 Bandeira / Comitê</option>
-                              <option value="megaphone">
-                                📣 Carro de Som / Alto Falante
-                              </option>
-                              <option value="star">⭐ Evento / Comício</option>
-                              <option value="group">
-                                👥 Reunião de Liderança
-                              </option>
-                              <option value="home">
-                                🏠 Residência Apoiadora
-                              </option>
-                            </select>
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400">
+                                Tipo de Operação
+                              </label>
+                              <button
+                                type="button"
+                                onClick={openOperationTypesManager}
+                                className="text-[10px] uppercase font-bold tracking-wider text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                              >
+                                <PenTool className="w-3 h-3" />
+                                Gerenciar
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-2xs"
+                                style={{
+                                  backgroundColor:
+                                    getOperationType(pinIconType)?.color ||
+                                    pinColor,
+                                }}
+                              >
+                                <OperationIcon
+                                  icon={operationTypeIcon(pinIconType)}
+                                  size={16}
+                                />
+                              </div>
+                              <select
+                                value={pinIconType}
+                                onChange={(e) =>
+                                  handlePinTypeChange(e.target.value)
+                                }
+                                className="w-full min-w-0 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs cursor-pointer"
+                              >
+                                {!getOperationType(pinIconType) && (
+                                  <option value={pinIconType}>
+                                    Sem tipo definido
+                                  </option>
+                                )}
+                                {operationTypes.map((type) => (
+                                  <option key={type.id} value={type.id}>
+                                    {type.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
 
                           <div>
@@ -9943,16 +10477,56 @@ export default function App() {
                                             <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
                                           )}
                                         </div>
-                                        <div className="truncate text-ellipsis">
-                                          <p className="text-[11px] leading-tight font-bold truncate">
-                                            {delta.full_name ||
-                                              delta.nome_completo ||
-                                              delta.nome}
-                                          </p>
-                                          <p className="text-[9px] text-slate-400 font-mono leading-none">
-                                            {delta.whatsapp}
-                                          </p>
-                                        </div>
+                                        {(() => {
+                                          const deltaName =
+                                            delta.full_name ||
+                                            delta.nome_completo ||
+                                            delta.nome ||
+                                            "Integrante";
+                                          const deltaPhoto =
+                                            delta.image ||
+                                            delta.foto_url ||
+                                            delta.photo ||
+                                            "";
+                                          return (
+                                            <>
+                                              <div
+                                                className={`w-7 h-7 rounded-full overflow-hidden shrink-0 border flex items-center justify-center ${
+                                                  isSelected
+                                                    ? "border-indigo-300 bg-indigo-100"
+                                                    : "border-slate-200 bg-slate-100"
+                                                }`}
+                                              >
+                                                {deltaPhoto ? (
+                                                  <img
+                                                    src={deltaPhoto}
+                                                    alt={deltaName}
+                                                    className="w-full h-full object-cover"
+                                                    loading="lazy"
+                                                    onError={(e) => {
+                                                      // Foto quebrada volta para as iniciais.
+                                                      (
+                                                        e.currentTarget as HTMLImageElement
+                                                      ).style.display = "none";
+                                                    }}
+                                                  />
+                                                ) : (
+                                                  <span className="text-[9px] font-extrabold text-slate-500 uppercase">
+                                                    {getInitials(deltaName)}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="truncate text-ellipsis">
+                                                <p className="text-[11px] leading-tight font-bold truncate">
+                                                  {deltaName}
+                                                </p>
+                                                <p className="text-[9px] text-slate-400 font-mono leading-none">
+                                                  {delta.whatsapp}
+                                                </p>
+                                              </div>
+                                            </>
+                                          );
+                                        })()}
                                       </button>
                                     );
                                   })}
