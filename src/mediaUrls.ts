@@ -55,4 +55,4 @@ export const CHECKIN_COVER = mediaUrl(
  */
 export const CLIENT_CARD_COVER =
   (import.meta as any).env?.VITE_CLIENT_CARD_COVER_URL ||
-  'https://zpfhqweydlujotqbuwse.supabase.co/storage/v1/object/public/imagem_url/ChatGPT%20Image%2017%20de%20set.%20de%202026,%2013_02_10.png';
+  'https://zpfhqweydlujotqbuwse.supabase.co/storage/v1/object/public/imagem_url/imgv2.png';
