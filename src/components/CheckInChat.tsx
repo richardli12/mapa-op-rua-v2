@@ -13,7 +13,15 @@ import {
 } from 'lucide-react';
 import { reverseGeocode } from '../services/streetSources';
 import { DatabaseService } from '../databaseClient';
-import { OperationType, CheckIn, CheckInMedia, CheckInNote, CheckInOperationRef } from '../types';
+import {
+  OperationType,
+  CheckIn,
+  CheckInMedia,
+  CheckInNote,
+  CheckInOperationRef,
+  PriorityLevel,
+  CHECKIN_PRIORITIES
+} from '../types';
 import OperationIcon from './OperationIcon';
 import BrandMark from './BrandMark';
 import MiniMapa from './MiniMapa';
@@ -120,6 +128,9 @@ export default function CheckInChat({
 
   const [operacoes, setOperacoes] = useState<OperationType[]>([]);
   const [operacoesConfirmadas, setOperacoesConfirmadas] = useState(false);
+  /** Nível de prioridade escolhido, da lista que o administrador cadastrou. */
+  const [prioridade, setPrioridade] = useState('');
+  const [niveis, setNiveis] = useState<PriorityLevel[]>([]);
 
   const [salvando, setSalvando] = useState(false);
   const [horas, setHoras] = useState<{ [k: string]: string }>({});
@@ -155,6 +166,19 @@ export default function CheckInChat({
     member?.full_name || member?.name || member?.nome || 'Integrante';
   const fotoMembro: string = member?.image || '';
 
+  /**
+   * Níveis oferecidos na tela.
+   *
+   * A lista é a do administrador; sem nada cadastrado, valem os quatro que o
+   * sistema já trazia — a etapa não pode ficar sem opção nenhuma.
+   */
+  const opcoesPrioridade =
+    niveis.length > 0
+      ? niveis.map(n => ({ id: n.id, label: n.label, color: n.color }))
+      : CHECKIN_PRIORITIES.map(p => ({ id: p.value as string, label: p.label, color: p.color }));
+
+  const nivelEscolhido = opcoesPrioridade.find(n => n.id === prioridade);
+
   const midiasProntas = midias.filter(m => m.estado === 'pronto');
   const obsProntas = observacoes.filter(o => o.estado === 'pronto');
   const fotos = midiasProntas.filter(m => m.tipo === 'image').length;
@@ -172,8 +196,12 @@ export default function CheckInChat({
 
   useEffect(() => {
     (async () => {
-      const res = await DatabaseService.lerConfiguracao('midia_galeria');
-      setPermitirGaleria(res.value === 'sim');
+      const [galeriaCfg, niveisCfg] = await Promise.all([
+        DatabaseService.lerConfiguracao('midia_galeria'),
+        DatabaseService.fetchPriorityLevels()
+      ]);
+      setPermitirGaleria(galeriaCfg.value === 'sim');
+      setNiveis(niveisCfg.data);
     })();
   }, []);
 
@@ -349,6 +377,7 @@ export default function CheckInChat({
       createdAt: new Date().toISOString(),
       candidateId: clientId,
       mode: 'livre',
+      priority: prioridade || undefined,
       status,
       // Primeiro tipo escolhido, para as telas antigas que leem uma operação só.
       operationTypeId: operacoes[0]?.id,
@@ -533,6 +562,10 @@ export default function CheckInChat({
       notify('Escolha pelo menos um tipo de operação.', 'error');
       return;
     }
+    if (!prioridade) {
+      notify('Escolha o nível de prioridade.', 'error');
+      return;
+    }
     setOperacoesConfirmadas(true);
     marcarHora('operacoes');
     // Escolhida a ação, o próximo passo é dizer de onde ela está sendo feita.
@@ -703,7 +736,7 @@ export default function CheckInChat({
       <div className="flex-1 min-h-0 px-3 pt-4 pb-6 space-y-3 overflow-y-auto">
         {/* ETAPA 1: tipo de ação do cliente */}
         <Fala
-          texto="Qual ação você vai fazer? Pode marcar mais de uma."
+          texto="Qual ação você vai fazer e qual a prioridade dela?"
           hora={horas.abertura}
         />
         {etapa === 1 && (
@@ -743,10 +776,40 @@ export default function CheckInChat({
                     })}
                   </div>
 
+                  {/* Nível de prioridade, da lista do administrador */}
+                  <p className="w-full text-[11px] font-extrabold uppercase tracking-wider text-slate-400 text-right mt-1">
+                    Prioridade
+                  </p>
+                  <div className="w-full grid grid-cols-2 gap-2">
+                    {opcoesPrioridade.map(nivel => {
+                      const marcado = prioridade === nivel.id;
+                      return (
+                        <button
+                          key={nivel.id}
+                          type="button"
+                          onClick={() => setPrioridade(nivel.id)}
+                          className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
+                            marcado
+                              ? 'text-white border-transparent'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                          style={marcado ? { backgroundColor: nivel.color } : undefined}
+                        >
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: marcado ? '#ffffff' : nivel.color }}
+                          />
+                          <span className="truncate">{nivel.label}</span>
+                          {marcado && <Check className="w-3.5 h-3.5 stroke-[3] ml-auto shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <button
                     type="button"
                     onClick={confirmarOperacoes}
-                    disabled={operacoes.length === 0}
+                    disabled={operacoes.length === 0 || !prioridade}
                     className="w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
                     style={{ backgroundColor: AZUL }}
                   >
@@ -755,7 +818,11 @@ export default function CheckInChat({
                   <p className="text-[11px] text-slate-400 font-semibold text-right">
                     {operacoes.length === 0
                       ? 'Marque pelo menos um tipo de operação.'
-                      : `${contar(operacoes.length, 'tipo marcado', 'tipos marcados')}.`}
+                      : !prioridade
+                        ? 'Escolha o nível de prioridade.'
+                        : `${contar(operacoes.length, 'tipo marcado', 'tipos marcados')} • ${
+                            nivelEscolhido?.label
+                          }.`}
                   </p>
                 </>
               )}
@@ -765,6 +832,15 @@ export default function CheckInChat({
         {operacoesConfirmadas && etapa > 1 && (
           <Resposta hora={horas.operacoes}>
             <span className="flex flex-wrap gap-1.5">
+              {nivelEscolhido && (
+                <span className="inline-flex items-center gap-1.5 bg-white/15 rounded-full pl-1 pr-2 py-0.5">
+                  <span
+                    className="w-4 h-4 rounded-full shrink-0 border-2 border-white/50"
+                    style={{ backgroundColor: nivelEscolhido.color }}
+                  />
+                  {nivelEscolhido.label}
+                </span>
+              )}
               {operacoes.map(op => (
                 <span
                   key={op.id}
@@ -982,9 +1058,9 @@ export default function CheckInChat({
                     />
                     <LinhaResumo
                       icone={<Flag className="w-3.5 h-3.5" style={{ color: VERDE }} />}
-                      texto={
-                        operacoes.map(o => o.label).join(', ') || 'Nenhuma operação'
-                      }
+                      texto={`${operacoes.map(o => o.label).join(', ') || 'Nenhuma operação'}${
+                        nivelEscolhido ? ` • ${nivelEscolhido.label}` : ''
+                      }`}
                       etapaDestino={1}
                     />
                     <li
