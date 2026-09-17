@@ -11,6 +11,7 @@ import {
   User,
 } from 'lucide-react';
 import { DatabaseService, db } from '../databaseClient';
+import { lerDispositivo } from '../services/dispositivo';
 import BrandMark from './BrandMark';
 
 /** Cores da marca, as mesmas do resto do sistema. */
@@ -307,6 +308,22 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
         MOTIVOS[res.data?.reason] || 'Este QR Code não é mais válido.',
       );
     }
+    // Aparelho do cadastro: fica guardado para o administrador e passa a ser o
+    // único que abre o painel desta pessoa. Falha aqui não desfaz o cadastro,
+    // que já está feito — o vínculo então nasce no primeiro acesso ao painel.
+    try {
+      const ficha = await lerDispositivo();
+      await DatabaseService.registrarDispositivoMembro({
+        memberId: res.data.id,
+        candidateId: convite?.candidateId || null,
+        whatsapp: telefone.replace(/\D/g, ''),
+        origem: 'cadastro',
+        ficha,
+      });
+    } catch (err) {
+      console.warn('Não foi possível registrar o aparelho do cadastro:', err);
+    }
+
     setConcluido(true);
   };
 
