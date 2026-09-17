@@ -101,6 +101,7 @@ import {
   CheckInPriority,
   CHECKIN_PRIORITIES,
   getCheckInPriority,
+  PriorityLevel,
   CheckInMedia,
   CheckInMediaType,
   CHECKIN_MAX_MEDIA,
@@ -797,6 +798,14 @@ export default function App() {
   const [inviteToken] = useState<string>(ROTA_INICIAL.convite);
   /** Endereço para onde vai quem abriu o domínio de acesso sem link. */
   const [saidaSemLink, setSaidaSemLink] = useState('');
+  /**
+   * Níveis de prioridade criados pelo administrador.
+   *
+   * A lista fixa do código continua como reserva: banco sem a tabela, ou sem
+   * nível nenhum cadastrado, não pode deixar a tela sem opção.
+   */
+  const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
+
   /** Tela aberta na área do administrador. */
   const [telaAdm, setTelaAdm] = useState<'clientes' | 'configuracoes'>('clientes');
 
@@ -1093,6 +1102,15 @@ export default function App() {
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [isSyncingDatabase, setIsSyncingDatabase] = useState(false);
   const [showDatabaseModal, setShowDatabaseModal] = useState(false);
+
+  // Níveis de prioridade: a lista é do administrador, não do código.
+  useEffect(() => {
+    if (ROTA_INICIAL.semLink) return;
+    (async () => {
+      const res = await DatabaseService.fetchPriorityLevels();
+      if (res.data.length > 0) setPriorityLevels(res.data);
+    })();
+  }, []);
 
   // Quem digitou só o domínio de acesso, sem link, vai para fora do sistema.
   useEffect(() => {
@@ -2950,6 +2968,32 @@ export default function App() {
   /* ------------------------------------------------------------------ *
    * Tipos de Operação — cadastro do usuário
    * ------------------------------------------------------------------ */
+
+  /**
+   * Opções de prioridade para as telas.
+   *
+   * Vem do que o administrador cadastrou; sem nada cadastrado, valem os quatro
+   * níveis que o sistema já trazia, para a tela nunca ficar sem escolha.
+   */
+  const opcoesDePrioridade = (
+    priorityLevels.length > 0
+      ? priorityLevels.map((n) => ({
+          value: n.id,
+          label: n.label,
+          description: n.description || "",
+          color: n.color,
+        }))
+      : CHECKIN_PRIORITIES.map((p) => ({
+          value: p.value as string,
+          label: p.label,
+          description: p.description,
+          color: p.color,
+        }))
+  ) as { value: string; label: string; description: string; color: string }[];
+
+  /** Nível gravado num check-in, resolvido pela lista do administrador. */
+  const resolverPrioridade = (valor?: string) =>
+    opcoesDePrioridade.find((o) => o.value === valor) || getCheckInPriority(valor);
 
   /** Tipo de um ponto, ou undefined se o tipo foi apagado depois. */
   const getOperationType = (id?: string) =>
@@ -5594,7 +5638,7 @@ export default function App() {
                       Grau de Prioridade / Impacto *
                     </label>
                     <div className="grid grid-cols-2 gap-2 font-sans">
-                      {CHECKIN_PRIORITIES.map((option) => {
+                      {opcoesDePrioridade.map((option) => {
                         const isSelected = checkInPriority === option.value;
                         return (
                           <button
@@ -8499,7 +8543,7 @@ export default function App() {
                       });
                       const isSelected = selectedId === checkIn.id;
                       const isFree = checkIn.mode === "livre";
-                      const priority = getCheckInPriority(checkIn.priority);
+                      const priority = resolverPrioridade(checkIn.priority);
                       const media = getCheckInMedia(checkIn);
                       const cover = media.find((m) => m.type === "image");
                       const videoCount = media.filter(
@@ -9511,6 +9555,7 @@ export default function App() {
             setPickedCoords(coords);
           }}
           operationTypes={operationTypes}
+            priorityLevels={priorityLevels}
           tempPlacementCoords={pickedCoords}
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor

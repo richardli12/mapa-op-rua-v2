@@ -13,7 +13,7 @@ import {
   StreetOption,
 } from '../services/streetSources';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, getCheckInPriority } from '../types';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, getCheckInPriority } from '../types';
 import { buildOperationIconSvg } from '../operationIcons';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
@@ -295,6 +295,8 @@ interface MapContainerProps {
   onMapFilterChange?: (filter: 'all' | 'checkins' | 'markers') => void;
   /** Tipos de Operação cadastrados, usados para achar o ícone de cada ponto. */
   operationTypes?: OperationType[];
+  /** Níveis de prioridade criados pelo administrador. */
+  priorityLevels?: PriorityLevel[];
 }
 
 /**
@@ -383,7 +385,8 @@ export default function MapContainer({
   candidates,
   mapFilter: propMapFilter,
   onMapFilterChange,
-  operationTypes = []
+  operationTypes = [],
+  priorityLevels = []
 }: MapContainerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -1360,7 +1363,10 @@ export default function MapContainer({
       // Check-in por missão usa o bonequinho verde de sempre. O check-in livre
       // vira um alerta pintado com a cor do grau de prioridade informado.
       const isFree = checkIn.mode === 'livre';
-      const priority = getCheckInPriority(checkIn.priority);
+      const nivel = (priorityLevels || []).find(n => n.id === checkIn.priority);
+      const priority = nivel
+        ? { label: nivel.label, color: nivel.color }
+        : getCheckInPriority(checkIn.priority);
       const markerColor = isFree ? (priority?.color || '#f97316') : '#10b981';
       const markerIcon = isFree
         ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
@@ -1946,7 +1952,12 @@ export default function MapContainer({
               {/* Modalidade e grau de prioridade/impacto */}
               {(() => {
                 const isFree = selectedCheckInForModal.mode === 'livre';
-                const priority = getCheckInPriority(selectedCheckInForModal.priority);
+                const nivel = (priorityLevels || []).find(
+                  n => n.id === selectedCheckInForModal.priority
+                );
+                const priority = nivel
+                  ? { label: nivel.label, color: nivel.color }
+                  : getCheckInPriority(selectedCheckInForModal.priority);
                 return (
                   <div className="flex flex-wrap items-center gap-2">
                     <span

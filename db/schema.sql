@@ -328,6 +328,30 @@ create table if not exists public.app_settings (
 );
 
 -- ----------------------------------------------------------------------------
+-- 8.6 priority_levels - niveis de prioridade criados pelo administrador
+-- ----------------------------------------------------------------------------
+-- O id e o valor gravado em check_ins.priority. Os quatro primeiros sao os que
+-- o sistema usava fixos no codigo, para os registros antigos continuarem sendo
+-- reconhecidos.
+create table if not exists public.priority_levels (
+  id          text primary key,
+  label       text not null,
+  description text,
+  color       text not null default '#64748b',
+  position    integer not null default 0,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists idx_priority_levels_ordem on public.priority_levels (position);
+
+insert into public.priority_levels (id, label, description, color, position) values
+  ('baixa',   'Baixa',   'Pode ser resolvido sem pressa.',      '#10b981', 0),
+  ('media',   'Média',   'Precisa entrar na fila de serviço.',  '#f59e0b', 1),
+  ('alta',    'Alta',    'Atrapalha a rotina do bairro.',       '#f97316', 2),
+  ('urgente', 'Urgente', 'Risco imediato à população.',         '#dc2626', 3)
+on conflict (id) do nothing;
+
+-- ----------------------------------------------------------------------------
 -- 9. Migracoes - completa bancos que ja existiam antes
 -- ----------------------------------------------------------------------------
 -- Num banco novo nada aqui muda coisa alguma; num banco antigo, adiciona as
@@ -519,7 +543,7 @@ begin
     'candidates', 'parties', 'time_delta',
     'operation_types', 'panfletagem_areas', 'campaign_pins', 'check_ins',
     'check_in_media', 'check_in_notes', 'check_in_operations',
-    'member_devices', 'app_settings'
+    'member_devices', 'app_settings', 'priority_levels'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);

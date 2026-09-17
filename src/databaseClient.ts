@@ -8,7 +8,8 @@ import {
   CheckInOperationRef,
   Candidate,
   Party,
-  OperationType
+  OperationType,
+  PriorityLevel
 } from './types';
 import type { FichaDispositivo } from './services/dispositivo';
 
@@ -1238,6 +1239,54 @@ export const DatabaseService = {
    * disso o app comparava "email = ? and password = ?" lendo a tabela com a
    * chave anônima — que vai no pacote do navegador.
    */
+  // ------------------------------------------------------ niveis de prioridade
+  /** Níveis de prioridade cadastrados pelo administrador, na ordem da lista. */
+  async fetchPriorityLevels() {
+    if (!db) return { success: false, data: [] as PriorityLevel[] };
+    try {
+      const { data, error } = await db
+        .from('priority_levels')
+        .select('*')
+        .order('position', { ascending: true });
+      if (error) throw error;
+      return { success: true, data: (data || []) as PriorityLevel[] };
+    } catch (err: any) {
+      // Banco sem a tabela cai na lista fixa do código, e nada quebra.
+      console.warn('Erro ao buscar níveis de prioridade:', err);
+      return { success: false, data: [] as PriorityLevel[], error: err.message };
+    }
+  },
+
+  async upsertPriorityLevel(nivel: PriorityLevel) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('priority_levels').upsert({
+        id: nivel.id,
+        label: nivel.label,
+        description: nivel.description || null,
+        color: nivel.color,
+        position: nivel.position
+      });
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao salvar nível de prioridade:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  async deletePriorityLevel(id: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('priority_levels').delete().eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao remover nível de prioridade:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
   async loginAdmin(email: string, password: string) {
     if (!db) {
       return { success: false, error: 'banco de dados não configurado.' };

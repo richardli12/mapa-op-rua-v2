@@ -83,6 +83,21 @@ export function getCheckInPriority(value?: string) {
   return CHECKIN_PRIORITIES.find(p => p.value === value);
 }
 
+/**
+ * Nível de prioridade criado pelo administrador.
+ *
+ * O `id` é o que fica gravado no check-in. Os quatro níveis antigos, que eram
+ * fixos no código, entram no banco com os mesmos ids — por isso registro
+ * antigo continua sendo reconhecido.
+ */
+export interface PriorityLevel {
+  id: string;
+  label: string;
+  description?: string;
+  color: string;
+  position: number;
+}
+
 export type CheckInMediaType = 'image' | 'video';
 
 /** Cada foto ou vídeo anexado ao check-in. */
