@@ -625,10 +625,29 @@ export default function App() {
   );
 
   // Modo de visualização (admin / checkin)
-  /** Token do QR Code, quando alguém abre o link de cadastro. */
+  /**
+   * Token do QR Code, quando alguém abre o link de cadastro.
+   *
+   * O formato novo leva o token depois do `#`, que nunca vai para o servidor.
+   * O formato antigo (`?convite=`) continua funcionando para os QR Codes já
+   * impressos. Lido o token, o endereço na barra é limpo na hora: quem olha a
+   * tela, ou copia o que está ali, vê só o domínio.
+   */
   const [inviteToken] = useState<string>(() => {
     if (typeof window === "undefined") return "";
-    return new URLSearchParams(window.location.search).get("convite") || "";
+    const fragmento = window.location.hash.replace(/^#/, "");
+    const doFragmento = new URLSearchParams(fragmento).get("c") || "";
+    const daBusca = new URLSearchParams(window.location.search).get("convite") || "";
+    const token = doFragmento || daBusca;
+
+    if (token) {
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {
+        /* navegador sem history: o endereço fica como está */
+      }
+    }
+    return token;
   });
 
   const [currentUrlView, setCurrentUrlView] = useState<"admin" | "checkin">(

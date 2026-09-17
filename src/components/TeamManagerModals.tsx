@@ -254,7 +254,15 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
     return () => clearInterval(t);
   }, []);
 
-  const linkDe = (token: string) => `${BASE_CADASTRO}/?convite=${token}`;
+  /**
+   * Link do convite.
+   *
+   * O token vai depois do `#`, e não como `?convite=`. O que vem depois do `#`
+   * nunca é enviado ao servidor: não entra em log de acesso, não vaza no
+   * cabeçalho Referer e não chega aos robôs que montam a pré-visualização de
+   * link. Aberta a página, o endereço na barra é limpo e sobra só o domínio.
+   */
+  const linkDe = (token: string) => `${BASE_CADASTRO}/#c=${token}`;
 
   useEffect(() => {
     if (!ativo) return setImagemQr('');

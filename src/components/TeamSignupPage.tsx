@@ -18,8 +18,6 @@ import BrandMark from './BrandMark';
 const AZUL = '#0C3556';
 const LARANJA = '#F58220';
 
-const TOTAL_ETAPAS = 2;
-
 const classeEntrada =
   'w-full py-3 bg-transparent border-none text-[14px] font-semibold text-[#0C3556] placeholder-[#B9C6D2] focus:outline-hidden';
 
@@ -68,15 +66,11 @@ const MOTIVOS: Record<string, string> = {
 function Moldura({
   titulo,
   children,
-  progresso,
-  etapa,
   relogio,
   restante,
 }: {
   titulo: string;
   children: React.ReactNode;
-  progresso?: number;
-  etapa: number;
   relogio: string;
   restante: number | null;
 }) {
@@ -113,23 +107,6 @@ function Moldura({
         >
           {titulo}
         </h1>
-
-        {progresso !== undefined && (
-          <>
-            <div className="mt-4 flex items-center justify-between text-[11px] font-extrabold text-[#7A8A9B]">
-              <span>
-                Etapa {etapa} de {TOTAL_ETAPAS}
-              </span>
-              <span>{progresso}%</span>
-            </div>
-            <div className="mt-1.5 h-[5px] rounded-full bg-[#C6D2DE] overflow-hidden">
-              <div
-                className="h-full rounded-full transition-[width] duration-300"
-                style={{ width: `${progresso}%`, backgroundColor: AZUL }}
-              />
-            </div>
-          </>
-        )}
       </div>
 
       <div className="flex-1 min-h-0 px-4 pb-6">
@@ -176,7 +153,6 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
   const [extras, setExtras] = useState<Record<string, string>>({});
   const [salvando, setSalvando] = useState(false);
   const [concluido, setConcluido] = useState(false);
-  const [etapa, setEtapa] = useState(1);
   /** Quanto falta para o convite expirar, em segundos. */
   const [restante, setRestante] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -266,16 +242,6 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
     }
   };
 
-  /** Fecha a primeira etapa: sem foto, nome e telefone não há segunda. */
-  const continuar = () => {
-    if (!foto) return setErro('Adicione sua foto para continuar.');
-    if (!nome.trim()) return setErro('Informe o nome completo.');
-    if (telefone.replace(/\D/g, '').length < 10)
-      return setErro('Informe o telefone com DDD.');
-    setErro(null);
-    setEtapa(2);
-  };
-
   const enviar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!foto) return setErro('Tire ou escolha uma foto para continuar.');
@@ -342,7 +308,6 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
     return (
       <Moldura
         titulo="Cadastro concluído"
-        etapa={etapa}
         relogio={relogio}
         restante={restante}
       >
@@ -364,7 +329,6 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
     return (
       <Moldura
         titulo="Convite indisponível"
-        etapa={etapa}
         relogio={relogio}
         restante={restante}
       >
@@ -386,176 +350,140 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
   return (
     <Moldura
       titulo="Complete seu cadastro"
-      progresso={etapa === 1 ? 50 : 100}
-      etapa={etapa}
       relogio={relogio}
       restante={restante}
     >
       <form onSubmit={enviar}>
-        <div className="flex items-center gap-3">
-          {etapa === 2 && (
-            <button
-              type="button"
-              onClick={() => setEtapa(1)}
-              aria-label="Voltar"
-              className="w-7 h-7 -ml-1 rounded-lg text-[#9AA9B8] hover:bg-slate-50 flex items-center justify-center cursor-pointer"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          )}
-          <p className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[#9AA9B8]">
-            {etapa === 1
-              ? 'Seus dados'
-              : convite.candidateName || 'Informações da equipe'}
-          </p>
-        </div>
+        <p className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[#9AA9B8]">
+          Seus dados
+        </p>
         <span className="block w-9 h-[3px] rounded-full bg-[#E3E9EF] mt-2.5" />
 
-        {etapa === 1 ? (
-          <>
-            {/* FOTO */}
-            <div className="mt-5 flex flex-col items-center">
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                capture="user"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) enviarFoto(file);
-                }}
-              />
-              <button
-                type="button"
-                disabled={enviandoFoto}
-                onClick={() => fileRef.current?.click()}
-                className="relative w-[84px] h-[84px] cursor-pointer active:scale-95 transition-transform disabled:opacity-60"
-                aria-label={foto ? 'Trocar foto' : 'Adicionar foto'}
-              >
-                {/* O corte fica só na foto: assim o + laranja passa da borda. */}
-                <span className="w-full h-full rounded-full bg-[#DCE5EE] overflow-hidden flex items-center justify-center">
-                  {foto ? (
-                    <img
-                      src={foto}
-                      alt="Sua foto"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : enviandoFoto ? (
-                    <Loader2 className="w-6 h-6 animate-spin text-[#7A8A9B]" />
-                  ) : (
-                    <Camera className="w-7 h-7 text-[#7A8A9B]" />
-                  )}
-                </span>
-                <span
-                  className="absolute bottom-0.5 right-0.5 w-6 h-6 rounded-full text-white flex items-center justify-center shadow-md ring-2 ring-white"
-                  style={{ backgroundColor: LARANJA }}
+        {/* FOTO */}
+        <div className="mt-5 flex flex-col items-center">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="user"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) enviarFoto(file);
+            }}
+          />
+          <button
+            type="button"
+            disabled={enviandoFoto}
+            onClick={() => fileRef.current?.click()}
+            className="relative w-[84px] h-[84px] cursor-pointer active:scale-95 transition-transform disabled:opacity-60"
+            aria-label={foto ? 'Trocar foto' : 'Adicionar foto'}
+          >
+            {/* O corte fica só na foto: assim o + laranja passa da borda. */}
+            <span className="w-full h-full rounded-full bg-[#DCE5EE] overflow-hidden flex items-center justify-center">
+              {foto ? (
+                <img
+                  src={foto}
+                  alt="Sua foto"
+                  className="w-full h-full object-cover"
+                />
+              ) : enviandoFoto ? (
+                <Loader2 className="w-6 h-6 animate-spin text-[#7A8A9B]" />
+              ) : (
+                <Camera className="w-7 h-7 text-[#7A8A9B]" />
+              )}
+            </span>
+            <span
+              className="absolute bottom-0.5 right-0.5 w-6 h-6 rounded-full text-white flex items-center justify-center shadow-md ring-2 ring-white"
+              style={{ backgroundColor: LARANJA }}
+            >
+              <Plus className="w-3.5 h-3.5 stroke-[3]" />
+            </span>
+          </button>
+          <p
+            className="mt-2 text-[12.5px] font-extrabold"
+            style={{ color: AZUL }}
+          >
+            {foto ? 'Trocar foto' : 'Adicionar foto'}
+          </p>
+          <p className="text-[11px] font-semibold text-[#9AA9B8]">
+            Obrigatória
+          </p>
+        </div>
+
+        <Campo
+          rotulo="Nome completo"
+          icone={<User className="w-4.5 h-4.5 text-[#A5B4C2]" />}
+        >
+          <input
+            type="text"
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            placeholder="Digite seu nome"
+            className={classeEntrada}
+          />
+        </Campo>
+
+        <Campo
+          rotulo="Telefone (WhatsApp)"
+          icone={<Phone className="w-4.5 h-4.5" style={{ color: LARANJA }} />}
+        >
+          <input
+            type="tel"
+            inputMode="numeric"
+            value={telefone}
+            onChange={(e) => setTelefone(mascararTelefone(e.target.value))}
+            placeholder="(00) 00000-0000"
+            className={classeEntrada}
+          />
+        </Campo>
+
+        {/* CAMPOS QUE O ADM CONFIGUROU PARA ESTE CLIENTE */}
+        {campos.map((campo) => (
+          <React.Fragment key={campo.id}>
+            <Campo rotulo={`${campo.label}${campo.required ? ' *' : ''}`}>
+              {campo.type === 'select' ? (
+                <select
+                  value={extras[campo.label] || ''}
+                  onChange={(e) =>
+                    setExtras((p) => ({
+                      ...p,
+                      [campo.label]: e.target.value,
+                    }))
+                  }
+                  className={`${classeEntrada} cursor-pointer`}
                 >
-                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                </span>
-              </button>
-              <p
-                className="mt-2 text-[12.5px] font-extrabold"
-                style={{ color: AZUL }}
-              >
-                {foto ? 'Trocar foto' : 'Adicionar foto'}
-              </p>
-              <p className="text-[11px] font-semibold text-[#9AA9B8]">
-                Obrigatória
-              </p>
-            </div>
-
-            <Campo
-              rotulo="Nome completo"
-              icone={<User className="w-4.5 h-4.5 text-[#A5B4C2]" />}
-            >
-              <input
-                type="text"
-                value={nome}
-                onChange={(e) => setNome(e.target.value)}
-                placeholder="Digite seu nome"
-                className={classeEntrada}
-              />
+                  <option value="">Selecione...</option>
+                  {(campo.options || []).map((op) => (
+                    <option key={op} value={op}>
+                      {op}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={
+                    campo.type === 'number'
+                      ? 'number'
+                      : campo.type === 'date'
+                        ? 'date'
+                        : campo.type === 'email'
+                          ? 'email'
+                          : 'text'
+                  }
+                  value={extras[campo.label] || ''}
+                  onChange={(e) =>
+                    setExtras((p) => ({
+                      ...p,
+                      [campo.label]: e.target.value,
+                    }))
+                  }
+                  className={classeEntrada}
+                />
+              )}
             </Campo>
-
-            <Campo
-              rotulo="Telefone (WhatsApp)"
-              icone={
-                <Phone className="w-4.5 h-4.5" style={{ color: LARANJA }} />
-              }
-            >
-              <input
-                type="tel"
-                inputMode="numeric"
-                value={telefone}
-                onChange={(e) => setTelefone(mascararTelefone(e.target.value))}
-                placeholder="(00) 00000-0000"
-                className={classeEntrada}
-              />
-            </Campo>
-          </>
-        ) : (
-          <>
-            {/* CAMPOS QUE O ADM CONFIGUROU PARA ESTE CLIENTE */}
-            {campos.length === 0 ? (
-              <div className="mt-5 rounded-2xl bg-[#F4F7FA] border border-[#E4EBF1] p-4">
-                <p className="text-[12.5px] font-semibold text-[#5A6E85] leading-relaxed">
-                  Tudo certo,{' '}
-                  <strong style={{ color: AZUL }}>{nome.trim()}</strong>.
-                  Confira seu telefone{' '}
-                  <strong style={{ color: AZUL }}>{telefone}</strong> e conclua
-                  o cadastro.
-                </p>
-              </div>
-            ) : (
-              campos.map((campo) => (
-                <React.Fragment key={campo.id}>
-                  <Campo rotulo={`${campo.label}${campo.required ? ' *' : ''}`}>
-                    {campo.type === 'select' ? (
-                      <select
-                        value={extras[campo.label] || ''}
-                        onChange={(e) =>
-                          setExtras((p) => ({
-                            ...p,
-                            [campo.label]: e.target.value,
-                          }))
-                        }
-                        className={`${classeEntrada} cursor-pointer`}
-                      >
-                        <option value="">Selecione...</option>
-                        {(campo.options || []).map((op) => (
-                          <option key={op} value={op}>
-                            {op}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type={
-                          campo.type === 'number'
-                            ? 'number'
-                            : campo.type === 'date'
-                              ? 'date'
-                              : campo.type === 'email'
-                                ? 'email'
-                                : 'text'
-                        }
-                        value={extras[campo.label] || ''}
-                        onChange={(e) =>
-                          setExtras((p) => ({
-                            ...p,
-                            [campo.label]: e.target.value,
-                          }))
-                        }
-                        className={classeEntrada}
-                      />
-                    )}
-                  </Campo>
-                </React.Fragment>
-              ))
-            )}
-          </>
-        )}
+          </React.Fragment>
+        ))}
 
         {erro && (
           <p className="mt-4 text-[11.5px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
@@ -564,8 +492,7 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
         )}
 
         <button
-          type={etapa === 1 ? 'button' : 'submit'}
-          onClick={etapa === 1 ? continuar : undefined}
+          type="submit"
           disabled={salvando || enviandoFoto}
           className="mt-5 w-full py-4 text-white font-extrabold text-[12.5px] uppercase tracking-wider rounded-xl transition-all active:scale-[0.99] disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
           style={{ backgroundColor: AZUL }}
@@ -577,7 +504,7 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
             </>
           ) : (
             <>
-              {etapa === 1 ? 'Continuar cadastro' : 'Concluir cadastro'}
+              Concluir cadastro
               <ArrowRight className="w-4 h-4" />
             </>
           )}
