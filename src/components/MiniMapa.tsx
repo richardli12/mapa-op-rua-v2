@@ -1,8 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 
+/** Um check-in desenhado no mapa: posição, cor do marcador e o que ele é. */
+export interface PontoDoMiniMapa {
+  lat: number;
+  lng: number;
+  /** Cor do marcador — a mesma que o ponto tem no mapa grande. */
+  cor?: string;
+  /** Texto que aparece ao passar o mouse. */
+  titulo?: string;
+  /** 'alerta' para check-in livre, 'pessoa' para check-in de missão. */
+  forma?: 'alerta' | 'pessoa';
+}
+
 interface MiniMapaProps {
   lat: number;
   lng: number;
+  /**
+   * Pontos a desenhar. Com a lista preenchida o mapa mostra todos eles e se
+   * ajusta para caber todos; vazia, mostra só o pino de lat/lng.
+   */
+  pontos?: PontoDoMiniMapa[];
   /** Avisa quando os tiles terminaram de entrar: só aí o passo pode seguir. */
   onReady?: () => void;
   /** Altura fixa, em pixels. Mapa sem altura definida não pede tile nenhum. */
@@ -21,10 +38,15 @@ interface MiniMapaProps {
 export default function MiniMapa({
   lat,
   lng,
+  pontos,
   onReady,
   height = 150,
   className = ''
 }: MiniMapaProps) {
+  // Lista nova a cada render não pode refazer o mapa: o que conta é o conteúdo.
+  const chaveDosPontos = (pontos || [])
+    .map(p => `${p.lat},${p.lng},${p.cor || ''},${p.forma || ''}`)
+    .join('|');
   const boxRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const [erro, setErro] = useState(false);
@@ -64,17 +86,51 @@ export default function MiniMapa({
       });
       tiles.addTo(mapa);
 
-      // Pino azul da marca, desenhado no próprio HTML: não depende do ícone
-      // padrão do Leaflet, que é um arquivo externo e some quando falha.
-      const pino = L.divIcon({
-        className: '',
-        html:
-          '<span style="display:block;width:22px;height:22px;border-radius:50%;' +
-          'background:#0C3556;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span>',
-        iconSize: [22, 22],
-        iconAnchor: [11, 11]
-      });
-      L.marker([lat, lng], { icon: pino }).addTo(mapa);
+      // Marcador desenhado no próprio HTML, com a mesma cara do mapa grande:
+      // não depende do ícone padrão do Leaflet, que é um arquivo externo e
+      // some quando falha.
+      const pino = (cor: string, forma?: 'alerta' | 'pessoa') => {
+        const desenho =
+          forma === 'pessoa'
+            ? '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
+            : forma === 'alerta'
+              ? '<path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>'
+              : '';
+        const svg = desenho
+          ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" ' +
+            'stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" ' +
+            'width="14" height="14">' + desenho + '</svg>'
+          : '';
+        return L.divIcon({
+          className: '',
+          html:
+            '<span style="display:flex;align-items:center;justify-content:center;' +
+            'width:26px;height:26px;border-radius:50%;background:' + cor + ';' +
+            'border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)">' + svg + '</span>',
+          iconSize: [26, 26],
+          iconAnchor: [13, 13]
+        });
+      };
+
+      const lista = pontos && pontos.length > 0 ? pontos : null;
+      if (lista) {
+        lista.forEach(ponto => {
+          const marcador = L.marker([ponto.lat, ponto.lng], {
+            icon: pino(ponto.cor || '#0C3556', ponto.forma)
+          }).addTo(mapa);
+          if (ponto.titulo) {
+            marcador.bindTooltip(ponto.titulo, { direction: 'top', offset: [0, -14] });
+          }
+        });
+        // Todos os check-ins precisam caber no cartão; o limite de zoom evita
+        // que um ponto sozinho encoste no chão da rua e perca a referência.
+        mapa.fitBounds(L.latLngBounds(lista.map(p => [p.lat, p.lng] as [number, number])), {
+          padding: [30, 30],
+          maxZoom: 16
+        });
+      } else {
+        L.marker([lat, lng], { icon: pino('#0C3556') }).addTo(mapa);
+      }
 
       const remedir = () => mapRef.current?.invalidateSize();
       remedir();
@@ -102,7 +158,7 @@ export default function MiniMapa({
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lat, lng]);
+  }, [lat, lng, chaveDosPontos]);
 
   return (
     <div className={`relative ${className}`} style={{ height }}>

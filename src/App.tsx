@@ -7004,14 +7004,53 @@ export default function App() {
             const emCampo = new Set(
               checkInsDeHoje.map((c: any) => c.memberId || c.name).filter(Boolean),
             );
-            const tiposDoCliente = operationTypes.filter(
-              (t) => t.candidateId === inspectedCandidate.id,
-            );
             const centro =
               checkInsDoCliente[0]?.coordinates ||
               (candidateLocation?.lat
                 ? { lat: candidateLocation.lat, lng: candidateLocation.lng }
                 : null);
+
+            // Os check-ins do cliente viram pinos no cartão do mapa, com a
+            // mesma cor e o mesmo desenho que têm no mapa grande: livre sai na
+            // cor da prioridade, o de missão sai no verde de sempre.
+            const pontosDoMapa = checkInsDoCliente
+              .filter((c: any) => c.coordinates?.lat && c.coordinates?.lng)
+              .map((c: any) => {
+                const livre = c.mode === "livre";
+                const nivel = livre ? resolverPrioridade(c.priority) : null;
+                const quando = c.createdAt
+                  ? new Date(c.createdAt).toLocaleString("pt-BR", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "";
+                return {
+                  lat: c.coordinates.lat,
+                  lng: c.coordinates.lng,
+                  cor: livre ? nivel?.color || "#f97316" : "#10b981",
+                  forma: (livre ? "alerta" : "pessoa") as "alerta" | "pessoa",
+                  titulo: [c.name, c.operationTypeLabel, quando]
+                    .filter(Boolean)
+                    .join(" • "),
+                };
+              });
+
+            // A legenda explica o que está desenhado: só entram as cores que
+            // aparecem de fato nos pinos deste cliente.
+            const legendaDoMapa: { chave: string; rotulo: string; cor: string }[] = [];
+            checkInsDoCliente.forEach((c: any) => {
+              const livre = c.mode === "livre";
+              const nivel = livre ? resolverPrioridade(c.priority) : null;
+              const chave = livre ? nivel?.value || "sem-nivel" : "missao";
+              if (legendaDoMapa.some((l) => l.chave === chave)) return;
+              legendaDoMapa.push({
+                chave,
+                rotulo: livre ? nivel?.label || "Sem prioridade" : "Por missão",
+                cor: livre ? nivel?.color || "#f97316" : "#10b981",
+              });
+            });
 
             const abas = [
               { id: "geral" as const, rotulo: "Visão geral" },
@@ -7180,25 +7219,30 @@ export default function App() {
                     </div>
 
                     {centro ? (
-                      <MiniMapa lat={centro.lat} lng={centro.lng} height={260} />
+                      <MiniMapa
+                        lat={centro.lat}
+                        lng={centro.lng}
+                        pontos={pontosDoMapa}
+                        height={260}
+                      />
                     ) : (
                       <div className="h-[260px] bg-slate-50 flex items-center justify-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
                         Sem registros para mostrar
                       </div>
                     )}
 
-                    {tiposDoCliente.length > 0 && (
+                    {legendaDoMapa.length > 0 && (
                       <div className="px-5 py-3 flex flex-wrap gap-2 border-t border-slate-100">
-                        {tiposDoCliente.map((tipo) => (
+                        {legendaDoMapa.map((item) => (
                           <span
-                            key={tipo.id}
+                            key={item.chave}
                             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-50 border border-slate-200 text-slate-600"
                           >
                             <span
                               className="w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: tipo.color }}
+                              style={{ backgroundColor: item.cor }}
                             />
-                            {tipo.label}
+                            {item.rotulo}
                           </span>
                         ))}
                       </div>
