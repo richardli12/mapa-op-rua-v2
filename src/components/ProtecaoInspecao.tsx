@@ -45,13 +45,22 @@ export default function ProtecaoInspecao() {
      * Ali não existe painel de ferramentas para vigiar, e as duas pistas que
      * este bloqueio usa mentem: a barra de endereço do navegador deixa um vão
      * enorme entre a janela e a página, e o toque demorado sobre a tela dispara
-     * o mesmo evento do botão direito. Por isso o celular fica de fora — antes
-     * disso, quem só abria a tela de login pelo iPhone já caía no bloqueio.
+     * o mesmo evento do botão direito. Por isso o celular fica de fora.
+     *
+     * Ter tela sensível ao toque não basta para ser celular: montes de
+     * notebooks têm, e contar os pontos de toque desligava o bloqueio num
+     * computador inteiro — foi o que deixou passar quem inspecionou o sistema
+     * pelo computador. Quem decide agora é o próprio navegador: só é celular
+     * quem se apresenta como tal.
+     *
+     * O iPad recente, e o iPhone com "site para computador" ligado, se
+     * apresentam como Mac; o que os entrega é a tela sensível de vários dedos,
+     * que Mac nenhum tem.
      */
+    const ua = navigator.userAgent || '';
     const aparelhoDeToque =
-      (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) ||
-      (typeof window.matchMedia === 'function' &&
-        window.matchMedia('(pointer: coarse)').matches);
+      /Mobi|Android|iPhone|iPod|Windows Phone|iPad/i.test(ua) ||
+      (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
 
     const teclado = (e: KeyboardEvent) => {
       const tecla = e.key?.toUpperCase();
@@ -108,9 +117,46 @@ export default function ProtecaoInspecao() {
       };
     }
 
+    /**
+     * Sonda do depurador.
+     *
+     * O vão entre a janela e a página só denuncia o painel quando ele está
+     * acoplado: aberto pelo menu do navegador, ou numa janela separada, o
+     * tamanho da página não muda e nada seria percebido. Já o `debugger`
+     * segura a execução enquanto o painel estiver aberto — e é essa demora que
+     * entrega. Duas leituras seguidas para não confundir com um engasgo da
+     * máquina, e nada enquanto a aba está em segundo plano, onde o navegador
+     * atrasa tudo de propósito.
+     */
+    let lentidoes = 0;
+    const sondar = () => {
+      if (document.hidden) {
+        lentidoes = 0;
+        return;
+      }
+      const inicio = performance.now();
+      // eslint-disable-next-line no-debugger
+      debugger;
+      const demora = performance.now() - inicio;
+
+      if (demora > 120) {
+        lentidoes += 1;
+        if (lentidoes >= 2) bloquear('painel');
+        return;
+      }
+      lentidoes = 0;
+      if (motivoRef.current === 'painel') {
+        motivoRef.current = null;
+        setBloqueado(false);
+      }
+    };
+
     window.addEventListener('keydown', teclado, true);
     window.addEventListener('contextmenu', menu, true);
-    const relogio = window.setInterval(vigiar, 700);
+    const relogio = window.setInterval(() => {
+      vigiar();
+      sondar();
+    }, 700);
     vigiar();
 
     return () => {
