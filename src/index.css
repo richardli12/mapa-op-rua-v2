@@ -184,3 +184,21 @@
 }
 
 
+
+/* Campo com fonte menor que 16px faz o iPhone aproximar a tela sozinho quando
+   recebe o toque. O texto continua com o tamanho do desenho: o que muda é só a
+   medida que o navegador lê, no tamanho em que ele se dá por satisfeito. */
+@supports (-webkit-touch-callout: none) {
+  input[type="text"],
+  input[type="tel"],
+  input[type="url"],
+  input[type="email"],
+  input[type="number"],
+  input[type="date"],
+  input[type="password"],
+  input[type="search"],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

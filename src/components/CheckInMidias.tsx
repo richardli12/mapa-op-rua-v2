@@ -20,6 +20,8 @@ export interface MidiaItem {
 
 interface CheckInMidiasProps {
   itens: MidiaItem[];
+  /** Enviar da galeria só existe quando o administrador libera. */
+  permitirGaleria: boolean;
   /** Falso depois de "Confirmar mídias": vira a mensagem fixa da conversa. */
   editavel: boolean;
   avatar: React.ReactNode;
@@ -39,6 +41,7 @@ interface CheckInMidiasProps {
  */
 export default function CheckInMidias({
   itens,
+  permitirGaleria,
   editavel,
   avatar,
   hora,
@@ -197,6 +200,7 @@ export default function CheckInMidias({
                 className="hidden"
                 onChange={e => pegar(videoRef, e, 'video')}
               />
+              {permitirGaleria && (
               <input
                 ref={galeriaRef}
                 type="file"
@@ -212,10 +216,12 @@ export default function CheckInMidias({
                   if (galeriaRef.current) galeriaRef.current.value = '';
                 }}
               />
+              )}
               <input
                 ref={trocaRef}
                 type="file"
                 accept="image/*,video/*"
+                {...(permitirGaleria ? {} : { capture: 'environment' as const })}
                 className="hidden"
                 onChange={e => {
                   const arquivo = e.target.files?.[0];
@@ -242,14 +248,16 @@ export default function CheckInMidias({
                   <Video className="w-3.5 h-3.5" style={{ color: AZUL }} />
                   Vídeo
                 </button>
-                <button
-                  type="button"
-                  onClick={() => galeriaRef.current?.click()}
-                  className="px-3 py-2 bg-white border border-slate-200 text-slate-700 text-[12px] font-bold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
-                >
-                  <Images className="w-3.5 h-3.5" style={{ color: AZUL }} />
-                  Galeria
-                </button>
+                {permitirGaleria && (
+                  <button
+                    type="button"
+                    onClick={() => galeriaRef.current?.click()}
+                    className="px-3 py-2 bg-white border border-slate-200 text-slate-700 text-[12px] font-bold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  >
+                    <Images className="w-3.5 h-3.5" style={{ color: AZUL }} />
+                    Galeria
+                  </button>
+                )}
               </div>
 
               <button
