@@ -1230,33 +1230,93 @@ export const DatabaseService = {
     }
   },
 
+  /**
+   * Login do painel.
+   *
+   * A conferência acontece dentro do banco: o hash da senha nunca sai de lá, e
+   * a comparação é feita com crypt(), que refaz o hash com o mesmo sal. Antes
+   * disso o app comparava "email = ? and password = ?" lendo a tabela com a
+   * chave anônima — que vai no pacote do navegador.
+   */
   async loginAdmin(email: string, password: string) {
     if (!db) {
       return { success: false, error: 'banco de dados não configurado.' };
     }
+    const conta = email.trim().toLowerCase();
     try {
-      const { data, error } = await db
-        .from('auth_users')
-        .select('*')
-        .eq('email', email.trim().toLowerCase())
-        .eq('password', password)
-        .maybeSingle();
+      const { data, error } = await db.rpc('login_admin', {
+        p_email: conta,
+        p_password: password
+      });
 
       if (error) {
-        console.warn('Erro ao consultar a tabela auth_users:', error);
+        // Banco que ainda não recebeu a migração não tem a função: cai na
+        // comparação antiga, para ninguém ficar sem entrar no painel.
+        if (/login_admin|function|schema cache|PGRST202/i.test(error.message || '')) {
+          console.warn('Senhas ainda em texto puro: rode a migração 2026-09-19-senhas-em-hash.');
+          return this.loginAdminTextoPuro(conta, password);
+        }
         throw error;
       }
 
-      if (data) {
-        return { success: true, user: data };
+      if (data?.ok) {
+        return { success: true, user: { email: data.email, name: data.name } };
       }
-
       return { success: false, error: 'Usuário ou senha inválidos.' };
     } catch (err: any) {
       console.error('Erro ao autenticar administrador:', err);
       return { success: false, error: err.message || 'Erro inesperado ao realizar login.' };
     }
   },
+
+  /** Caminho antigo, só enquanto a migração das senhas não roda. */
+  async loginAdminTextoPuro(email: string, password: string) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const { data, error } = await db
+        .from('auth_users')
+        .select('*')
+        .eq('email', email)
+        .eq('password', password)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) return { success: true, user: data };
+      return { success: false, error: 'Usuário ou senha inválidos.' };
+    } catch (err: any) {
+      console.error('Erro ao autenticar administrador:', err);
+      return { success: false, error: err.message || 'Erro inesperado ao realizar login.' };
+    }
+  },
+
+  /** Cadastra ou troca a senha de uma conta do painel. Guarda só o hash. */
+  async definirSenhaAdmin(dados: {
+    email: string;
+    novaSenha: string;
+    senhaAtual?: string;
+    nome?: string;
+  }) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const { data, error } = await db.rpc('set_admin_password', {
+        p_email: dados.email.trim().toLowerCase(),
+        p_new_password: dados.novaSenha,
+        p_old_password: dados.senhaAtual ?? null,
+        p_name: dados.nome ?? null
+      });
+      if (error) throw error;
+      if (data?.ok) return { success: true };
+      const motivos: Record<string, string> = {
+        senha_curta: 'A senha precisa ter pelo menos 8 caracteres.',
+        senha_atual_incorreta: 'A senha atual está incorreta.'
+      };
+      return { success: false, error: motivos[data?.reason] || 'Não foi possível salvar a senha.' };
+    } catch (err: any) {
+      console.error('Erro ao definir senha do administrador:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+
 
   async fetchCandidates() {
     if (!db) return { success: false, data: [] as Candidate[] };

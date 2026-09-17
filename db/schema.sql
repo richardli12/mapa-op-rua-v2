@@ -25,14 +25,17 @@ create extension if not exists pgcrypto;
 -- ----------------------------------------------------------------------------
 -- 1. auth_users - login do painel administrativo
 -- ----------------------------------------------------------------------------
--- A tela de login consulta email + password direto nesta tabela
--- (SupabaseService.loginAdmin). A senha fica em texto puro porque e assim que
--- o app compara hoje; veja a observacao de seguranca no fim do arquivo.
+-- A senha e guardada so em hash bcrypt (pgcrypto), em password_hash. A coluna
+-- password continua existindo, vazia, para nao quebrar instalacao antiga que
+-- ainda a leia. Quem confere a senha e a funcao login_admin, dentro do banco:
+-- o hash nunca sai de la.
 create table if not exists public.auth_users (
-  email      text primary key,
-  password   text not null,
-  name       text,
-  created_at timestamptz default now()
+  email               text primary key,
+  password            text default '',
+  password_hash       text,
+  password_changed_at timestamptz,
+  name                text,
+  created_at          timestamptz default now()
 );
 
 
@@ -330,6 +333,8 @@ create table if not exists public.app_settings (
 -- Num banco novo nada aqui muda coisa alguma; num banco antigo, adiciona as
 -- colunas que entraram depois.
 alter table public.auth_users        add column if not exists name text;
+alter table public.auth_users        add column if not exists password_hash text;
+alter table public.auth_users        add column if not exists password_changed_at timestamptz;
 alter table public.auth_users        add column if not exists created_at timestamptz default now();
 
 alter table public.candidates        add column if not exists estado text;
@@ -432,10 +437,16 @@ create unique index if not exists idx_candidates_external
 -- ----------------------------------------------------------------------------
 -- 12. Usuario inicial do painel
 -- ----------------------------------------------------------------------------
--- TROQUE A SENHA depois do primeiro acesso:
---   update public.auth_users set password = 'sua-senha' where email = 'admin@totalmapa.com';
-insert into public.auth_users (email, password, name)
-values ('admin@totalmapa.com', 'troque-esta-senha', 'Administrador')
+-- A senha entra ja em hash. TROQUE depois do primeiro acesso:
+--   select public.set_admin_password('admin@totalmapa.com', 'sua-senha-nova', 'troque-esta-senha');
+insert into public.auth_users (email, password, password_hash, name, password_changed_at)
+values (
+  'admin@totalmapa.com',
+  '',
+  crypt('troque-esta-senha', gen_salt('bf', 10)),
+  'Administrador',
+  now()
+)
 on conflict (email) do nothing;
 
 
@@ -505,7 +516,7 @@ do $$
 declare t text;
 begin
   foreach t in array array[
-    'auth_users', 'candidates', 'parties', 'time_delta',
+    'candidates', 'parties', 'time_delta',
     'operation_types', 'panfletagem_areas', 'campaign_pins', 'check_ins',
     'check_in_media', 'check_in_notes', 'check_in_operations',
     'member_devices', 'app_settings'
@@ -533,11 +544,14 @@ notify pgrst, 'reload schema';
 -- ============================================================================
 -- Observacao de seguranca
 --
--- auth_users guarda a senha em texto puro e a policy acima deixa a tabela
--- legivel pela chave anon, que vai no bundle do navegador - ou seja, hoje
--- qualquer pessoa com a URL do app consegue ler as senhas do painel. O script
--- foi mantido assim porque e o formato que o login do app compara. Para
--- fechar isso de verdade, o caminho e migrar o login para o Supabase Auth ou
--- guardar so o hash (pgcrypto) e comparar numa funcao RPC - as duas mudancas
--- pedem ajuste no codigo do app tambem.
+-- A senha do painel nao fica mais legivel: auth_users guarda so o hash bcrypt,
+-- a tabela esta fora da policy aberta da chave anon e a conferencia acontece
+-- na funcao login_admin, com security definer. Rode tambem a migracao
+-- db/migrations/2026-09-19-senhas-em-hash.sql num banco que ja existia: ela
+-- converte as senhas antigas e apaga o texto puro.
+--
+-- O resto do sistema continua falando com o banco pela chave anon, que vai no
+-- pacote do navegador: as demais tabelas sao legiveis por quem tiver essa
+-- chave. Fechar isso de vez pede Supabase Auth ou leitura por funcao, tabela
+-- por tabela.
 -- ============================================================================
