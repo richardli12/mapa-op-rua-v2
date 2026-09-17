@@ -17,4 +17,4 @@ alter table public.operation_types add column if not exists position integer def
 update public.operation_types set active = true where active is null;
 
 create index if not exists idx_operation_types_ordem
-  on public.operation_types (candidateid, position);
+  on public.operation_types ("candidateId", position);
