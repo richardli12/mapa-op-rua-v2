@@ -27,8 +27,8 @@ também a constante `SUPABASE_SQL_SETUP` em `src/supabaseClient.ts`.
 | Tabela | Para quê |
 | --- | --- |
 | `auth_users` | Login do painel administrativo |
-| `candidates` | Candidatos (espelho do que vem do Nexus + cadastros locais) |
-| `parties` | Partidos |
+| `candidates` | Clientes do sistema (cadastro manual ou vinculado de base externa) |
+| `parties` | Partidos (usados nos rótulos dos clientes) |
 | `time_delta` | Equipe em campo, identificada pelo WhatsApp |
 | `operation_types` | Tipos de Operação dos pontos, cadastrados pelo usuário |
 | `panfletagem_areas` | Áreas de panfletagem (círculos no mapa) |

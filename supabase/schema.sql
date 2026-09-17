@@ -37,24 +37,51 @@ create table if not exists public.auth_users (
 
 
 -- ----------------------------------------------------------------------------
--- 2. candidates - candidatos
+-- 2. candidates - CLIENTES do sistema
 -- ----------------------------------------------------------------------------
--- O id e text (e nao uuid) de proposito: a lista principal vem da API do
--- Nexus, que manda o id como string. Com text, tanto os ids do Nexus quanto os
--- uuid gerados aqui entram sem erro - e o default continua com formato uuid,
--- que e o que o app espera ao reconhecer um registro ja salvo.
+-- E a entidade principal do painel: areas, pontos e check-ins apontam para um
+-- cliente. O cadastro nasce de dois jeitos, e source diz qual:
+--   'manual'    - o administrador digitou os dados na tela;
+--   'vinculado' - o administrador escolheu alguem de uma base externa e o
+--                 sistema copiou a ficha inteira para ca (foto, contatos,
+--                 partido e o id de origem em external_id).
+--
+-- O id e text (e nao uuid) de proposito: num vinculo, o id de origem vira o id
+-- do cliente aqui, e ele pode chegar em qualquer formato. Com text os dois
+-- casos entram sem erro, e o default continua em formato uuid, que e o que o
+-- app espera ao reconhecer um registro ja salvo.
+--
+-- raw guarda a ficha crua da origem inteira, entao nada se perde mesmo que a
+-- base externa passe a mandar um campo que ainda nao tem coluna aqui.
 create table if not exists public.candidates (
-  id               text primary key default gen_random_uuid()::text,
-  name             text not null,
-  phone            text,
-  instagram_handle text,
-  city             text,
-  estado           text,
-  office           text,
-  image            text,
-  party_id         text,          -- partido do candidato (id em parties)
-  status_active    boolean default true,
-  created_at       timestamptz default now()
+  id                   text primary key default gen_random_uuid()::text,
+  name                 text not null,
+  phone                text,
+  instagram_handle     text,
+  city                 text,
+  estado               text,
+  office               text,
+  image                text,
+  status_active        boolean default true,
+
+  source               text default 'manual',
+  external_id          text,
+
+  email                text,
+  campanha             text,
+  numero_campanha      text,
+  link_grupo_whatsapp  text,
+  favorito             boolean,
+
+  party_id             text,   -- id do partido na origem
+  party_name           text,
+  party_initials       text,
+  party_logo_url       text,
+  party_color          text,
+
+  external_created_at  text,   -- data de cadastro na base de origem
+  raw                  jsonb,  -- ficha crua da origem, inteira
+  created_at           timestamptz default now()
 );
 
 
@@ -187,6 +214,19 @@ alter table public.candidates        add column if not exists estado text;
 alter table public.candidates        add column if not exists party_id text;
 alter table public.candidates        add column if not exists status_active boolean default true;
 alter table public.candidates        add column if not exists created_at timestamptz default now();
+alter table public.candidates        add column if not exists source text default 'manual';
+alter table public.candidates        add column if not exists external_id text;
+alter table public.candidates        add column if not exists email text;
+alter table public.candidates        add column if not exists campanha text;
+alter table public.candidates        add column if not exists numero_campanha text;
+alter table public.candidates        add column if not exists link_grupo_whatsapp text;
+alter table public.candidates        add column if not exists favorito boolean;
+alter table public.candidates        add column if not exists party_name text;
+alter table public.candidates        add column if not exists party_initials text;
+alter table public.candidates        add column if not exists party_logo_url text;
+alter table public.candidates        add column if not exists party_color text;
+alter table public.candidates        add column if not exists external_created_at text;
+alter table public.candidates        add column if not exists raw jsonb;
 
 alter table public.parties           add column if not exists color text;
 alter table public.parties           add column if not exists created_at timestamptz default now();
@@ -249,6 +289,9 @@ create index if not exists idx_pins_tipo            on public.campaign_pins ("ic
 create index if not exists idx_time_delta_candidato on public.time_delta (candidate_id);
 
 create index if not exists idx_candidates_partido   on public.candidates (party_id);
+create index if not exists idx_candidates_origem    on public.candidates (source);
+create unique index if not exists idx_candidates_external
+  on public.candidates (external_id) where external_id is not null;
 
 
 -- ----------------------------------------------------------------------------

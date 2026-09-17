@@ -52,24 +52,51 @@ create table if not exists public.auth_users (
 
 
 -- ----------------------------------------------------------------------------
--- 2. candidates - candidatos
+-- 2. candidates - CLIENTES do sistema
 -- ----------------------------------------------------------------------------
--- O id e text (e nao uuid) de proposito: a lista principal vem da API do
--- Nexus, que manda o id como string. Com text, tanto os ids do Nexus quanto os
--- uuid gerados aqui entram sem erro - e o default continua com formato uuid,
--- que e o que o app espera ao reconhecer um registro ja salvo.
+-- E a entidade principal do painel: areas, pontos e check-ins apontam para um
+-- cliente. O cadastro nasce de dois jeitos, e source diz qual:
+--   'manual'    - o administrador digitou os dados na tela;
+--   'vinculado' - o administrador escolheu alguem de uma base externa e o
+--                 sistema copiou a ficha inteira para ca (foto, contatos,
+--                 partido e o id de origem em external_id).
+--
+-- O id e text (e nao uuid) de proposito: num vinculo, o id de origem vira o id
+-- do cliente aqui, e ele pode chegar em qualquer formato. Com text os dois
+-- casos entram sem erro, e o default continua em formato uuid, que e o que o
+-- app espera ao reconhecer um registro ja salvo.
+--
+-- raw guarda a ficha crua da origem inteira, entao nada se perde mesmo que a
+-- base externa passe a mandar um campo que ainda nao tem coluna aqui.
 create table if not exists public.candidates (
-  id               text primary key default gen_random_uuid()::text,
-  name             text not null,
-  phone            text,
-  instagram_handle text,
-  city             text,
-  estado           text,
-  office           text,
-  image            text,
-  party_id         text,          -- partido do candidato (id em parties)
-  status_active    boolean default true,
-  created_at       timestamptz default now()
+  id                   text primary key default gen_random_uuid()::text,
+  name                 text not null,
+  phone                text,
+  instagram_handle     text,
+  city                 text,
+  estado               text,
+  office               text,
+  image                text,
+  status_active        boolean default true,
+
+  source               text default 'manual',
+  external_id          text,
+
+  email                text,
+  campanha             text,
+  numero_campanha      text,
+  link_grupo_whatsapp  text,
+  favorito             boolean,
+
+  party_id             text,   -- id do partido na origem
+  party_name           text,
+  party_initials       text,
+  party_logo_url       text,
+  party_color          text,
+
+  external_created_at  text,   -- data de cadastro na base de origem
+  raw                  jsonb,  -- ficha crua da origem, inteira
+  created_at           timestamptz default now()
 );
 
 
@@ -202,6 +229,19 @@ alter table public.candidates        add column if not exists estado text;
 alter table public.candidates        add column if not exists party_id text;
 alter table public.candidates        add column if not exists status_active boolean default true;
 alter table public.candidates        add column if not exists created_at timestamptz default now();
+alter table public.candidates        add column if not exists source text default 'manual';
+alter table public.candidates        add column if not exists external_id text;
+alter table public.candidates        add column if not exists email text;
+alter table public.candidates        add column if not exists campanha text;
+alter table public.candidates        add column if not exists numero_campanha text;
+alter table public.candidates        add column if not exists link_grupo_whatsapp text;
+alter table public.candidates        add column if not exists favorito boolean;
+alter table public.candidates        add column if not exists party_name text;
+alter table public.candidates        add column if not exists party_initials text;
+alter table public.candidates        add column if not exists party_logo_url text;
+alter table public.candidates        add column if not exists party_color text;
+alter table public.candidates        add column if not exists external_created_at text;
+alter table public.candidates        add column if not exists raw jsonb;
 
 alter table public.parties           add column if not exists color text;
 alter table public.parties           add column if not exists created_at timestamptz default now();
@@ -264,6 +304,9 @@ create index if not exists idx_pins_tipo            on public.campaign_pins ("ic
 create index if not exists idx_time_delta_candidato on public.time_delta (candidate_id);
 
 create index if not exists idx_candidates_partido   on public.candidates (party_id);
+create index if not exists idx_candidates_origem    on public.candidates (source);
+create unique index if not exists idx_candidates_external
+  on public.candidates (external_id) where external_id is not null;
 
 
 -- ----------------------------------------------------------------------------
@@ -492,6 +535,69 @@ function prepareUpsertPayload(obj: any, table: string): any {
     }
   }
   return payload;
+}
+
+/**
+ * Linha da tabela candidates -> cliente do app.
+ *
+ * As colunas seguem o padrao snake_case do banco e o app usa camelCase, entao
+ * a traducao acontece aqui, num lugar so.
+ */
+function rowToClient(row: any): Candidate {
+  if (!row) return row;
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone || '',
+    instagram_handle: row.instagram_handle || '',
+    city: row.city || '',
+    estado: row.estado || undefined,
+    office: row.office || '',
+    image: row.image || undefined,
+    status_active: row.status_active !== false,
+    partyId: row.party_id || undefined,
+    source: row.source === 'vinculado' ? 'vinculado' : 'manual',
+    externalId: row.external_id || undefined,
+    email: row.email || undefined,
+    campanha: row.campanha || undefined,
+    numeroCampanha: row.numero_campanha || undefined,
+    linkGrupoWhatsapp: row.link_grupo_whatsapp || undefined,
+    favorito: typeof row.favorito === 'boolean' ? row.favorito : undefined,
+    partyName: row.party_name || undefined,
+    partyInitials: row.party_initials || undefined,
+    partyLogoUrl: row.party_logo_url || undefined,
+    partyColor: row.party_color || undefined,
+    externalCreatedAt: row.external_created_at || undefined,
+    raw: row.raw || undefined
+  };
+}
+
+/** Cliente do app -> linha da tabela candidates. */
+function clientToRow(client: Omit<Candidate, 'id'> & { id?: string }): any {
+  return {
+    name: client.name,
+    phone: client.phone || null,
+    instagram_handle: client.instagram_handle || null,
+    city: client.city || null,
+    estado: client.estado || null,
+    office: client.office || null,
+    image: client.image || null,
+    status_active: client.status_active !== false,
+    party_id: client.partyId || null,
+    source: client.source === 'vinculado' ? 'vinculado' : 'manual',
+    external_id: client.externalId || null,
+    email: client.email || null,
+    campanha: client.campanha || null,
+    numero_campanha: client.numeroCampanha || null,
+    link_grupo_whatsapp: client.linkGrupoWhatsapp || null,
+    favorito: typeof client.favorito === 'boolean' ? client.favorito : null,
+    party_name: client.partyName || null,
+    party_initials: client.partyInitials || null,
+    party_logo_url: client.partyLogoUrl || null,
+    party_color: client.partyColor || null,
+    external_created_at: client.externalCreatedAt || null,
+    raw: client.raw || null
+  };
 }
 
 export const SupabaseService = {
@@ -865,32 +971,37 @@ export const SupabaseService = {
   },
 
   async fetchCandidates() {
-    if (!supabase) return { success: false, data: [] };
+    if (!supabase) return { success: false, data: [] as Candidate[] };
     try {
       const { data, error } = await supabase
         .from('candidates')
         .select('*');
       if (error) throw error;
-      return { success: true, data: data as Candidate[] };
+      const rows = (data || []).map(rowToClient);
+      return { success: true, data: rows };
     } catch (err: any) {
-      console.error('Erro ao buscar candidatos no Supabase:', err);
-      return { success: false, error: err.message, data: [] };
+      console.error('Erro ao buscar clientes no Supabase:', err);
+      return { success: false, error: err.message, data: [] as Candidate[] };
     }
   },
 
+  /** Mesmo dado de fetchCandidates, com o nome que a tela usa. */
+  async fetchClients() {
+    return SupabaseService.fetchCandidates();
+  },
+
+  /**
+   * Grava um cliente com tudo o que se sabe sobre ele.
+   *
+   * Num vínculo, o id de origem vira o id do cliente aqui: é ele que as áreas,
+   * os pontos e os check-ins ja usam para apontar para a pessoa, então manter o
+   * mesmo id preserva os vínculos e evita registro duplicado a cada importação.
+   */
   async upsertCandidate(cand: Omit<Candidate, 'id'> & { id?: string }) {
     if (!supabase) return { success: false, error: 'Supabase não configurado.' };
     try {
-      const payload = {
-        name: cand.name,
-        phone: cand.phone,
-        instagram_handle: cand.instagram_handle,
-        city: cand.city,
-        estado: cand.estado,
-        office: cand.office,
-        image: cand.image
-      } as any;
-      
+      const payload = clientToRow(cand);
+
       const isNew = !cand.id || cand.id.startsWith('temp-') || cand.id.length < 10;
       if (!isNew && cand.id) {
         payload.id = cand.id;
@@ -902,11 +1013,20 @@ export const SupabaseService = {
         .select();
 
       if (error) throw error;
-      return { success: true, data: data?.[0] };
+      return { success: true, data: data?.[0] ? rowToClient(data[0]) : undefined };
     } catch (err: any) {
-      console.error('Erro ao salvar candidato no Supabase:', err);
+      console.error('Erro ao salvar cliente no Supabase:', err);
       return { success: false, error: err.message };
     }
+  },
+
+  /** Mesmo upsert, com o nome que a tela usa. */
+  async upsertClient(client: Omit<Candidate, 'id'> & { id?: string }) {
+    return SupabaseService.upsertCandidate(client);
+  },
+
+  async deleteClient(id: string) {
+    return SupabaseService.deleteCandidate(id);
   },
 
   async deleteCandidate(id: string) {
