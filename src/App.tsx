@@ -8336,7 +8336,37 @@ export default function App() {
 
         <div className="w-8 h-[1px] bg-slate-800/50" />
 
-        {/* Button 3: Compartilhar Check-in - Green */}
+        {/* Button 3: Régua - mede distância no mapa */}
+        <button
+          onClick={() => {
+            const ligando = !reguaLigada;
+            setReguaLigada(ligando);
+            if (!ligando) {
+              limparReguaEmAndamento();
+              return;
+            }
+            // Abre o painel na régua: é lá que ficam cor, nome e as medições
+            // salvas. Ligar a ferramenta sem mostrar os controles seria deixar
+            // a pessoa medindo às cegas.
+            setActiveTab("regua");
+            setIsSidebarOpen(true);
+          }}
+          className={`group w-10 h-10 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
+            reguaLigada
+              ? "bg-[#F58220] border-orange-600 ring-2 ring-orange-400/40"
+              : "bg-slate-700 hover:bg-slate-600 border-slate-600"
+          }`}
+          title={reguaLigada ? "Desligar a régua" : "Medir distância (régua)"}
+        >
+          <Ruler className="w-5 h-5" />
+          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
+            {reguaLigada ? "Régua ligada" : "Régua"}
+          </span>
+        </button>
+
+        <div className="w-8 h-[1px] bg-slate-800/50" />
+
+        {/* Button 4: Compartilhar Check-in - Green */}
         <button
           onClick={() => setIsShareModalOpen(true)}
           className="group w-10 h-10 bg-emerald-600 hover:bg-emerald-500 border border-emerald-700 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative"
