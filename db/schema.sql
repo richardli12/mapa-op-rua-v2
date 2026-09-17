@@ -214,6 +214,68 @@ create table if not exists public.check_ins (
 
 
 -- ----------------------------------------------------------------------------
+-- 8.1 check_in_media - fotos e videos do check-in
+-- ----------------------------------------------------------------------------
+-- storage_path = caminho dentro do bucket 'imagens'. E por ele que o arquivo e
+-- apagado quando a midia sai do check-in; sem ele o arquivo ficaria orfao.
+create table if not exists public.check_in_media (
+  id            uuid primary key default gen_random_uuid(),
+  check_in_id   text not null references public.check_ins (id) on delete cascade,
+  kind          text not null check (kind in ('image', 'video')),
+  url           text not null,
+  storage_path  text,
+  mime_type     text,
+  size_bytes    bigint,
+  position      integer not null default 0,
+  created_at    timestamptz not null default now()
+);
+
+create index if not exists idx_check_in_media_checkin
+  on public.check_in_media (check_in_id, position);
+
+
+-- ----------------------------------------------------------------------------
+-- 8.2 check_in_notes - observacoes digitadas e audios gravados
+-- ----------------------------------------------------------------------------
+create table if not exists public.check_in_notes (
+  id               uuid primary key default gen_random_uuid(),
+  check_in_id      text not null references public.check_ins (id) on delete cascade,
+  kind             text not null check (kind in ('texto', 'audio')),
+  content          text,
+  url              text,
+  storage_path     text,
+  duration_seconds numeric,
+  position         integer not null default 0,
+  created_at       timestamptz not null default now(),
+  constraint check_in_notes_conteudo check (
+    (kind = 'texto' and content is not null and length(btrim(content)) > 0)
+    or (kind = 'audio' and url is not null)
+  )
+);
+
+create index if not exists idx_check_in_notes_checkin
+  on public.check_in_notes (check_in_id, position);
+
+
+-- ----------------------------------------------------------------------------
+-- 8.3 check_in_operations - um check-in pode ter varios tipos de operacao
+-- ----------------------------------------------------------------------------
+create table if not exists public.check_in_operations (
+  id                   uuid primary key default gen_random_uuid(),
+  check_in_id          text not null references public.check_ins (id) on delete cascade,
+  operation_type_id    text not null,
+  operation_type_label text,
+  position             integer not null default 0,
+  created_at           timestamptz not null default now(),
+  unique (check_in_id, operation_type_id)
+);
+
+create index if not exists idx_check_in_operations_checkin
+  on public.check_in_operations (check_in_id, position);
+create index if not exists idx_check_in_operations_tipo
+  on public.check_in_operations (operation_type_id);
+
+-- ----------------------------------------------------------------------------
 -- 9. Migracoes - completa bancos que ja existiam antes
 -- ----------------------------------------------------------------------------
 -- Num banco novo nada aqui muda coisa alguma; num banco antigo, adiciona as
@@ -264,6 +326,9 @@ alter table public.check_ins         add column if not exists "missionTitle" tex
 alter table public.check_ins         add column if not exists "operationTypeId" text;
 alter table public.check_ins         add column if not exists "operationTypeLabel" text;
 alter table public.check_ins         add column if not exists accuracy numeric;
+alter table public.check_ins         add column if not exists status text default 'confirmado';
+alter table public.check_ins         add column if not exists "confirmedAt" timestamptz;
+alter table public.check_ins         add column if not exists "updatedAt" timestamptz default now();
 alter table public.check_ins         add column if not exists "memberId" text;
 alter table public.check_ins         add column if not exists "memberPhoto" text;
 
@@ -392,7 +457,8 @@ declare t text;
 begin
   foreach t in array array[
     'auth_users', 'candidates', 'parties', 'time_delta',
-    'operation_types', 'panfletagem_areas', 'campaign_pins', 'check_ins'
+    'operation_types', 'panfletagem_areas', 'campaign_pins', 'check_ins',
+    'check_in_media', 'check_in_notes', 'check_in_operations'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);

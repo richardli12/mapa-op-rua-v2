@@ -1,5 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, Party, OperationType } from './types';
+import {
+  PanfletagemArea,
+  CampaignPin,
+  CheckIn,
+  CheckInMedia,
+  CheckInNote,
+  CheckInOperationRef,
+  Candidate,
+  Party,
+  OperationType
+} from './types';
 
 const databaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || '';
 const databaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
@@ -113,7 +123,9 @@ function prepareUpsertPayload(obj: any, table: string): any {
     userLatitude: 'userlatitude',
     userLongitude: 'userlongitude',
     missionId: 'missionid',
-    missionTitle: 'missiontitle'
+    missionTitle: 'missiontitle',
+    confirmedAt: 'confirmedat',
+    updatedAt: 'updatedat'
   };
 
   for (const [camelKey, lowerKey] of Object.entries(mappings)) {
@@ -360,7 +372,11 @@ export const DatabaseService = {
   async upsertCheckIn(checkIn: CheckIn) {
     if (!db) return { success: false };
     try {
-      const payload = prepareUpsertPayload(checkIn, 'check_ins');
+      const agora = new Date().toISOString();
+      const payload = prepareUpsertPayload(
+        { ...checkIn, status: 'confirmado', confirmedAt: agora, updatedAt: agora },
+        'check_ins'
+      );
       const { error } = await db
         .from('check_ins')
         .upsert(payload);
@@ -716,6 +732,234 @@ export const DatabaseService = {
         url: null,
         error: err.message || 'Falha no upload do arquivo.'
       };
+    }
+  },
+
+  /**
+   * Envia um arquivo do check-in para o Storage acompanhando o progresso.
+   *
+   * O cliente do banco resolve o upload numa promessa só, sem avisar o quanto
+   * já subiu — e um vídeo de campo leva tempo demais para a tela ficar muda.
+   * Por isso o envio é feito no XMLHttpRequest, que reporta byte a byte.
+   *
+   * Devolve também o caminho dentro do bucket: é por ele que o arquivo é
+   * apagado quando a mídia sai do check-in.
+   */
+  uploadArquivoCheckIn(
+    file: File,
+    pasta: 'midias' | 'audios',
+    onProgress?: (porcento: number) => void
+  ): Promise<{ success: boolean; url: string | null; path: string | null; error?: string }> {
+    if (!db) {
+      return Promise.resolve({
+        success: false,
+        url: null,
+        path: null,
+        error: 'banco de dados não configurado.'
+      });
+    }
+
+    const tipo = file.type || '';
+    const extensaoDoNome = file.name.includes('.') ? file.name.split('.').pop() : '';
+    // A câmera e o gravador de alguns aparelhos mandam o arquivo sem extensão.
+    const padrao = tipo.startsWith('video/') ? 'mp4' : tipo.startsWith('audio/') ? 'webm' : 'jpg';
+    const extensao = (extensaoDoNome || padrao).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const nome = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extensao}`;
+    const caminho = `check_ins/${pasta}/${nome}`;
+
+    return new Promise(resolve => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${databaseUrl}/storage/v1/object/imagens/${caminho}`, true);
+      xhr.setRequestHeader('apikey', databaseAnonKey);
+      xhr.setRequestHeader('authorization', `Bearer ${databaseAnonKey}`);
+      xhr.setRequestHeader('x-upsert', 'false');
+      xhr.setRequestHeader('cache-control', '3600');
+      if (tipo) xhr.setRequestHeader('content-type', tipo);
+
+      xhr.upload.onprogress = evento => {
+        if (evento.lengthComputable) {
+          onProgress?.(Math.round((evento.loaded / evento.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          onProgress?.(100);
+          resolve({
+            success: true,
+            url: `${databaseUrl}/storage/v1/object/public/imagens/${caminho}`,
+            path: caminho
+          });
+          return;
+        }
+        let mensagem = `falha no envio (${xhr.status}).`;
+        try {
+          mensagem = JSON.parse(xhr.responseText)?.message || mensagem;
+        } catch {
+          /* resposta sem corpo legível */
+        }
+        console.error('Erro de upload no banco de dados Storage:', xhr.responseText);
+        resolve({ success: false, url: null, path: null, error: mensagem });
+      };
+
+      xhr.onerror = () =>
+        resolve({ success: false, url: null, path: null, error: 'sem conexão para enviar o arquivo.' });
+      xhr.onabort = () =>
+        resolve({ success: false, url: null, path: null, error: 'envio cancelado.' });
+
+      xhr.send(file);
+    });
+  },
+
+  /** Apaga do Storage os arquivos que saíram do check-in. */
+  async removerArquivosStorage(caminhos: string[]) {
+    const lista = caminhos.filter(Boolean);
+    if (!db || lista.length === 0) return { success: true };
+    try {
+      const { error } = await db.storage.from('imagens').remove(lista);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao apagar arquivo no banco de dados Storage:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Grava o check-in ainda como rascunho.
+   *
+   * O rascunho existe desde a confirmação do local para que cada mídia enviada
+   * já tenha a que se ligar: assim o arquivo no Storage nunca fica solto, sem
+   * linha no banco que diga de quem ele é.
+   */
+  async salvarRascunhoCheckIn(checkIn: CheckIn) {
+    if (!db) return { success: false };
+    try {
+      const payload = prepareUpsertPayload(
+        { ...checkIn, status: 'rascunho', updatedAt: new Date().toISOString() },
+        'check_ins'
+      );
+      const { error } = await db.from('check_ins').upsert(payload);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao salvar rascunho do check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Liga uma mídia recém-enviada ao rascunho do check-in. */
+  async registrarMidiaCheckIn(
+    checkInId: string,
+    midia: CheckInMedia & { id: string; position: number }
+  ) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('check_in_media').upsert({
+        id: midia.id,
+        check_in_id: checkInId,
+        kind: midia.type,
+        url: midia.url,
+        storage_path: midia.storagePath || null,
+        mime_type: midia.mimeType || null,
+        size_bytes: midia.sizeBytes || null,
+        position: midia.position
+      });
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao registrar mídia do check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Tira a mídia do check-in. O arquivo no Storage é apagado à parte. */
+  async removerMidiaCheckIn(id: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('check_in_media').delete().eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao remover mídia do check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Regrava as observações do check-in na ordem em que aparecem na conversa. */
+  async salvarObservacoesCheckIn(checkInId: string, notas: CheckInNote[]) {
+    if (!db) return { success: false };
+    try {
+      const { error: erroLimpeza } = await db
+        .from('check_in_notes')
+        .delete()
+        .eq('check_in_id', checkInId);
+      if (erroLimpeza) throw erroLimpeza;
+
+      if (notas.length === 0) return { success: true };
+
+      const { error } = await db.from('check_in_notes').insert(
+        notas.map((nota, i) => ({
+          id: nota.id,
+          check_in_id: checkInId,
+          kind: nota.kind,
+          content: nota.kind === 'texto' ? nota.content : null,
+          url: nota.url || null,
+          storage_path: nota.storagePath || null,
+          duration_seconds: nota.durationSeconds ?? null,
+          position: i
+        }))
+      );
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao salvar observações do check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Regrava os tipos de operação escolhidos no check-in. */
+  async salvarOperacoesCheckIn(checkInId: string, operacoes: CheckInOperationRef[]) {
+    if (!db) return { success: false };
+    try {
+      const { error: erroLimpeza } = await db
+        .from('check_in_operations')
+        .delete()
+        .eq('check_in_id', checkInId);
+      if (erroLimpeza) throw erroLimpeza;
+
+      if (operacoes.length === 0) return { success: true };
+
+      const { error } = await db.from('check_in_operations').insert(
+        operacoes.map((op, i) => ({
+          check_in_id: checkInId,
+          operation_type_id: op.operationTypeId,
+          operation_type_label: op.operationTypeLabel,
+          position: i
+        }))
+      );
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao salvar operações do check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Apaga o rascunho abandonado — as linhas filhas caem junto, por cascata. */
+  async descartarRascunhoCheckIn(id: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('check_ins')
+        .delete()
+        .eq('id', id)
+        .eq('status', 'rascunho');
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao descartar rascunho do check-in:', err);
+      return { success: false, error: err.message };
     }
   },
 

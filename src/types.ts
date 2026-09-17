@@ -89,6 +89,26 @@ export type CheckInMediaType = 'image' | 'video';
 export interface CheckInMedia {
   url: string;
   type: CheckInMediaType;
+  /** Caminho dentro do bucket: e por ele que o arquivo e apagado do Storage. */
+  storagePath?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+}
+
+/** Observacao do check-in: um texto digitado ou um audio gravado em campo. */
+export interface CheckInNote {
+  id: string;
+  kind: 'texto' | 'audio';
+  content?: string;
+  url?: string;
+  storagePath?: string;
+  durationSeconds?: number;
+}
+
+/** Tipo de operacao escolhido no check-in, com o rotulo do dia congelado. */
+export interface CheckInOperationRef {
+  operationTypeId: string;
+  operationTypeLabel: string;
 }
 
 export const CHECKIN_MAX_MEDIA = 6;
@@ -113,6 +133,9 @@ export interface CheckIn {
   priority?: CheckInPriority; // Grau de prioridade/impacto (check-in livre)
   missionId?: string; // Área ou ponto vinculado quando o check-in é de missão
   missionTitle?: string; // Título da missão no momento do check-in
+  status?: 'rascunho' | 'confirmado'; // rascunho enquanto o fluxo não terminou
+  notes?: CheckInNote[]; // observações digitadas e áudios gravados
+  operations?: CheckInOperationRef[]; // todos os tipos de operação escolhidos
 }
 
 export interface BairroData {
