@@ -666,6 +666,32 @@ export const DatabaseService = {
   },
 
   /** Leitura publica do convite, pela pessoa que abriu o QR. */
+  /**
+   * Abre o convite prendendo-o ao aparelho que chegou primeiro.
+   *
+   * Banco que ainda não recebeu a migração da leitura única não tem a função:
+   * nesse caso a leitura antiga responde, e o convite volta a valer para
+   * qualquer aparelho até alguém concluir o cadastro.
+   */
+  async abrirConviteEquipe(token: string, deviceIdHash: string) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const { data, error } = await db.rpc('open_team_invite', {
+        p_token: token,
+        p_device: deviceIdHash
+      });
+      if (error) throw error;
+      return { success: true, data };
+    } catch (err: any) {
+      if (/open_team_invite|function|schema cache|PGRST202/i.test(err?.message || '')) {
+        console.warn('Leitura única indisponível: rode a migração 2026-09-19-qrcode-uma-leitura.');
+        return this.getTeamInvite(token);
+      }
+      console.error('Erro ao abrir convite:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
   async getTeamInvite(token: string) {
     if (!db) return { success: false, error: 'banco de dados não configurado.' };
     try {
@@ -690,9 +716,28 @@ export const DatabaseService = {
     whatsapp: string;
     image: string;
     extra: any;
+    /** Aparelho que abriu o convite: só ele conclui o cadastro. */
+    deviceIdHash?: string;
   }) {
     if (!db) return { success: false, error: 'banco de dados não configurado.' };
     try {
+      const comAparelho = await db.rpc('claim_team_invite_device', {
+        p_token: payload.token,
+        p_name: payload.name,
+        p_whatsapp: payload.whatsapp,
+        p_image: payload.image,
+        p_extra: payload.extra || {},
+        p_device: payload.deviceIdHash || ''
+      });
+      if (!comAparelho.error) return { success: true, data: comAparelho.data };
+
+      // Banco sem a migração da leitura única: segue pela função antiga.
+      if (!/claim_team_invite_device|function|schema cache|PGRST202/i.test(
+        comAparelho.error.message || ''
+      )) {
+        throw comAparelho.error;
+      }
+
       const { data, error } = await db.rpc('claim_team_invite', {
         p_token: payload.token,
         p_name: payload.name,

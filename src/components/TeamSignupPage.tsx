@@ -156,10 +156,21 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
   /** Quanto falta para o convite expirar, em segundos. */
   const [restante, setRestante] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** Aparelho que abriu este convite. Só ele conclui o cadastro. */
+  const aparelhoRef = useRef('');
 
   useEffect(() => {
     (async () => {
-      const res = await DatabaseService.getTeamInvite(token);
+      // O aparelho é identificado antes de pedir o convite: é ele que prende o
+      // QR Code a uma leitura só.
+      let aparelho = '';
+      try {
+        aparelho = (await lerDispositivo()).deviceIdHash;
+        aparelhoRef.current = aparelho;
+      } catch {
+        /* sem identificação, o banco recusa a abertura */
+      }
+      const res = await DatabaseService.abrirConviteEquipe(token, aparelho);
       if (!res.success) {
         setErro('Não foi possível validar este convite.');
       } else if (!res.data?.valid) {
@@ -264,6 +275,7 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
       whatsapp: telefone,
       image: foto,
       extra: extras,
+      deviceIdHash: aparelhoRef.current,
     });
     setSalvando(false);
 
