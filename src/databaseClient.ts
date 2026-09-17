@@ -9,7 +9,8 @@ import {
   Candidate,
   Party,
   OperationType,
-  PriorityLevel
+  PriorityLevel,
+  MapMeasurement
 } from './types';
 import type { FichaDispositivo } from './services/dispositivo';
 
@@ -1283,6 +1284,66 @@ export const DatabaseService = {
       return { success: true };
     } catch (err: any) {
       console.error('Erro ao remover nível de prioridade:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  // ------------------------------------------------------- medicoes da regua
+  /** Medições salvas de um cliente, na ordem em que foram criadas. */
+  async fetchMeasurements(candidateId?: string) {
+    if (!db) return { success: false, data: [] as MapMeasurement[] };
+    try {
+      let query = db.from('map_measurements').select('*').order('created_at', { ascending: true });
+      if (candidateId) query = query.eq('candidate_id', candidateId);
+      const { data, error } = await query;
+      if (error) throw error;
+      return {
+        success: true,
+        data: (data || []).map(linha => ({
+          id: linha.id,
+          candidateId: linha.candidate_id || '',
+          name: linha.name,
+          color: linha.color,
+          points: linha.points || [],
+          totalMeters: Number(linha.total_meters) || 0,
+          createdAt: linha.created_at
+        })) as MapMeasurement[]
+      };
+    } catch (err: any) {
+      // Banco sem a tabela não pode derrubar o mapa: a régua segue sem histórico.
+      console.warn('Erro ao buscar medições do mapa:', err);
+      return { success: false, data: [] as MapMeasurement[], error: err.message };
+    }
+  },
+
+  async upsertMeasurement(medicao: MapMeasurement) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('map_measurements').upsert({
+        id: medicao.id,
+        candidate_id: medicao.candidateId || null,
+        name: medicao.name,
+        color: medicao.color,
+        points: medicao.points,
+        total_meters: medicao.totalMeters,
+        updated_at: new Date().toISOString()
+      });
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao salvar medição do mapa:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  async deleteMeasurement(id: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('map_measurements').delete().eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao remover medição do mapa:', err);
       return { success: false, error: err.message };
     }
   },

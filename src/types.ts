@@ -90,6 +90,17 @@ export function getCheckInPriority(value?: string) {
  * fixos no código, entram no banco com os mesmos ids — por isso registro
  * antigo continua sendo reconhecido.
  */
+/** Medicao feita com a regua do mapa, guardada para a equipe toda ver. */
+export interface MapMeasurement {
+  id: string;
+  candidateId?: string;
+  name: string;
+  color: string;
+  points: { lat: number; lng: number }[];
+  totalMeters: number;
+  createdAt?: string;
+}
+
 export interface PriorityLevel {
   id: string;
   label: string;
