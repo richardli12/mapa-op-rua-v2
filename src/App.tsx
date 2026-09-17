@@ -6697,7 +6697,7 @@ export default function App() {
                 </div>
 
                 {/* METRICS ROW */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
                     <span className="text-slate-400 font-bold text-[9.5px] uppercase tracking-wider">
                       Integrantes da Equipe
@@ -6711,42 +6711,6 @@ export default function App() {
                     </h3>
                     <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
                       Multiplicadores do cliente
-                    </p>
-                  </div>
-
-                  <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
-                    <span className="text-slate-400 font-bold text-[9.5px] uppercase tracking-wider">
-                      Áreas de Panfletagem
-                    </span>
-                    <h3 className="text-2xl font-black text-emerald-600 mt-1">
-                      {
-                        areas.filter(
-                          (a) =>
-                            a.candidateId === inspectedCandidate.id ||
-                            a.candidate_id === inspectedCandidate.id,
-                        ).length
-                      }
-                    </h3>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                      Zonas de panfletagem
-                    </p>
-                  </div>
-
-                  <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
-                    <span className="text-slate-400 font-bold text-[9.5px] uppercase tracking-wider">
-                      Pontos de Campanha
-                    </span>
-                    <h3 className="text-2xl font-black text-sky-600 mt-1">
-                      {
-                        pins.filter(
-                          (p) =>
-                            p.candidateId === inspectedCandidate.id ||
-                            p.candidate_id === inspectedCandidate.id,
-                        ).length
-                      }
-                    </h3>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                      Marcadores e Pins ativos
                     </p>
                   </div>
 
