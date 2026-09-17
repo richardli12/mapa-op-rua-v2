@@ -90,6 +90,68 @@ export function getCheckInPriority(value?: string) {
 }
 
 /**
+ * Escola do município, vinda do Censo Escolar.
+ *
+ * É uma camada pública do mapa: não pertence a nenhum cliente, e sim ao
+ * município. As colunas de etapa (`matMedio`, `matProfissional`, ...) se
+ * sobrepõem entre si — no ensino médio integrado o mesmo aluno conta em duas —
+ * e `matEspecial` é um recorte transversal. Nunca some essas colunas.
+ */
+export interface Escola {
+  codigoInep: string;
+  nome: string;
+  endereco?: string;
+  latitude: number;
+  longitude: number;
+  municipio?: string;
+  uf?: string;
+  dependencia?: string;
+  situacao?: string;
+  restricao?: string;
+  telefone?: string;
+  etapas?: string[];
+  matriculas?: number | null;
+  matFeminino?: number | null;
+  matMasculino?: number | null;
+  matRacaNaoDeclarada?: number | null;
+  matBranca?: number | null;
+  matPreta?: number | null;
+  matParda?: number | null;
+  matAmarela?: number | null;
+  matIndigena?: number | null;
+  mat0a3?: number | null;
+  mat4a5?: number | null;
+  mat6a10?: number | null;
+  mat11a14?: number | null;
+  mat15a17?: number | null;
+  mat18Mais?: number | null;
+  matInfantil?: number | null;
+  matCreche?: number | null;
+  matPreEscola?: number | null;
+  matFundamental?: number | null;
+  matFundIniciais?: number | null;
+  matFundFinais?: number | null;
+  matMedio?: number | null;
+  matProfissional?: number | null;
+  matEja?: number | null;
+  matEjaFundamental?: number | null;
+  matEjaMedio?: number | null;
+  matEspecial?: number | null;
+}
+
+/** Cor de cada rede de ensino, no mapa e nas listas. */
+export const CORES_DEPENDENCIA: Record<string, string> = {
+  Municipal: '#0ea5e9',
+  Estadual: '#8b5cf6',
+  Federal: '#059669',
+  Privada: '#f59e0b'
+};
+
+export function corDaDependencia(dependencia?: string) {
+  return CORES_DEPENDENCIA[dependencia || ''] || '#64748b';
+}
+
+/**
  * Nível de prioridade criado pelo administrador.
  *
  * O `id` é o que fica gravado no check-in. Os quatro níveis antigos, que eram

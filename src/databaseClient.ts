@@ -9,7 +9,8 @@ import {
   Candidate,
   Party,
   OperationType,
-  PriorityLevel
+  PriorityLevel,
+  Escola
 } from './types';
 import type { FichaDispositivo } from './services/dispositivo';
 
@@ -1299,6 +1300,72 @@ export const DatabaseService = {
    */
   // ------------------------------------------------------ niveis de prioridade
   /** Níveis de prioridade cadastrados pelo administrador, na ordem da lista. */
+  // ------------------------------------------------------------------ escolas
+  /**
+   * Escolas do municipio, para a camada do mapa.
+   *
+   * Sem a tabela criada o app segue sem a camada, em vez de quebrar: o botao
+   * simplesmente nao aparece.
+   */
+  async fetchEscolas(municipio: string) {
+    if (!db || !municipio) return { success: false, data: [] as Escola[] };
+    try {
+      const { data, error } = await db
+        .from('escolas')
+        .select('*')
+        .ilike('municipio', municipio.trim())
+        .order('nome', { ascending: true });
+      if (error) throw error;
+
+      const linhas = (data || []).map((linha: any) => ({
+        codigoInep: linha.codigo_inep,
+        nome: linha.nome,
+        endereco: linha.endereco,
+        latitude: Number(linha.latitude),
+        longitude: Number(linha.longitude),
+        municipio: linha.municipio,
+        uf: linha.uf,
+        dependencia: linha.dependencia,
+        situacao: linha.situacao,
+        restricao: linha.restricao,
+        telefone: linha.telefone,
+        etapas: linha.etapas || [],
+        matriculas: linha.matriculas,
+        matFeminino: linha.mat_feminino,
+        matMasculino: linha.mat_masculino,
+        matRacaNaoDeclarada: linha.mat_raca_nao_declarada,
+        matBranca: linha.mat_branca,
+        matPreta: linha.mat_preta,
+        matParda: linha.mat_parda,
+        matAmarela: linha.mat_amarela,
+        matIndigena: linha.mat_indigena,
+        mat0a3: linha.mat_0_3,
+        mat4a5: linha.mat_4_5,
+        mat6a10: linha.mat_6_10,
+        mat11a14: linha.mat_11_14,
+        mat15a17: linha.mat_15_17,
+        mat18Mais: linha.mat_18_mais,
+        matInfantil: linha.mat_infantil,
+        matCreche: linha.mat_creche,
+        matPreEscola: linha.mat_pre_escola,
+        matFundamental: linha.mat_fundamental,
+        matFundIniciais: linha.mat_fund_iniciais,
+        matFundFinais: linha.mat_fund_finais,
+        matMedio: linha.mat_medio,
+        matProfissional: linha.mat_profissional,
+        matEja: linha.mat_eja,
+        matEjaFundamental: linha.mat_eja_fundamental,
+        matEjaMedio: linha.mat_eja_medio,
+        matEspecial: linha.mat_especial
+      })) as Escola[];
+
+      return { success: true, data: linhas };
+    } catch (err: any) {
+      console.warn('Nao foi possivel buscar as escolas do municipio:', err);
+      return { success: false, data: [] as Escola[], error: err.message };
+    }
+  },
+
   async fetchPriorityLevels() {
     if (!db) return { success: false, data: [] as PriorityLevel[] };
     try {

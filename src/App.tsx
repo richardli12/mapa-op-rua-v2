@@ -90,6 +90,7 @@ import {
   Brain,
   Clock,
   BarChart3,
+  GraduationCap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
@@ -97,6 +98,7 @@ import OperationIcon from "./components/OperationIcon";
 import ConfirmDialog, { ConfirmRequest } from "./components/ConfirmDialog";
 import MindMapPanel from "./components/MindMapPanel";
 import MiniMapa from "./components/MiniMapa";
+import BarrasDaEscola from "./components/BarrasDaEscola";
 import { OPERATION_ICONS } from "./operationIcons";
 import {
   PanfletagemArea,
@@ -113,6 +115,8 @@ import {
   CHECKIN_PRIORITIES,
   getCheckInPriority,
   PriorityLevel,
+  Escola,
+  corDaDependencia,
   CheckInMedia,
   CheckInMediaType,
   CHECKIN_MAX_MEDIA,
@@ -555,6 +559,11 @@ export default function App() {
   );
   /** Tipo sendo arrastado para trocar de ordem. */
   const [tipoArrastado, setTipoArrastado] = useState<string | null>(null);
+
+  /** Escolas do município do cliente em foco, camada pública do mapa. */
+  const [escolas, setEscolas] = useState<Escola[]>([]);
+  const [escolasLigadas, setEscolasLigadas] = useState(false);
+  const [escolaAberta, setEscolaAberta] = useState<Escola | null>(null);
 
   /** Estado da aba Check-ins: filtros, página e o registro aberto ao lado. */
   const [buscaCheckIns, setBuscaCheckIns] = useState("");
@@ -3025,6 +3034,37 @@ export default function App() {
       vivo = false;
     };
   }, [checkInAberto]);
+
+  /** Cliente em foco no mapa, para saber de que município buscar as escolas. */
+  const clienteDoMapa =
+    selectedCandidateFilter !== "all"
+      ? candidates.find((c) => c.id === selectedCandidateFilter)
+      : null;
+  const municipioDoMapa = (clienteDoMapa?.city || "").trim();
+
+  // Escolas do município do cliente. Município sem escolas cadastradas deixa a
+  // camada de fora, e o botão nem aparece no mapa.
+  useEffect(() => {
+    if (!isDatabaseConfigured || !municipioDoMapa) {
+      setEscolas([]);
+      setEscolasLigadas(false);
+      setEscolaAberta(null);
+      return;
+    }
+    let vivo = true;
+    (async () => {
+      const res = await DatabaseService.fetchEscolas(municipioDoMapa);
+      if (!vivo) return;
+      setEscolas(res.data);
+      if (res.data.length === 0) {
+        setEscolasLigadas(false);
+        setEscolaAberta(null);
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [municipioDoMapa, isDatabaseConfigured]);
 
   // Handle Pick Marker Mode trigger
   const startCoordinatesPicking = (type: "area" | "pin") => {
@@ -10858,6 +10898,36 @@ export default function App() {
           </span>
         </button>
 
+        {/* ESCOLAS DO MUNICÍPIO — só aparece onde há escolas cadastradas */}
+        {escolas.length > 0 && (
+          <>
+            <div className="w-8 h-[1px] bg-slate-800/50" />
+            <button
+              onClick={() => {
+                setEscolasLigadas((ligado) => {
+                  if (ligado) setEscolaAberta(null);
+                  return !ligado;
+                });
+              }}
+              className={`group w-10 h-10 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
+                escolasLigadas
+                  ? "bg-sky-600 border-sky-700 ring-2 ring-sky-400/40"
+                  : "bg-slate-700 hover:bg-slate-600 border-slate-600"
+              }`}
+              title={
+                escolasLigadas
+                  ? "Esconder as escolas do mapa"
+                  : `Mostrar as ${escolas.length} escolas de ${municipioDoMapa}`
+              }
+            >
+              <GraduationCap className="w-5 h-5" />
+              <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
+                {escolasLigadas ? "Escolas à vista" : "Escolas"}
+              </span>
+            </button>
+          </>
+        )}
+
         <div className="w-8 h-[1px] bg-slate-800/50" />
 
         {/* Button 4: Compartilhar Check-in - Green */}
@@ -11052,6 +11122,217 @@ export default function App() {
           >
             Cancelar
           </button>
+        </div>
+      )}
+
+      {/* FICHA DA ESCOLA — tudo que o censo traz sobre ela */}
+      {escolaAberta && (
+        <div className="fixed inset-y-0 right-0 w-full sm:w-[420px] bg-white shadow-2xl border-l border-slate-200 z-[2200] flex flex-col animate-in slide-in-from-right duration-200">
+          <div
+            className="px-5 py-4 text-white flex items-start justify-between gap-3 shrink-0"
+            style={{ backgroundColor: corDaDependencia(escolaAberta.dependencia) }}
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <GraduationCap className="w-4 h-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest opacity-90">
+                  {escolaAberta.dependencia || "Escola"}
+                </span>
+                {escolaAberta.situacao &&
+                  escolaAberta.situacao !== "EM ATIVIDADE" && (
+                    <span className="px-2 py-0.5 rounded-full bg-white/20 text-[9.5px] font-black uppercase tracking-wide">
+                      Paralisada
+                    </span>
+                  )}
+              </div>
+              <h3 className="text-[16px] font-black leading-tight">
+                {escolaAberta.nome}
+              </h3>
+              <p className="text-[11px] font-semibold opacity-90 mt-0.5">
+                INEP {escolaAberta.codigoInep}
+              </p>
+            </div>
+            <button
+              onClick={() => setEscolaAberta(null)}
+              className="w-9 h-9 rounded-xl hover:bg-white/20 flex items-center justify-center cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
+            {/* IDENTIFICAÇÃO */}
+            <div className="flex flex-col gap-2.5">
+              {escolaAberta.endereco && (
+                <div className="flex items-start gap-2">
+                  <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                  <p className="text-[12px] font-semibold text-slate-600 leading-snug">
+                    {escolaAberta.endereco}
+                  </p>
+                </div>
+              )}
+              {escolaAberta.telefone && (
+                <a
+                  href={`tel:${escolaAberta.telefone.replace(/\D/g, "")}`}
+                  className="flex items-center gap-2 text-[12px] font-bold text-[#015FC9] hover:underline"
+                >
+                  <Phone className="w-4 h-4 shrink-0" />
+                  {escolaAberta.telefone}
+                </a>
+              )}
+              {/* As coordenadas não interessam a quem usa: o que interessa é
+                  chegar lá. O número vira o caminho. */}
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${escolaAberta.latitude},${escolaAberta.longitude}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+              >
+                <Map className="w-4 h-4 text-[#015FC9]" />
+                Abrir no Google Maps
+              </a>
+              {escolaAberta.restricao && (
+                <p className="text-[11px] font-semibold text-slate-400 leading-snug">
+                  {escolaAberta.restricao}
+                </p>
+              )}
+            </div>
+
+            {(escolaAberta.etapas || []).length > 0 && (
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">
+                  Etapas oferecidas
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(escolaAberta.etapas || []).map((etapa) => (
+                    <span
+                      key={etapa}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-[11px] font-black"
+                    >
+                      {etapa}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {escolaAberta.matriculas == null ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                <p className="text-[12px] font-bold text-amber-800">
+                  Sem matrículas no Censo 2025
+                </p>
+                <p className="text-[11px] text-amber-700 mt-0.5 leading-snug">
+                  {escolaAberta.situacao ||
+                    "A escola não teve censo neste ano."}
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* TOTAL E SEXO */}
+                <div>
+                  <div className="flex items-baseline gap-2 mb-3">
+                    <span className="text-3xl font-black text-[#0D233A] leading-none">
+                      {escolaAberta.matriculas.toLocaleString("pt-BR")}
+                    </span>
+                    <span className="text-[12px] font-semibold text-slate-400">
+                      matrículas em 2025
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {[
+                      {
+                        rotulo: "Feminino",
+                        valor: escolaAberta.matFeminino,
+                        cor: "#ec4899",
+                      },
+                      {
+                        rotulo: "Masculino",
+                        valor: escolaAberta.matMasculino,
+                        cor: "#0ea5e9",
+                      },
+                    ].map((campo) => (
+                      <div
+                        key={campo.rotulo}
+                        className="bg-slate-50 border border-slate-100 rounded-2xl px-3.5 py-2.5"
+                      >
+                        <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">
+                          {campo.rotulo}
+                        </p>
+                        <p
+                          className="text-[17px] font-black leading-tight"
+                          style={{ color: campo.cor }}
+                        >
+                          {(campo.valor || 0).toLocaleString("pt-BR")}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <BarrasDaEscola
+                  titulo="Por etapa"
+                  nota="As etapas se sobrepõem: no médio integrado o mesmo aluno conta em duas."
+                  total={escolaAberta.matriculas}
+                  itens={[
+                    {
+                      rotulo: "Educação Infantil",
+                      valor: escolaAberta.matInfantil,
+                      detalhe: `creche ${escolaAberta.matCreche || 0} · pré ${escolaAberta.matPreEscola || 0}`,
+                    },
+                    {
+                      rotulo: "Ensino Fundamental",
+                      valor: escolaAberta.matFundamental,
+                      detalhe: `iniciais ${escolaAberta.matFundIniciais || 0} · finais ${escolaAberta.matFundFinais || 0}`,
+                    },
+                    { rotulo: "Ensino Médio", valor: escolaAberta.matMedio },
+                    {
+                      rotulo: "Educação Profissional",
+                      valor: escolaAberta.matProfissional,
+                    },
+                    {
+                      rotulo: "EJA",
+                      valor: escolaAberta.matEja,
+                      detalhe: `fund. ${escolaAberta.matEjaFundamental || 0} · médio ${escolaAberta.matEjaMedio || 0}`,
+                    },
+                    {
+                      rotulo: "Educação Especial",
+                      valor: escolaAberta.matEspecial,
+                      detalhe: "alunos de inclusão, já contados na etapa regular",
+                    },
+                  ]}
+                />
+
+                <BarrasDaEscola
+                  titulo="Por faixa etária"
+                  total={escolaAberta.matriculas}
+                  itens={[
+                    { rotulo: "0 a 3 anos", valor: escolaAberta.mat0a3 },
+                    { rotulo: "4 a 5 anos", valor: escolaAberta.mat4a5 },
+                    { rotulo: "6 a 10 anos", valor: escolaAberta.mat6a10 },
+                    { rotulo: "11 a 14 anos", valor: escolaAberta.mat11a14 },
+                    { rotulo: "15 a 17 anos", valor: escolaAberta.mat15a17 },
+                    { rotulo: "18 anos ou mais", valor: escolaAberta.mat18Mais },
+                  ]}
+                />
+
+                <BarrasDaEscola
+                  titulo="Por cor ou raça"
+                  total={escolaAberta.matriculas}
+                  itens={[
+                    { rotulo: "Parda", valor: escolaAberta.matParda },
+                    { rotulo: "Branca", valor: escolaAberta.matBranca },
+                    { rotulo: "Preta", valor: escolaAberta.matPreta },
+                    { rotulo: "Indígena", valor: escolaAberta.matIndigena },
+                    { rotulo: "Amarela", valor: escolaAberta.matAmarela },
+                    {
+                      rotulo: "Não declarada",
+                      valor: escolaAberta.matRacaNaoDeclarada,
+                    },
+                  ]}
+                />
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -12262,6 +12543,9 @@ export default function App() {
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor
           }
+          escolas={escolas}
+          escolasVisiveis={escolasLigadas}
+          onEscolaSelecionada={(escola) => setEscolaAberta(escola)}
           tempPlacementRadius={Number(areaRadius) || 0}
           onTempRadiusChange={(metros) => setAreaRadius(metros)}
           tempPlacementType={coordsPickingMode}
