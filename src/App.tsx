@@ -77,7 +77,6 @@ import {
   MACEIO_BAIRROS,
   PRESET_COLORS,
   OperationType,
-  DEFAULT_OPERATION_TYPES,
   Candidate,
   Party,
   CheckInMode,
@@ -337,14 +336,12 @@ export default function App() {
    */
   const [operationTypes, setOperationTypes] = useState<OperationType[]>(() => {
     const saved = localStorage.getItem("operation_types");
-    if (!saved) return DEFAULT_OPERATION_TYPES;
+    if (!saved) return [];
     try {
       const parsed = JSON.parse(saved);
-      return Array.isArray(parsed) && parsed.length > 0
-        ? parsed
-        : DEFAULT_OPERATION_TYPES;
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
-      return DEFAULT_OPERATION_TYPES;
+      return [];
     }
   });
 
@@ -1048,17 +1045,6 @@ export default function App() {
 
       if (!res.success) return;
 
-      if (res.data.length === 0) {
-        for (const type of DEFAULT_OPERATION_TYPES) {
-          await DatabaseService.upsertOperationType({
-            ...type,
-            createdAt: new Date().toISOString(),
-          });
-        }
-        if (active) setOperationTypes(DEFAULT_OPERATION_TYPES);
-        return;
-      }
-
       setOperationTypes(
         [...res.data].sort((a, b) =>
           (a.label || "").localeCompare(b.label || "", "pt-BR"),
@@ -1257,9 +1243,7 @@ export default function App() {
   const [pinDescription, setPinDescription] = useState("");
   const [pinColor, setPinColor] = useState("#ea580c");
   // Id do Tipo de Operação escolhido para o ponto.
-  const [pinIconType, setPinIconType] = useState<string>(
-    DEFAULT_OPERATION_TYPES[0].id,
-  );
+  const [pinIconType, setPinIconType] = useState<string>("");
   const [pinDate, setPinDate] = useState("");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [pinCandidateId, setPinCandidateId] = useState<string>("");
@@ -2757,6 +2741,22 @@ export default function App() {
   const getOperationType = (id?: string) =>
     operationTypes.find((t) => t.id === id);
 
+  /**
+   * Cliente dono dos tipos em foco.
+   *
+   * Dentro do formulário do ponto vale o cliente escolhido nele; fora, vale o
+   * cliente filtrado no mapa. Sem cliente em foco não há tipo para mostrar,
+   * porque tipo de operação pertence sempre a um cliente.
+   */
+  const operationTypesOwnerId =
+    pinCandidateId ||
+    (selectedCandidateFilter !== "all" ? selectedCandidateFilter : "");
+
+  /** Tipos do cliente em foco. Os de outros clientes não aparecem aqui. */
+  const clientOperationTypes = operationTypes.filter(
+    (t) => operationTypesOwnerId && t.candidateId === operationTypesOwnerId,
+  );
+
   /** Rótulo do tipo para exibição, com uma saída digna para tipos apagados. */
   const operationTypeLabel = (id?: string) =>
     getOperationType(id)?.label || "Sem tipo definido";
@@ -2793,7 +2793,17 @@ export default function App() {
       return;
     }
 
-    const duplicated = operationTypes.some(
+    if (!operationTypesOwnerId) {
+      triggerNotification(
+        "Escolha um cliente antes: cada tipo de operação pertence a um cliente.",
+        "error",
+      );
+      return;
+    }
+
+    // Nomes iguais só atrapalham dentro do mesmo cliente; dois clientes podem
+    // ter cada um o seu "Carreata" sem conflito.
+    const duplicated = clientOperationTypes.some(
       (t) =>
         t.id !== editingOperationTypeId &&
         t.label.trim().toLowerCase() === label.toLowerCase(),
@@ -2815,6 +2825,7 @@ export default function App() {
           label,
           icon: opTypeIcon,
           color: opTypeColor,
+          candidateId: operationTypesOwnerId,
           createdAt: new Date().toISOString(),
         };
 
@@ -2848,14 +2859,6 @@ export default function App() {
     const type = operationTypes.find((t) => t.id === id);
     if (!type) return;
 
-    if (operationTypes.length <= 1) {
-      triggerNotification(
-        "Mantenha ao menos um tipo de operação cadastrado.",
-        "error",
-      );
-      return;
-    }
-
     const usedBy = pins.filter((p) => p.iconType === id).length;
 
     askConfirmation({
@@ -2877,8 +2880,8 @@ export default function App() {
 
         // O formulário aberto não pode continuar apontando para um tipo que sumiu.
         if (pinIconType === id) {
-          const fallback = operationTypes.find((t) => t.id !== id);
-          if (fallback) setPinIconType(fallback.id);
+          const fallback = clientOperationTypes.find((t) => t.id !== id);
+          setPinIconType(fallback ? fallback.id : "");
         }
         if (editingOperationTypeId === id) resetOperationTypeForm();
 
@@ -2968,8 +2971,8 @@ export default function App() {
   const resetPinForm = () => {
     setPinTitle("");
     setPinDescription("");
-    setPinColor(operationTypes[0]?.color || "#ea580c");
-    setPinIconType(operationTypes[0]?.id || DEFAULT_OPERATION_TYPES[0].id);
+    setPinColor("#ea580c");
+    setPinIconType("");
     setPinDate("");
     setPickedCoords(null);
     setEditingPinId(null);
@@ -7763,28 +7766,19 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Botão de Voltar para Candidatos (Top Right) */}
+      {/* Botão de Voltar (canto superior esquerdo) */}
       {adminUser && adminTab === "map" && (
-        <div
-          className={`absolute top-4 z-[1000] font-sans transition-all duration-300 ${
-            isMindMapOpen && !isMindMapFullscreen
-              ? "right-[calc(50%+1rem)]"
-              : "right-4"
-          }`}
-        >
+        <div className="absolute top-4 left-4 z-[1001] font-sans">
           <button
             onClick={() => {
               setAdminTab("candidates");
-              triggerNotification(
-                "Retornando para o Painel de Candidatos!",
-                "info",
-              );
+              triggerNotification("Retornando para os clientes!", "info");
             }}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 font-extrabold text-[11px] uppercase tracking-wider rounded-2xl shadow-xl border border-slate-200/80 transition-all cursor-pointer flex items-center gap-2 hover:scale-105 active:scale-95"
-            title="Voltar para a Gestão de Candidatos"
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] uppercase tracking-wider rounded-2xl shadow-xl border border-rose-700/40 transition-all cursor-pointer flex items-center gap-2 hover:scale-105 active:scale-95"
+            title="Voltar"
           >
-            <ChevronLeft className="w-4 h-4 text-slate-600 stroke-[3]" />
-            <span>Voltar para Candidatos</span>
+            <ChevronLeft className="w-4 h-4 text-white stroke-[3]" />
+            <span>Voltar</span>
           </button>
         </div>
       )}
@@ -8799,7 +8793,7 @@ export default function App() {
                               Sem tipo definido
                             </option>
                           )}
-                          {operationTypes.map((type) => (
+                          {clientOperationTypes.map((type) => (
                             <option key={type.id} value={type.id}>
                               {type.label}
                             </option>
@@ -9419,16 +9413,18 @@ export default function App() {
               {/* Lista dos tipos cadastrados */}
               <div className="space-y-2">
                 <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none">
-                  Cadastrados ({operationTypes.length})
+                  Cadastrados ({clientOperationTypes.length})
                 </h4>
 
-                {operationTypes.length === 0 ? (
+                {clientOperationTypes.length === 0 ? (
                   <p className="text-[11px] text-slate-400 italic bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
-                    Nenhum tipo cadastrado ainda.
+                    {operationTypesOwnerId
+                      ? "Este cliente ainda não tem nenhum tipo de operação."
+                      : "Escolha um cliente para cadastrar os tipos de operação dele."}
                   </p>
                 ) : (
                   <div className="space-y-1.5">
-                    {operationTypes.map((type) => {
+                    {clientOperationTypes.map((type) => {
                       const usedBy = pins.filter(
                         (p) => p.iconType === type.id,
                       ).length;
@@ -10416,7 +10412,7 @@ export default function App() {
                                     Sem tipo definido
                                   </option>
                                 )}
-                                {operationTypes.map((type) => (
+                                {clientOperationTypes.map((type) => (
                                   <option key={type.id} value={type.id}>
                                     {type.label}
                                   </option>

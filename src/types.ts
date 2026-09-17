@@ -32,10 +32,9 @@ export interface CampaignPin {
 /**
  * Tipo de Operação de um ponto no mapa.
  *
- * Os tipos não são fixos no código: quem opera o sistema cadastra, edita e
- * apaga os seus próprios. Os padrões abaixo servem só como ponto de partida
- * de uma instalação nova — e os ids dos seis primeiros são os mesmos que os
- * pontos antigos já gravaram, então nada do que está no mapa se perde.
+ * Não existe tipo fixo no sistema: cada cliente tem os seus, cadastrados por
+ * quem opera o painel. Um cliente novo começa sem nenhum tipo, e os tipos de
+ * um cliente não aparecem para os outros.
  */
 export interface OperationType {
   id: string;
@@ -44,17 +43,10 @@ export interface OperationType {
   icon: string;
   /** Cor sugerida ao criar um ponto deste tipo. */
   color: string;
+  /** Cliente dono deste tipo. Tipo sem dono não aparece em lugar nenhum. */
+  candidateId?: string;
   createdAt?: string;
 }
-
-export const DEFAULT_OPERATION_TYPES: OperationType[] = [
-  { id: 'flag', label: 'Base Operacional', icon: 'flag', color: '#2563eb' },
-  { id: 'group', label: 'Reunião de Equipe', icon: 'group', color: '#7c3aed' },
-  { id: 'star', label: 'Evento / Ação', icon: 'star', color: '#ca8a04' },
-  { id: 'megaphone', label: 'Divulgação', icon: 'megaphone', color: '#ea580c' },
-  { id: 'home', label: 'Visita / Atendimento', icon: 'home', color: '#16a34a' },
-  { id: 'sound', label: 'Veículo de Som', icon: 'sound', color: '#0891b2' }
-];
 
 /** Busca um tipo pelo id, tolerando pontos gravados com um tipo já apagado. */
 export function findOperationType(
