@@ -10938,38 +10938,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Botão de Simulação Instantânea */}
-              <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-2xl flex items-center justify-between gap-3">
-                <div className="flex-1">
-                  <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block">
-                    Demonstração
-                  </span>
-                  <p className="text-[10px] text-slate-400 leading-snug mt-0.5">
-                    Teste o formulário do voluntário simulando o fluxo no
-                    próprio navegador.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsShareModalOpen(false);
-                    setCurrentUrlView("checkin");
-                    // A simulação abre no cliente em foco, como o link real
-                    if (shareCandidate) setCheckInCandidateId(shareCandidate.id);
-                    // Atualizar url temporariamente sem dar reload
-                    const url = new URL(window.location.href);
-                    url.searchParams.set("view", "checkin");
-                    if (shareCandidate) {
-                      url.searchParams.set("candidate", shareCandidate.id);
-                    }
-                    window.history.pushState({}, "", url.toString());
-                  }}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-sm hover:shadow-md transition-colors whitespace-nowrap active:scale-95"
-                >
-                  Simular Fluxo
-                </button>
-              </div>
-
               {/* Footer */}
               <div className="flex gap-3 pt-1 justify-end">
                 <button
