@@ -1,13 +1,13 @@
 /**
- * Ponte para a API do Nexus.
+ * Ponte para a base externa de onde saem as fichas de vínculo.
  *
- * A chave fica só aqui, no servidor. Ela é lida de NEXUS_PUBLIC_API_KEY, a
- * variável já configurada na Vercel, e nunca é enviada ao navegador — o que
- * aconteceria se o front chamasse o Nexus direto, já que tudo que vai para o
- * bundle é público.
+ * A chave fica só aqui, no servidor, e nunca é enviada ao navegador — o que
+ * aconteceria se o front chamasse a base direto, já que tudo que vai para o
+ * bundle é público. O nome da variável de ambiente foi mantido para não
+ * quebrar o que já está configurado na hospedagem.
  */
 
-const NEXUS_BASE = "https://nexus-v3-1-gules.vercel.app/api/public-api/v1";
+const BASE_URL = "https://nexus-v3-1-gules.vercel.app/api/public-api/v1";
 
 /**
  * Só estes caminhos são repassados, para a ponte não virar um proxy aberto que
@@ -50,7 +50,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const response = await fetch(
-      `${NEXUS_BASE}/${path}?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}`,
+      `${BASE_URL}/${path}?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}`,
       { headers: { Authorization: `Bearer ${apiKey}` } },
     );
 
@@ -62,6 +62,6 @@ export default async function handler(req: any, res: any) {
   } catch (err: any) {
     res
       .status(502)
-      .json({ error: `Falha ao consultar o Nexus: ${err?.message || err}` });
+      .json({ error: `Falha ao consultar a base externa: ${err?.message || err}` });
   }
 }

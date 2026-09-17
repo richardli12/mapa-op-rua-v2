@@ -224,7 +224,7 @@ export interface Party {
   name: string;
   initials: string;
   logo_url: string;
-  color?: string; // cor primária do partido, vinda do Nexus
+  color?: string; // cor primária do partido, vinda da base externa
 }
 
 

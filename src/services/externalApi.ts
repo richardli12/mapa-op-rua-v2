@@ -1,20 +1,21 @@
 /**
- * Leitura de partidos e candidatos do Nexus.
+ * Leitura de partidos e candidatos da base externa.
  *
- * As chamadas passam pela ponte em /api/nexus, que guarda a chave no servidor.
+ * As chamadas passam pela ponte em /api/base-externa, que guarda a chave no
+ * servidor.
  * O endpoint de candidatos já traz o partido de cada um embutido, então a lista
  * de partidos é montada a partir dela, sem uma segunda consulta.
  */
 
 import { Candidate, Party } from "../types";
 
-const BRIDGE_URL = "/api/nexus";
+const BRIDGE_URL = "/api/base-externa";
 const PAGE_SIZE = 100;
 
 /** Trava de segurança: impede laço infinito se o meta vier inconsistente. */
 const MAX_PAGES = 50;
 
-interface NexusParty {
+interface ExternalParty {
   id?: string;
   nome?: string;
   sigla?: string;
@@ -22,7 +23,7 @@ interface NexusParty {
   cor_primaria?: string | null;
 }
 
-interface NexusCandidate {
+interface ExternalCandidate {
   id?: string;
   nome?: string;
   email?: string;
@@ -38,10 +39,10 @@ interface NexusCandidate {
   status?: string;
   favorito?: boolean;
   cadastrado_em?: string;
-  partido?: NexusParty | null;
+  partido?: ExternalParty | null;
 }
 
-export interface NexusData {
+export interface ExternalData {
   candidates: Candidate[];
   parties: Party[];
 }
@@ -70,10 +71,10 @@ const fetchPage = async <T>(
   try {
     payload = await response.json();
   } catch {
-    // Em desenvolvimento o Vite não executa funções da Vercel e devolve o
+    // Em desenvolvimento o servidor local não executa a função da ponte e devolve o
     // próprio arquivo da ponte, que não é JSON.
     throw new Error(
-      "A lista para vínculo não respondeu como esperado. Em ambiente local ela só funciona com `vercel dev`.",
+      "A lista para vínculo não respondeu como esperado. Em ambiente local ela só funciona com o servidor de funções ligado.",
     );
   }
 
@@ -83,7 +84,7 @@ const fetchPage = async <T>(
   };
 };
 
-const toCandidate = (raw: NexusCandidate): Candidate | null => {
+const toCandidate = (raw: ExternalCandidate): Candidate | null => {
   if (!raw?.id || !raw?.nome) return null;
   return {
     id: String(raw.id),
@@ -115,7 +116,7 @@ const toCandidate = (raw: NexusCandidate): Candidate | null => {
   };
 };
 
-const toParty = (raw: NexusParty): Party | null => {
+const toParty = (raw: ExternalParty): Party | null => {
   if (!raw?.id) return null;
   return {
     id: String(raw.id),
@@ -129,10 +130,10 @@ const toParty = (raw: NexusParty): Party | null => {
 /**
  * Busca todos os candidatos, percorrendo as páginas, e deriva os partidos.
  */
-export const fetchNexusData = async (
+export const fetchExternalData = async (
   signal?: AbortSignal,
-): Promise<NexusData> => {
-  const rows = await fetchAllPages<NexusCandidate>("candidatos", signal);
+): Promise<ExternalData> => {
+  const rows = await fetchAllPages<ExternalCandidate>("candidatos", signal);
 
   const candidates: Candidate[] = [];
   const partiesById = new Map<string, Party>();
@@ -173,7 +174,7 @@ const fetchAllPages = async <T>(
   return rows;
 };
 
-interface NexusTeamMember {
+interface ExternalTeamMember {
   id?: string;
   nome?: string;
   foto_url?: string | null;
@@ -197,7 +198,7 @@ interface NexusTeamMember {
  * Integrante da Equipe no formato que o sistema já usa.
  *
  * Os nomes de campo (full_name, candidate_id) são os que o restante do código
- * espera desde a época em que a lista vinha do Supabase, então a conversão
+ * espera desde a época em que a lista vinha do banco de dados, então a conversão
  * acontece aqui e nada mais precisa mudar.
  */
 export interface TeamMember {
@@ -220,13 +221,13 @@ export interface TeamMember {
 }
 
 /** Equipe de um candidato. */
-export const fetchNexusTeam = async (
+export const fetchExternalTeam = async (
   candidateId: string,
   signal?: AbortSignal,
 ): Promise<TeamMember[]> => {
   if (!candidateId) return [];
 
-  const rows = await fetchAllPages<NexusTeamMember>(
+  const rows = await fetchAllPages<ExternalTeamMember>(
     `candidatos/${candidateId}/lideres-delta`,
     signal,
   );
