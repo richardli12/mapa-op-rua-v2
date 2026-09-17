@@ -89,6 +89,7 @@ import {
   Target,
   Brain,
   Clock,
+  BarChart3,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
@@ -539,6 +540,21 @@ export default function App() {
   const [opTypeLabel, setOpTypeLabel] = useState("");
   const [opTypeIcon, setOpTypeIcon] = useState("flag");
   const [opTypeColor, setOpTypeColor] = useState("#2563eb");
+  const [opTypeDescription, setOpTypeDescription] = useState("");
+  const [opTypeActive, setOpTypeActive] = useState(true);
+  /** Formulário compacto de tipo de operação, na ficha do cliente. */
+  const [modalTipoAberto, setModalTipoAberto] = useState(false);
+  /** Estado da aba de tipos: busca, filtro, página e período do gráfico. */
+  const [buscaTipos, setBuscaTipos] = useState("");
+  const [filtroTipos, setFiltroTipos] = useState<"todos" | "ativo" | "inativo">(
+    "todos",
+  );
+  const [paginaTipos, setPaginaTipos] = useState(1);
+  const [periodoTipos, setPeriodoTipos] = useState<"mes" | "semana" | "tudo">(
+    "mes",
+  );
+  /** Tipo sendo arrastado para trocar de ordem. */
+  const [tipoArrastado, setTipoArrastado] = useState<string | null>(null);
 
   /**
    * Pedido de confirmação em aberto.
@@ -827,7 +843,7 @@ export default function App() {
 
   /** Aba aberta dentro da ficha do cliente. */
   const [abaCliente, setAbaCliente] = useState<
-    "geral" | "equipe" | "checkins"
+    "geral" | "equipe" | "tipos" | "checkins"
   >("geral");
 
   /** Estado da aba Equipe: busca, filtro de status, página e ranking. */
@@ -3091,6 +3107,8 @@ export default function App() {
    * porque tipo de operação pertence sempre a um cliente.
    */
   const operationTypesOwnerId =
+    // A ficha do cliente aberta manda: os tipos que ela mostra são os dele.
+    inspectedCandidate?.id ||
     pinCandidateId ||
     (selectedCandidateFilter !== "all" ? selectedCandidateFilter : "");
 
@@ -3112,6 +3130,8 @@ export default function App() {
     setOpTypeLabel("");
     setOpTypeIcon("flag");
     setOpTypeColor("#2563eb");
+    setOpTypeDescription("");
+    setOpTypeActive(true);
   };
 
   const openOperationTypesManager = () => {
@@ -3124,6 +3144,8 @@ export default function App() {
     setOpTypeLabel(type.label);
     setOpTypeIcon(type.icon);
     setOpTypeColor(type.color);
+    setOpTypeDescription(type.description || "");
+    setOpTypeActive(type.active !== false);
   };
 
   const saveOperationType = (e: React.FormEvent) => {
@@ -3161,12 +3183,17 @@ export default function App() {
           label,
           icon: opTypeIcon,
           color: opTypeColor,
+          description: opTypeDescription.trim(),
+          active: opTypeActive,
         }
       : {
           id: "op_" + Math.random().toString(36).substr(2, 9),
           label,
           icon: opTypeIcon,
           color: opTypeColor,
+          description: opTypeDescription.trim(),
+          active: opTypeActive,
+          position: clientOperationTypes.length,
           candidateId: operationTypesOwnerId,
           createdAt: new Date().toISOString(),
         };
@@ -3195,6 +3222,26 @@ export default function App() {
     if (editingOperationTypeId === pinIconType) setPinColor(saved.color);
 
     resetOperationTypeForm();
+  };
+
+  /** Liga ou desliga um tipo: desligado some dos check-ins, histórico fica. */
+  const alternarTipoAtivo = (tipo: OperationType) => {
+    const atualizado = { ...tipo, active: tipo.active === false };
+    setOperationTypes((prev) =>
+      prev.map((t) => (t.id === tipo.id ? atualizado : t)),
+    );
+    if (isDatabaseConfigured) {
+      DatabaseService.upsertOperationType(atualizado).then((res) => {
+        if (!res.success)
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+      });
+    }
+    triggerNotification(
+      atualizado.active
+        ? `"${tipo.label}" voltou para os check-ins.`
+        : `"${tipo.label}" saiu dos check-ins.`,
+      "info",
+    );
   };
 
   const deleteOperationType = (id: string) => {
@@ -4562,9 +4609,16 @@ export default function App() {
           member={authenticatedSupporter}
           clientId={checkInCandidateId}
           clientName={clienteDoLink?.name || ""}
-          operationTypes={operationTypes.filter(
-            (t) => t.candidateId === checkInCandidateId,
-          )}
+          operationTypes={operationTypes
+            // Tipo desligado não aparece no check-in; o histórico dele fica.
+            .filter(
+              (t) => t.candidateId === checkInCandidateId && t.active !== false,
+            )
+            .sort(
+              (a, b) =>
+                (a.position ?? 0) - (b.position ?? 0) ||
+                a.label.localeCompare(b.label),
+            )}
           notify={triggerNotification}
           onBack={() => {
             setAuthenticatedSupporter(null);
@@ -6396,7 +6450,165 @@ export default function App() {
           askConfirmation={askConfirmation}
         />
 
-        {/* PERFIL DO INTEGRANTE — o que a lista da equipe mostra em "Ver perfil" */}
+          {/* FORMULÁRIO DE TIPO DE OPERAÇÃO — usado por "Novo tipo" e "Editar" */}
+        {modalTipoAberto && (
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[3000]"
+            onClick={() => {
+              setModalTipoAberto(false);
+              resetOperationTypeForm();
+            }}
+          >
+            <form
+              onSubmit={(e) => {
+                saveOperationType(e);
+                if (opTypeLabel.trim()) setModalTipoAberto(false);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-md w-full p-6 flex flex-col gap-4 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span
+                    className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shrink-0"
+                    style={{ backgroundColor: opTypeColor }}
+                  >
+                    <OperationIcon icon={opTypeIcon} size={22} />
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-black text-[#0D233A] leading-tight">
+                      {editingOperationTypeId ? "Editar tipo" : "Novo tipo"}
+                    </h3>
+                    <p className="text-[11.5px] font-semibold text-slate-400 truncate">
+                      {inspectedCandidate?.name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalTipoAberto(false);
+                    resetOperationTypeForm();
+                  }}
+                  className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-400 flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest font-black text-slate-400 mb-1.5">
+                  Nome do tipo
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={opTypeLabel}
+                  onChange={(e) => setOpTypeLabel(e.target.value)}
+                  placeholder="Ex: Tapa-buraco"
+                  className="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest font-black text-slate-400 mb-1.5">
+                  Descrição
+                </label>
+                <input
+                  type="text"
+                  value={opTypeDescription}
+                  onChange={(e) => setOpTypeDescription(e.target.value)}
+                  placeholder="Ex: Reparo de vias e pavimentação"
+                  className="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest font-black text-slate-400 mb-1.5">
+                  Ícone
+                </label>
+                <div className="grid grid-cols-8 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                  {OPERATION_ICONS.map((icone) => (
+                    <button
+                      key={icone.key}
+                      type="button"
+                      title={icone.label}
+                      onClick={() => setOpTypeIcon(icone.key)}
+                      className={`h-10 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
+                        opTypeIcon === icone.key
+                          ? "border-[#015FC9] bg-[#EFF4FB] text-[#015FC9]"
+                          : "border-slate-200 text-slate-400 hover:bg-slate-50"
+                      }`}
+                    >
+                      <OperationIcon icon={icone.key} size={18} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest font-black text-slate-400 mb-1.5">
+                    Cor
+                  </label>
+                  <div className="flex items-center gap-2 h-11 px-2 bg-slate-50 border border-slate-200 rounded-2xl">
+                    <input
+                      type="color"
+                      value={opTypeColor}
+                      onChange={(e) => setOpTypeColor(e.target.value)}
+                      className="w-8 h-8 rounded-lg cursor-pointer border-none bg-transparent shrink-0"
+                    />
+                    <span className="text-[11px] font-mono font-bold text-slate-500 uppercase">
+                      {opTypeColor}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest font-black text-slate-400 mb-1.5">
+                    Status
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setOpTypeActive((v) => !v)}
+                    className="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-2xl flex items-center gap-2 text-[12px] font-bold text-slate-600 cursor-pointer hover:bg-slate-50"
+                  >
+                    <span
+                      className={`w-8 h-4.5 rounded-full flex items-center px-0.5 transition-all ${
+                        opTypeActive
+                          ? "bg-emerald-500 justify-end"
+                          : "bg-slate-300 justify-start"
+                      }`}
+                    >
+                      <span className="w-3.5 h-3.5 bg-white rounded-full block" />
+                    </span>
+                    {opTypeActive ? "Ativo" : "Inativo"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalTipoAberto(false);
+                    resetOperationTypeForm();
+                  }}
+                  className="flex-1 h-11 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-2xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 h-11 bg-[#015FC9] hover:bg-blue-600 text-white text-xs font-bold rounded-2xl cursor-pointer active:scale-95"
+                >
+                  {editingOperationTypeId ? "Salvar alterações" : "Criar tipo"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+      {/* PERFIL DO INTEGRANTE — o que a lista da equipe mostra em "Ver perfil" */}
         {membroDoPerfil && (
           <div
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[3000]"
@@ -7291,6 +7503,7 @@ export default function App() {
             const abas = [
               { id: "geral" as const, rotulo: "Visão geral" },
               { id: "equipe" as const, rotulo: "Equipe" },
+              { id: "tipos" as const, rotulo: "Tipos de operação" },
               { id: "checkins" as const, rotulo: "Check-ins" },
             ];
 
@@ -7379,12 +7592,6 @@ export default function App() {
                   {aba.rotulo}
                 </button>
               ))}
-              <button
-                onClick={openOperationTypesManager}
-                className="px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 border-transparent text-slate-500 hover:text-slate-700 cursor-pointer"
-              >
-                Tipos de operação
-              </button>
               <button
                 onClick={() => setTeamModal("campos")}
                 className="px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 border-transparent text-slate-500 hover:text-slate-700 cursor-pointer"
@@ -8272,6 +8479,440 @@ export default function App() {
                             : "Ver ranking completo"}
                         </button>
                       )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {abaCliente === "tipos" && (() => {
+              const agora = new Date();
+              const inicioDoPeriodo =
+                periodoTipos === "semana"
+                  ? new Date(
+                      agora.getFullYear(),
+                      agora.getMonth(),
+                      agora.getDate() - 6,
+                    ).getTime()
+                  : periodoTipos === "mes"
+                    ? new Date(agora.getFullYear(), agora.getMonth(), 1).getTime()
+                    : 0;
+
+              const tiposDoCliente = operationTypes
+                .filter((t) => t.candidateId === inspectedCandidate.id)
+                .sort(
+                  (a, b) =>
+                    (a.position ?? 0) - (b.position ?? 0) ||
+                    a.label.localeCompare(b.label),
+                );
+
+              /** Quantos check-ins cada tipo tem, no total e no período. */
+              const contar = (tipo: OperationType, desde: number) =>
+                checkInsDoCliente.filter((c: any) => {
+                  const mesmo =
+                    c.operationTypeId === tipo.id ||
+                    c.operationTypeLabel === tipo.label;
+                  if (!mesmo) return false;
+                  if (!desde) return true;
+                  const t = new Date(c.createdAt).getTime();
+                  return !Number.isNaN(t) && t >= desde;
+                }).length;
+
+              const comUso = tiposDoCliente.map((tipo) => ({
+                ...tipo,
+                total: contar(tipo, 0),
+                noPeriodo: contar(tipo, inicioDoPeriodo),
+              }));
+
+              const busca = buscaTipos.trim().toLowerCase();
+              const filtrados = comUso.filter((tipo) => {
+                const casaBusca =
+                  !busca ||
+                  tipo.label.toLowerCase().includes(busca) ||
+                  (tipo.description || "").toLowerCase().includes(busca);
+                const ligado = tipo.active !== false;
+                const casaStatus =
+                  filtroTipos === "todos" ||
+                  (filtroTipos === "ativo" ? ligado : !ligado);
+                return casaBusca && casaStatus;
+              });
+
+              const porPagina = 10;
+              const totalPaginas = Math.max(
+                1,
+                Math.ceil(filtrados.length / porPagina),
+              );
+              const pagina = Math.min(paginaTipos, totalPaginas);
+              const daPagina = filtrados.slice(
+                (pagina - 1) * porPagina,
+                pagina * porPagina,
+              );
+
+              const usoNoPeriodo = [...comUso].sort(
+                (a, b) => b.noPeriodo - a.noPeriodo || a.label.localeCompare(b.label),
+              );
+              const maiorUso = usoNoPeriodo[0]?.noPeriodo || 1;
+              const totalNoPeriodo = usoNoPeriodo.reduce(
+                (soma, t) => soma + t.noPeriodo,
+                0,
+              );
+
+              /** Solta o tipo arrastado na posição de outro e regrava a ordem. */
+              const reordenar = (destinoId: string) => {
+                if (!tipoArrastado || tipoArrastado === destinoId) return;
+                const ordem = tiposDoCliente.map((t) => t.id);
+                const de = ordem.indexOf(tipoArrastado);
+                const para = ordem.indexOf(destinoId);
+                if (de < 0 || para < 0) return;
+                ordem.splice(para, 0, ordem.splice(de, 1)[0]);
+
+                setOperationTypes((prev) =>
+                  prev.map((t) => {
+                    const nova = ordem.indexOf(t.id);
+                    return nova < 0 ? t : { ...t, position: nova };
+                  }),
+                );
+                if (isDatabaseConfigured) {
+                  ordem.forEach((id, indice) => {
+                    const tipo = operationTypes.find((t) => t.id === id);
+                    if (tipo)
+                      DatabaseService.upsertOperationType({
+                        ...tipo,
+                        position: indice,
+                      });
+                  });
+                }
+                setTipoArrastado(null);
+              };
+
+              const Emblema = ({
+                tipo,
+                tamanho,
+              }: {
+                tipo: OperationType;
+                tamanho: string;
+              }) => (
+                <span
+                  className={`${tamanho} rounded-2xl flex items-center justify-center shrink-0 text-white`}
+                  style={{ backgroundColor: tipo.color }}
+                >
+                  <OperationIcon icon={tipo.icon} size={20} />
+                </span>
+              );
+
+              return (
+                <div className="flex flex-col gap-5">
+                  {/* CABEÇALHO DOS TIPOS */}
+                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm px-6 py-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-10 h-10 rounded-2xl bg-[#F1F5FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                        <Layers className="w-5 h-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-[17px] font-black text-[#0D233A] leading-tight flex items-center gap-2 flex-wrap">
+                          Tipos de operação
+                          <span className="px-2.5 py-1 rounded-full bg-[#EFF4FB] text-[#015FC9] text-[11px] font-black">
+                            {tiposDoCliente.length}{" "}
+                            {tiposDoCliente.length === 1 ? "tipo" : "tipos"}
+                          </span>
+                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 text-[11px] font-black flex items-center gap-1.5">
+                            <Lock className="w-3 h-3" />
+                            Exclusivos deste cliente
+                          </span>
+                        </h3>
+                        <p className="text-[12px] text-slate-400 font-semibold">
+                          Configure as opções disponíveis nos check-ins deste
+                          cliente
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        resetOperationTypeForm();
+                        setModalTipoAberto(true);
+                      }}
+                      className="h-11 px-4 bg-[#015FC9] hover:bg-blue-600 text-white font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      Novo tipo
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+                    {/* LISTA DE TIPOS */}
+                    <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+                      <div className="px-6 pt-5 pb-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <h4 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                            Tipos cadastrados
+                          </h4>
+                          <p className="text-[11px] text-slate-400 font-semibold">
+                            Arraste para ordenar como aparecem no check-in
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <div className="relative flex items-center bg-white border border-slate-200 rounded-2xl h-10 px-3 w-56 focus-within:ring-2 focus-within:ring-blue-500/20">
+                            <Search className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
+                            <input
+                              type="text"
+                              value={buscaTipos}
+                              onChange={(e) => {
+                                setBuscaTipos(e.target.value);
+                                setPaginaTipos(1);
+                              }}
+                              placeholder="Buscar tipo de operação..."
+                              className="bg-transparent border-none w-full text-[11.5px] font-semibold text-slate-700 placeholder-slate-400 focus:outline-hidden"
+                            />
+                          </div>
+                          <div className="relative">
+                            <select
+                              value={filtroTipos}
+                              onChange={(e) => {
+                                setFiltroTipos(e.target.value as any);
+                                setPaginaTipos(1);
+                              }}
+                              className="appearance-none h-10 pl-3.5 pr-9 bg-white border border-slate-200 rounded-2xl text-[11.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden"
+                            >
+                              <option value="todos">Todos os status</option>
+                              <option value="ativo">Ativo</option>
+                              <option value="inativo">Inativo</option>
+                            </select>
+                            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[640px] border-collapse text-left">
+                          <thead>
+                            <tr className="bg-[#FAFBFD] border-y border-slate-100">
+                              {["Ordem", "Tipo de operação", "Check-ins", "Status"].map(
+                                (coluna) => (
+                                  <th
+                                    key={coluna}
+                                    className="py-3 px-3 text-[9.5px] uppercase font-black text-[#8492A6] whitespace-nowrap"
+                                  >
+                                    {coluna}
+                                  </th>
+                                ),
+                              )}
+                              <th className="py-3 px-3 text-[9.5px] uppercase font-black text-[#8492A6]">
+                                Ações
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {daPagina.length === 0 ? (
+                              <tr>
+                                <td
+                                  colSpan={5}
+                                  className="py-14 text-center text-slate-400 font-bold text-[11px] uppercase tracking-widest"
+                                >
+                                  {tiposDoCliente.length === 0
+                                    ? "Nenhum tipo cadastrado para este cliente"
+                                    : "Nenhum tipo encontrado"}
+                                </td>
+                              </tr>
+                            ) : (
+                              daPagina.map((tipo) => (
+                                <tr
+                                  key={tipo.id}
+                                  draggable
+                                  onDragStart={() => setTipoArrastado(tipo.id)}
+                                  onDragOver={(e) => e.preventDefault()}
+                                  onDrop={() => reordenar(tipo.id)}
+                                  onDragEnd={() => setTipoArrastado(null)}
+                                  className={`hover:bg-slate-50/60 transition-all ${
+                                    tipoArrastado === tipo.id ? "opacity-40" : ""
+                                  }`}
+                                >
+                                  <td className="py-3.5 px-3">
+                                    <span
+                                      className="w-7 h-7 rounded-lg grid grid-cols-2 gap-[3px] content-center justify-center text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing"
+                                      title="Arraste para mudar a ordem"
+                                    >
+                                      {Array.from({ length: 6 }).map((_, i) => (
+                                        <span
+                                          key={i}
+                                          className="w-[3px] h-[3px] rounded-full bg-current"
+                                        />
+                                      ))}
+                                    </span>
+                                  </td>
+                                  <td className="py-3.5 px-3">
+                                    <div className="flex items-center gap-3">
+                                      <Emblema tipo={tipo} tamanho="w-10 h-10" />
+                                      <div className="min-w-0">
+                                        <p className="font-black text-slate-800 text-[13px] leading-tight truncate">
+                                          {tipo.label}
+                                        </p>
+                                        <p className="text-[10.5px] text-slate-400 font-semibold truncate">
+                                          {tipo.description || "Sem descrição"}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="py-3.5 px-3 text-[12px] font-semibold text-slate-500 whitespace-nowrap">
+                                    {tipo.total}{" "}
+                                    {tipo.total === 1 ? "check-in" : "check-ins"}
+                                  </td>
+                                  <td className="py-3.5 px-3">
+                                    <button
+                                      onClick={() => alternarTipoAtivo(tipo)}
+                                      title={
+                                        tipo.active !== false
+                                          ? "Desligar: sai dos check-ins"
+                                          : "Ligar: volta aos check-ins"
+                                      }
+                                      className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-slate-600 whitespace-nowrap cursor-pointer hover:text-slate-800"
+                                    >
+                                      <span
+                                        className={`w-2 h-2 rounded-full ${
+                                          tipo.active !== false
+                                            ? "bg-emerald-500"
+                                            : "bg-slate-300"
+                                        }`}
+                                      />
+                                      {tipo.active !== false ? "Ativo" : "Inativo"}
+                                    </button>
+                                  </td>
+                                  <td className="py-3.5 px-3">
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => {
+                                          startEditOperationType(tipo);
+                                          setModalTipoAberto(true);
+                                        }}
+                                        className="h-8 px-3.5 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all whitespace-nowrap"
+                                      >
+                                        Editar
+                                      </button>
+                                      <button
+                                        onClick={() => deleteOperationType(tipo.id)}
+                                        title="Excluir tipo"
+                                        className="w-8 h-8 border border-rose-200 text-rose-500 hover:bg-rose-50 rounded-xl flex items-center justify-center cursor-pointer transition-all"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="px-6 py-4 flex items-center justify-between gap-3 border-t border-slate-100">
+                        <p className="text-[11px] font-bold text-slate-400">
+                          {filtrados.length}{" "}
+                          {filtrados.length === 1
+                            ? "tipo cadastrado"
+                            : "tipos cadastrados"}
+                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            disabled={pagina <= 1}
+                            onClick={() => setPaginaTipos(pagina - 1)}
+                            className="w-8 h-8 rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          {Array.from({ length: totalPaginas }, (_, i) => i + 1).map(
+                            (numero) => (
+                              <button
+                                key={numero}
+                                onClick={() => setPaginaTipos(numero)}
+                                className={`w-8 h-8 rounded-xl text-[11px] font-black cursor-pointer transition-all ${
+                                  numero === pagina
+                                    ? "bg-[#015FC9] text-white"
+                                    : "border border-slate-200 text-slate-500 hover:bg-slate-50"
+                                }`}
+                              >
+                                {numero}
+                              </button>
+                            ),
+                          )}
+                          <button
+                            disabled={pagina >= totalPaginas}
+                            onClick={() => setPaginaTipos(pagina + 1)}
+                            className="w-8 h-8 rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* USO NOS CHECK-INS */}
+                    <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5 flex flex-col gap-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <BarChart3 className="w-5 h-5 text-[#015FC9] shrink-0" />
+                          <div className="min-w-0">
+                            <h4 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                              Uso nos check-ins
+                            </h4>
+                            <p className="text-[11px] text-slate-400 font-semibold whitespace-nowrap">
+                              Distribuição por tipo de operação
+                            </p>
+                          </div>
+                        </div>
+                        <div className="relative shrink-0">
+                          <select
+                            value={periodoTipos}
+                            onChange={(e) => setPeriodoTipos(e.target.value as any)}
+                            className="appearance-none h-9 pl-2.5 pr-7 bg-white border border-slate-200 rounded-xl text-[10.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden"
+                          >
+                            <option value="mes">Este mês</option>
+                            <option value="semana">Últimos 7 dias</option>
+                            <option value="tudo">Todo o período</option>
+                          </select>
+                          <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        </div>
+                      </div>
+
+                      {usoNoPeriodo.length === 0 ? (
+                        <div className="py-10 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                          Nenhum tipo cadastrado
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-3 max-h-[380px] overflow-y-auto pr-1">
+                          {usoNoPeriodo.map((tipo) => (
+                            <div key={tipo.id} className="flex items-center gap-3">
+                              <Emblema tipo={tipo} tamanho="w-10 h-10" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[12.5px] font-black text-slate-800 truncate leading-tight">
+                                  {tipo.label}
+                                </p>
+                                <span className="mt-1.5 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                  <span
+                                    className="block h-full rounded-full"
+                                    style={{
+                                      width: `${(tipo.noPeriodo / maiorUso) * 100}%`,
+                                      backgroundColor: tipo.color,
+                                    }}
+                                  />
+                                </span>
+                              </div>
+                              <p className="text-xl font-black text-[#0D233A] leading-none shrink-0">
+                                {tipo.noPeriodo}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="border-t border-slate-100 pt-3 flex items-baseline gap-2">
+                        <span className="text-3xl font-black text-[#0D233A] leading-none">
+                          {totalNoPeriodo}
+                        </span>
+                        <span className="text-[12px] font-semibold text-slate-400">
+                          check-ins no período
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
