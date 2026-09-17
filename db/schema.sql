@@ -276,6 +276,46 @@ create index if not exists idx_check_in_operations_tipo
   on public.check_in_operations (operation_type_id);
 
 -- ----------------------------------------------------------------------------
+-- 8.4 member_devices - de que aparelho cada integrante se cadastrou
+-- ----------------------------------------------------------------------------
+-- Prende o acesso ao painel ao aparelho do cadastro. Guarda a ficha tecnica que
+-- o navegador entrega e, de identificavel, so hashes: o do identificador do
+-- cookie e o HMAC do IP publico (este ultimo so quando DEVICE_IP_HMAC_KEY esta
+-- configurada no servidor).
+create table if not exists public.member_devices (
+  id                uuid primary key default gen_random_uuid(),
+  member_id         text references public.time_delta (id) on delete cascade,
+  candidate_id      text,
+  whatsapp          text,
+  device_id_hash    text,
+  fingerprint       text,
+  trusted           boolean not null default true,
+  device_type       text,
+  browser           text,
+  os                text,
+  platform          text,
+  user_agent        text,
+  screen_resolution text,
+  timezone          text,
+  language          text,
+  languages         text[],
+  touch_points      integer,
+  ip_hash           text,
+  origin            text not null default 'cadastro',
+  created_at        timestamptz not null default now(),
+  last_seen_at      timestamptz not null default now()
+);
+
+create index if not exists idx_member_devices_membro  on public.member_devices (member_id);
+create index if not exists idx_member_devices_whats   on public.member_devices (whatsapp);
+create index if not exists idx_member_devices_cliente on public.member_devices (candidate_id);
+create index if not exists idx_member_devices_hash    on public.member_devices (device_id_hash);
+
+create unique index if not exists idx_member_devices_unico
+  on public.member_devices (member_id, device_id_hash)
+  where member_id is not null and device_id_hash is not null;
+
+-- ----------------------------------------------------------------------------
 -- 9. Migracoes - completa bancos que ja existiam antes
 -- ----------------------------------------------------------------------------
 -- Num banco novo nada aqui muda coisa alguma; num banco antigo, adiciona as
@@ -458,7 +498,8 @@ begin
   foreach t in array array[
     'auth_users', 'candidates', 'parties', 'time_delta',
     'operation_types', 'panfletagem_areas', 'campaign_pins', 'check_ins',
-    'check_in_media', 'check_in_notes', 'check_in_operations'
+    'check_in_media', 'check_in_notes', 'check_in_operations',
+    'member_devices'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);

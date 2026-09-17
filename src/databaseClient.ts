@@ -10,6 +10,7 @@ import {
   Party,
   OperationType
 } from './types';
+import type { FichaDispositivo } from './services/dispositivo';
 
 const databaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || '';
 const databaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
@@ -959,6 +960,122 @@ export const DatabaseService = {
       return { success: true };
     } catch (err: any) {
       console.error('Erro ao descartar rascunho do check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  // --------------------------------------------------------------- aparelhos
+  /**
+   * Guarda o aparelho de um integrante.
+   *
+   * Chamado no cadastro pelo QR Code e, depois, a cada entrada no painel, para
+   * atualizar a ultima vez em que aquele aparelho apareceu.
+   */
+  async registrarDispositivoMembro(dados: {
+    memberId?: string | null;
+    candidateId?: string | null;
+    whatsapp?: string | null;
+    origem: 'cadastro' | 'login';
+    ficha: FichaDispositivo;
+  }) {
+    if (!db) return { success: false };
+    try {
+      const { ficha } = dados;
+      const linha = {
+        member_id: dados.memberId || null,
+        candidate_id: dados.candidateId || null,
+        whatsapp: dados.whatsapp || null,
+        device_id_hash: ficha.deviceIdHash,
+        fingerprint: ficha.fingerprint,
+        device_type: ficha.deviceType,
+        browser: ficha.browser,
+        os: ficha.os,
+        platform: ficha.platform,
+        user_agent: ficha.userAgent,
+        screen_resolution: ficha.screenResolution,
+        timezone: ficha.timezone,
+        language: ficha.language,
+        languages: ficha.languages,
+        touch_points: ficha.touchPoints,
+        ip_hash: ficha.ipHash,
+        origin: dados.origem,
+        last_seen_at: ficha.accessedAt
+      };
+
+      // Mesmo aparelho do mesmo integrante: atualiza, nao duplica.
+      if (dados.memberId) {
+        const { data: existente } = await db
+          .from('member_devices')
+          .select('id')
+          .eq('member_id', dados.memberId)
+          .eq('device_id_hash', ficha.deviceIdHash)
+          .limit(1);
+
+        if (existente && existente.length > 0) {
+          const { error } = await db
+            .from('member_devices')
+            .update({ last_seen_at: ficha.accessedAt, ip_hash: ficha.ipHash })
+            .eq('id', existente[0].id);
+          if (error) throw error;
+          return { success: true };
+        }
+      }
+
+      const { error } = await db.from('member_devices').insert(linha);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao registrar aparelho do integrante:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Aparelhos ja vinculados a um integrante. */
+  async listarDispositivosMembro(memberId: string) {
+    if (!db) return { success: false, data: [] as any[] };
+    try {
+      const { data, error } = await db
+        .from('member_devices')
+        .select('*')
+        .eq('member_id', memberId)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return { success: true, data: data || [] };
+    } catch (err: any) {
+      console.error('Erro ao ler aparelhos do integrante:', err);
+      return { success: false, data: [] as any[], error: err.message };
+    }
+  },
+
+  /** Marca que aquele aparelho apareceu de novo agora. */
+  async marcarDispositivoVisto(id: string, ficha: FichaDispositivo) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('member_devices')
+        .update({
+          last_seen_at: ficha.accessedAt,
+          ip_hash: ficha.ipHash,
+          device_id_hash: ficha.deviceIdHash
+        })
+        .eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao atualizar aparelho do integrante:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Solta o vinculo: o integrante volta a poder entrar de um aparelho novo. */
+  async removerDispositivoMembro(id: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('member_devices').delete().eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao remover aparelho do integrante:', err);
       return { success: false, error: err.message };
     }
   },

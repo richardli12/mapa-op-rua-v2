@@ -16,6 +16,8 @@ import { PARTY_LOGOS, BRAND_LOGO, CHECKIN_COVER } from "./mediaUrls";
 import OperationTypeSelect from "./components/OperationTypeSelect";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
+import { lerDispositivo } from "./services/dispositivo";
+import DispositivosMembroModal from "./components/DispositivosMembroModal";
 import BrandMark from "./components/BrandMark";
 import {
   VincularMembroModal,
@@ -26,6 +28,7 @@ import {
 import {
   MapPin,
   Users,
+  Smartphone,
   Layers,
   Flag,
   Megaphone,
@@ -573,6 +576,8 @@ export default function App() {
   const [partySearch, setPartySearch] = useState("");
   const [inspectedCandidate, setInspectedCandidate] =
     useState<Candidate | null>(null);
+  /** Integrante cuja ficha de aparelhos o administrador está olhando. */
+  const [membroDosAparelhos, setMembroDosAparelhos] = useState<any>(null);
   const [supporters, setSupporters] = useState<any[]>(() => {
     const saved = localStorage.getItem("campaign_supporters");
     return saved
@@ -3928,6 +3933,68 @@ export default function App() {
           return;
         }
 
+      /**
+       * Trava de aparelho.
+       *
+       * Quem se cadastrou pelo QR Code ficou ligado ao aparelho daquele
+       * momento; é dele, e só dele, que o painel abre. O reconhecimento tenta
+       * primeiro o identificador guardado no cookie e, se ele não estiver mais
+       * lá (cookie limpo, navegação privada), a impressão do aparelho — tela,
+       * sistema, fuso, idioma. Mesmo aparelho, mesmo acesso.
+       *
+       * Duas situações abrem exceção, senão a trava prenderia quem não deve:
+       * integrante sem nenhum aparelho guardado (cadastro antigo, anterior a
+       * esta trava) vincula o aparelho no primeiro acesso; e falha de leitura
+       * no banco não bloqueia ninguém — não dá para trancar a equipe inteira do
+       * lado de fora porque uma consulta não respondeu.
+       */
+      const validarAparelhoDoMembro = async (
+        memberId: string,
+        whatsapp: string,
+        candidateId: string,
+      ) => {
+        if (!memberId) return true;
+        try {
+          const ficha = await lerDispositivo();
+          const lista = await DatabaseService.listarDispositivosMembro(memberId);
+          if (!lista.success) return true;
+
+          const aparelhos = lista.data || [];
+          if (aparelhos.length === 0) {
+            await DatabaseService.registrarDispositivoMembro({
+              memberId,
+              candidateId,
+              whatsapp,
+              origem: "login",
+              ficha,
+            });
+            return true;
+          }
+
+          const porCookie = aparelhos.find(
+            (d: any) => d.device_id_hash && d.device_id_hash === ficha.deviceIdHash,
+          );
+          const porImpressao = aparelhos.find(
+            (d: any) => d.fingerprint && d.fingerprint === ficha.fingerprint,
+          );
+          const conhecido = porCookie || porImpressao;
+
+          if (!conhecido) {
+            triggerNotification(
+              "Este não é o aparelho usado no seu cadastro. Por segurança, entre pelo aparelho de sempre ou peça a quem coordena a equipe para liberar este.",
+              "error",
+            );
+            return false;
+          }
+
+          await DatabaseService.marcarDispositivoVisto(conhecido.id, ficha);
+          return true;
+        } catch (err) {
+          console.warn("Não foi possível conferir o aparelho:", err);
+          return true;
+        }
+      };
+
         setIsVerifyingLogin(true);
         const res = await DatabaseService.checkSupporter(contactInput);
         setIsVerifyingLogin(false);
@@ -3960,6 +4027,11 @@ export default function App() {
             );
             return;
           }
+
+          // O painel abre só no aparelho em que a pessoa se cadastrou: número
+          // certo digitado em outro celular não entra no lugar de ninguém.
+          const liberado = await validarAparelhoDoMembro(sup.id, sup.whatsapp, sCandId);
+          if (!liberado) return;
 
           const authObj = {
             id: sup.id || "sup_" + Math.random(),
@@ -6866,6 +6938,17 @@ export default function App() {
                                           <Phone className="w-3.5 h-3.5" />
                                         </a>
 
+                                        {/* APARELHOS DE ACESSO (só o administrador vê) */}
+                                        <button
+                                          onClick={() =>
+                                            setMembroDosAparelhos(sup)
+                                          }
+                                          className="p-1 h-7 w-7 hover:bg-sky-50 text-slate-400 hover:text-sky-700 rounded-md border border-transparent hover:border-sky-100 flex items-center justify-center transition-all cursor-pointer"
+                                          title="Aparelhos de acesso"
+                                        >
+                                          <Smartphone className="w-3.5 h-3.5" />
+                                        </button>
+
                                         {/* DELETE REMOVE MULTIPLIER BUTTON */}
                                         <button
                                           onClick={() => {
@@ -7728,6 +7811,15 @@ export default function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-slate-50 font-sans text-slate-800">
       {/* Confirmação no meio da tela, com a cara do sistema */}
       <ConfirmDialog request={confirmRequest} onClose={closeConfirmation} />
+
+      {/* Ficha de aparelhos de um integrante — visível só aqui, na área do
+          administrador. Nenhuma tela de integrante mostra estes dados. */}
+      <DispositivosMembroModal
+        membro={membroDosAparelhos}
+        onClose={() => setMembroDosAparelhos(null)}
+        notify={triggerNotification}
+        askConfirmation={askConfirmation}
+      />
 
       {/* Toast Notification HUD */}
       <AnimatePresence>
