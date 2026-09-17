@@ -12,7 +12,7 @@ import {
   mergeStreetLists,
   StreetOption,
 } from '../services/streetSources';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2 } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, getCheckInPriority } from '../types';
 import { buildOperationIconSvg } from '../operationIcons';
 
@@ -390,6 +390,18 @@ export default function MapContainer({
 }: MapContainerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
+  /**
+   * Régua do mapa.
+   *
+   * Ligada, cada toque no mapa marca um ponto e a linha entre eles mostra a
+   * distância. Enquanto está ligada o mapa não serve para escolher coordenada:
+   * seriam dois usos do mesmo clique disputando a mesma ação.
+   */
+  const [reguaAtiva, setReguaAtiva] = useState(false);
+  const [pontosRegua, setPontosRegua] = useState<{ lat: number; lng: number }[]>([]);
+  const reguaGroupRef = useRef<L.LayerGroup | null>(null);
+  const reguaAtivaRef = useRef(false);
+  reguaAtivaRef.current = reguaAtiva;
   const circlesGroupRef = useRef<L.LayerGroup | null>(null);
   const pinsGroupRef = useRef<L.LayerGroup | null>(null);
   const tempGroupRef = useRef<L.LayerGroup | null>(null);
@@ -1037,9 +1049,13 @@ export default function MapContainer({
 
     // Listeners for map coordinate picking
     map.on('click', (e: L.LeafletMouseEvent) => {
-      onCoordsPicked({ lat: e.latlng.lat, lng: e.latlng.lng });
       setOpenBairroDropdown(false);
       setOpenRuaDropdown(false);
+      if (reguaAtivaRef.current) {
+        setPontosRegua(pontos => [...pontos, { lat: e.latlng.lat, lng: e.latlng.lng }]);
+        return;
+      }
+      onCoordsPicked({ lat: e.latlng.lat, lng: e.latlng.lng });
     });
 
     map.on('mousemove', (e: L.LeafletMouseEvent) => {
@@ -1082,6 +1098,80 @@ export default function MapContainer({
       map.getContainer().style.cursor = '';
     }
   }, [clickToPickCoords]);
+
+  /** Formata a distância como se lê em campo: metros até 1 km, depois km. */
+  const medida = (metros: number) =>
+    metros < 1000 ? `${Math.round(metros)} m` : `${(metros / 1000).toFixed(2)} km`;
+
+  /** Distância total do caminho marcado na régua. */
+  const totalRegua = (() => {
+    if (pontosRegua.length < 2 || !mapRef.current) return 0;
+    let soma = 0;
+    for (let i = 1; i < pontosRegua.length; i++) {
+      soma += mapRef.current.distance(
+        L.latLng(pontosRegua[i - 1].lat, pontosRegua[i - 1].lng),
+        L.latLng(pontosRegua[i].lat, pontosRegua[i].lng)
+      );
+    }
+    return soma;
+  })();
+
+  // Desenho da régua: refeito a cada ponto novo.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!reguaGroupRef.current) {
+      reguaGroupRef.current = L.layerGroup().addTo(map);
+    }
+    const camada = reguaGroupRef.current;
+    camada.clearLayers();
+
+    if (pontosRegua.length === 0) return;
+
+    const caminho = pontosRegua.map(p => L.latLng(p.lat, p.lng));
+    if (caminho.length > 1) {
+      // Duas linhas: a branca embaixo dá contraste sobre mapa claro e escuro.
+      L.polyline(caminho, { color: '#ffffff', weight: 6, opacity: 0.9 }).addTo(camada);
+      L.polyline(caminho, { color: '#F58220', weight: 3 }).addTo(camada);
+    }
+
+    let acumulado = 0;
+    caminho.forEach((ponto, i) => {
+      if (i > 0) acumulado += map.distance(caminho[i - 1], ponto);
+      L.marker(ponto, {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({
+          className: '',
+          html:
+            '<span style="display:block;width:12px;height:12px;border-radius:50%;' +
+            'background:#F58220;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)"></span>',
+          iconSize: [12, 12],
+          iconAnchor: [6, 6]
+        })
+      }).addTo(camada);
+
+      if (i > 0) {
+        L.marker(ponto, {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({
+            className: '',
+            html:
+              '<span style="white-space:nowrap;transform:translate(10px,-50%);display:inline-block;' +
+              'background:#0C3556;color:#fff;font:700 10px/1 ui-sans-serif,system-ui;' +
+              'padding:4px 6px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.3)">' +
+              medida(acumulado) +
+              '</span>',
+            iconSize: [0, 0],
+            iconAnchor: [0, 0]
+          })
+        }).addTo(camada);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pontosRegua]);
 
   // Se mudar o candidato, ativa o loader imediatamente para não piscar no mapa antigo
   useEffect(() => {
@@ -1569,6 +1659,65 @@ export default function MapContainer({
 
       {/* Map Element */}
       <div id="campaign-primary-map" ref={containerRef} className="w-full h-full bg-slate-100" />
+
+      {/* RÉGUA: medir distância no mapa */}
+      <div className="absolute top-4 right-4 z-[1001] font-sans flex flex-col items-end gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setReguaAtiva(ativa => !ativa);
+            if (reguaAtiva) setPontosRegua([]);
+          }}
+          title={reguaAtiva ? 'Fechar a régua' : 'Medir distância no mapa'}
+          className={`h-10 px-3.5 rounded-xl shadow-lg border flex items-center gap-2 text-xs font-extrabold transition-all cursor-pointer active:scale-95 ${
+            reguaAtiva
+              ? 'bg-[#F58220] border-orange-600/30 text-white'
+              : 'bg-white/95 backdrop-blur-md border-slate-200/70 text-slate-700 hover:bg-white'
+          }`}
+        >
+          <Ruler className="w-4 h-4" />
+          Régua
+        </button>
+
+        {reguaAtiva && (
+          <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/70 p-3 w-56 animate-in slide-in-from-top duration-200">
+            <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">
+              Distância medida
+            </p>
+            <p className="text-xl font-black text-[#0D233A] leading-none mt-1">
+              {pontosRegua.length < 2 ? '—' : medida(totalRegua)}
+            </p>
+            <p className="text-[10px] text-slate-500 font-semibold leading-snug mt-1.5">
+              {pontosRegua.length === 0
+                ? 'Toque no mapa para marcar o primeiro ponto.'
+                : pontosRegua.length === 1
+                  ? 'Marque o próximo ponto para ver a distância.'
+                  : `${pontosRegua.length} pontos marcados.`}
+            </p>
+
+            <div className="flex gap-1.5 mt-2.5">
+              <button
+                type="button"
+                onClick={() => setPontosRegua(p => p.slice(0, -1))}
+                disabled={pontosRegua.length === 0}
+                className="flex-1 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-600 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Undo2 className="w-3 h-3" />
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={() => setPontosRegua([])}
+                disabled={pontosRegua.length === 0}
+                className="flex-1 h-8 rounded-lg bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-600 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Trash2 className="w-3 h-3" />
+                Limpar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* PAINEL DE NAVEGAÇÃO CASCATA (TOP SQUIRCLE) */}
       {/* Abaixo do botão Voltar, que ocupa o topo do canto esquerdo. */}
