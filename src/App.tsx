@@ -830,6 +830,19 @@ export default function App() {
     "geral" | "equipe" | "checkins"
   >("geral");
 
+  /** Estado da aba Equipe: busca, filtro de status, página e ranking. */
+  const [buscaEquipe, setBuscaEquipe] = useState("");
+  const [filtroEquipe, setFiltroEquipe] = useState<"todos" | "campo" | "ativo">(
+    "todos",
+  );
+  const [paginaEquipe, setPaginaEquipe] = useState(1);
+  const [periodoRanking, setPeriodoRanking] = useState<
+    "mes" | "semana" | "tudo"
+  >("mes");
+  const [rankingCompleto, setRankingCompleto] = useState(false);
+  /** Integrante aberto no perfil, com os dados e as ações dele. */
+  const [membroDoPerfil, setMembroDoPerfil] = useState<any>(null);
+
   /** Tela aberta na área do administrador. */
   const [telaAdm, setTelaAdm] = useState<'clientes' | 'configuracoes'>('clientes');
 
@@ -6382,6 +6395,158 @@ export default function App() {
           onClose={closeConfirmation}
         />
 
+        {/* Ficha de aparelhos de um integrante: esta tela tem a sua própria
+            árvore, então os modais dela moram aqui. */}
+        <DispositivosMembroModal
+          membro={membroDosAparelhos}
+          onClose={() => setMembroDosAparelhos(null)}
+          notify={triggerNotification}
+          askConfirmation={askConfirmation}
+        />
+
+        {/* PERFIL DO INTEGRANTE — o que a lista da equipe mostra em "Ver perfil" */}
+        {membroDoPerfil && (
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[3000]"
+            onClick={() => setMembroDoPerfil(null)}
+          >
+            <div
+              className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-md w-full p-6 flex flex-col gap-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <span className="w-16 h-16 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 text-base font-black text-[#015FC9] uppercase">
+                    {membroDoPerfil.image ? (
+                      <img
+                        src={membroDoPerfil.image}
+                        alt={membroDoPerfil.full_name || "Integrante"}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      (membroDoPerfil.full_name || "DT").substring(0, 2)
+                    )}
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-black text-[#0D233A] leading-tight truncate">
+                      {membroDoPerfil.full_name}
+                    </h3>
+                    <p className="text-[12px] font-semibold text-slate-400">
+                      {membroDoPerfil.emCampo ? "Em campo hoje" : "Ativo"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMembroDoPerfil(null)}
+                  className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-400 flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  {
+                    rotulo: "Telefone",
+                    valor:
+                    membroDoPerfil.telefone ||
+                    membroDoPerfil.whatsapp ||
+                    "Sem telefone",
+                  },
+                  {
+                    rotulo: "Origem",
+                    valor:
+                      membroDoPerfil.source === "qrcode"
+                        ? "QR Code"
+                        : membroDoPerfil.source === "vinculado"
+                          ? "Vinculado"
+                          : "Cadastro manual",
+                  },
+                  {
+                    rotulo: "Check-ins",
+                    valor: `${membroDoPerfil.total ?? 0}`,
+                  },
+                  {
+                    rotulo: "Membro desde",
+                    valor: (membroDoPerfil.created_at || membroDoPerfil.createdAt)
+                      ? new Date(
+                          membroDoPerfil.created_at || membroDoPerfil.createdAt,
+                        ).toLocaleDateString("pt-BR")
+                      : "Não registrado",
+                  },
+                ].map((campo) => (
+                  <div
+                    key={campo.rotulo}
+                    className="bg-slate-50 border border-slate-100 rounded-2xl px-3.5 py-2.5"
+                  >
+                    <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">
+                      {campo.rotulo}
+                    </p>
+                    <p className="text-[13px] font-bold text-slate-700 truncate">
+                      {campo.valor}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <a
+                  href={`https://wa.me/55${(membroDoPerfil.whatsapp || "").replace(/\D/g, "")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="h-11 px-4 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Phone className="w-4 h-4" />
+                  Chamar no WhatsApp
+                </a>
+                <button
+                  onClick={() => {
+                    setMembroDosAparelhos(membroDoPerfil);
+                    setMembroDoPerfil(null);
+                  }}
+                  className="h-11 px-4 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Smartphone className="w-4 h-4 text-[#015FC9]" />
+                  Aparelhos de acesso
+                </button>
+                <button
+                  onClick={() => {
+                    const alvo = membroDoPerfil;
+                    setMembroDoPerfil(null);
+                    askConfirmation({
+                      title: "Remover da Equipe",
+                      message: `${alvo.full_name} deixa de receber as missões deste cliente.`,
+                      confirmLabel: "Remover",
+                      onConfirm: async () => {
+                        setSupporters((prev) =>
+                          prev.filter((s) => s.id !== alvo.id),
+                        );
+                        if (isDatabaseConfigured) {
+                          const res = await DatabaseService.deleteSupporter(
+                            alvo.id,
+                          );
+                          if (res.success)
+                            triggerNotification("Integrante removido!", "success");
+                        } else {
+                          triggerNotification(
+                            "Integrante removido localmente!",
+                            "info",
+                          );
+                        }
+                      },
+                    });
+                  }}
+                  className="h-11 px-4 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Remover da equipe
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Toast Notification HUD */}
         <AnimatePresence>
           {notification && (
@@ -7574,233 +7739,552 @@ export default function App() {
             )}
 
             {/* EQUIPE */}
-            {abaCliente === "equipe" && (
-              <div className="grid grid-cols-1 gap-6">
-                  {/* LEFT COLUMN: INTERACTIVE TIME DELTA (2/3 Grid length) */}
-                  <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden flex flex-col min-h-[350px]">
-                    <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                      <div>
-                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
-                          <span>🚀 Equipe</span>
-                        </h4>
-                        <p className="text-[10px] text-slate-400 font-bold mt-0.5">
-                          Gerenciamento e comunicação com mobilizadores ativos
-                        </p>
-                      </div>
+            {abaCliente === "equipe" && (() => {
+              const agora = new Date();
+              const inicioDeHoje = new Date(
+                agora.getFullYear(),
+                agora.getMonth(),
+                agora.getDate(),
+              ).getTime();
+              const inicioDeOntem = inicioDeHoje - 86400000;
+              const inicioDoPeriodo =
+                periodoRanking === "semana"
+                  ? inicioDeHoje - 6 * 86400000
+                  : periodoRanking === "mes"
+                    ? new Date(
+                        agora.getFullYear(),
+                        agora.getMonth(),
+                        1,
+                      ).getTime()
+                    : 0;
 
-                      <div className="flex items-center gap-2">
-                        {/* ESCOLHA DE TRAZER OU NÃO A EQUIPE DE FORA */}
-                        <button
-                          disabled={togglingTeamId === inspectedCandidate.id}
-                          onClick={() => handleToggleTeamSync(inspectedCandidate)}
-                          title={
-                            inspectedCandidate.syncTeam
-                              ? "A equipe deste cliente está sendo trazida. Clique para parar."
-                              : "A equipe deste cliente não é trazida. Clique para trazer."
-                          }
-                          className={`px-3 py-1.5 font-bold text-[11px] rounded-xl flex items-center gap-1.5 border transition-all cursor-pointer ${
-                            inspectedCandidate.syncTeam
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                              : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
-                          } ${
-                            togglingTeamId === inspectedCandidate.id
-                              ? "opacity-60 cursor-wait"
-                              : ""
-                          }`}
-                        >
-                          <span
-                            className={`w-7 h-4 rounded-full flex items-center px-0.5 transition-all ${
-                              inspectedCandidate.syncTeam
-                                ? "bg-emerald-500 justify-end"
-                                : "bg-slate-300 justify-start"
-                            }`}
-                          >
-                            <span className="w-3 h-3 bg-white rounded-full block"></span>
+              /** (94) 99123-4567 a partir do que estiver gravado. */
+              const formatarTelefone = (bruto?: string) => {
+                const n = (bruto || "").replace(/\D/g, "").replace(/^55/, "");
+                if (n.length === 11)
+                  return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+                if (n.length === 10)
+                  return `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6)}`;
+                return bruto || "Sem telefone";
+              };
+
+              /** Tudo que a tela precisa saber de cada integrante. */
+              const membros = equipeDoCliente.map((m: any) => {
+                const meus = checkInsDoCliente.filter(
+                  (c: any) => c.memberId === m.id || c.name === m.full_name,
+                );
+                const ultimo = meus
+                  .map((c: any) => new Date(c.createdAt).getTime())
+                  .filter((t: number) => !Number.isNaN(t))
+                  .sort((a: number, b: number) => b - a)[0];
+                const noPeriodo = meus.filter((c: any) => {
+                  const t = new Date(c.createdAt).getTime();
+                  return !Number.isNaN(t) && t >= inicioDoPeriodo;
+                }).length;
+                return {
+                  ...m,
+                  telefone: formatarTelefone(m.whatsapp),
+                  total: meus.length,
+                  noPeriodo,
+                  ultimo,
+                  emCampo: ultimo !== undefined && ultimo >= inicioDeHoje,
+                };
+              });
+
+              /** "Hoje, 08:42", "Ontem, 17:26" ou a data cheia. */
+              const quandoFoi = (t?: number) => {
+                if (t === undefined) return "Nunca registrou";
+                const hora = new Date(t).toLocaleTimeString("pt-BR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                if (t >= inicioDeHoje) return `Hoje, ${hora}`;
+                if (t >= inicioDeOntem) return `Ontem, ${hora}`;
+                return `${new Date(t).toLocaleDateString("pt-BR")}, ${hora}`;
+              };
+
+              const origemDoMembro = (fonte?: string) =>
+                fonte === "qrcode"
+                  ? { rotulo: "QR Code", cor: "bg-purple-50 text-purple-600" }
+                  : fonte === "vinculado"
+                    ? { rotulo: "Vinculado", cor: "bg-slate-100 text-slate-500" }
+                    : { rotulo: "Cadastro manual", cor: "bg-blue-50 text-[#015FC9]" };
+
+              const busca = buscaEquipe.trim().toLowerCase();
+              const somenteNumeros = busca.replace(/\D/g, "");
+              const filtrados = membros.filter((m: any) => {
+                const casaBusca =
+                  !busca ||
+                  (m.full_name || "").toLowerCase().includes(busca) ||
+                  (somenteNumeros.length > 0 &&
+                    (m.whatsapp || "").replace(/\D/g, "").includes(somenteNumeros));
+                const casaStatus =
+                  filtroEquipe === "todos" ||
+                  (filtroEquipe === "campo" ? m.emCampo : !m.emCampo);
+                return casaBusca && casaStatus;
+              });
+
+              const porPagina = 10;
+              const totalPaginas = Math.max(
+                1,
+                Math.ceil(filtrados.length / porPagina),
+              );
+              const pagina = Math.min(paginaEquipe, totalPaginas);
+              const daPagina = filtrados.slice(
+                (pagina - 1) * porPagina,
+                pagina * porPagina,
+              );
+
+              const emCampoAgora = membros.filter((m: any) => m.emCampo).length;
+
+              const rankingEquipe = [...membros].sort(
+                (a: any, b: any) =>
+                  b.noPeriodo - a.noPeriodo ||
+                  (a.full_name || "").localeCompare(b.full_name || ""),
+              );
+              const mostrados = rankingCompleto
+                ? rankingEquipe
+                : rankingEquipe.slice(0, 3);
+              const maiorDoPeriodo = rankingEquipe[0]?.noPeriodo || 1;
+              const medalhas = [
+                "bg-amber-100 text-amber-700 border-amber-200",
+                "bg-slate-200 text-slate-600 border-slate-300",
+                "bg-orange-100 text-orange-700 border-orange-200",
+              ];
+
+              const Retrato = ({
+                pessoa,
+                tamanho,
+              }: {
+                pessoa: any;
+                tamanho: string;
+              }) => (
+                <span
+                  className={`${tamanho} rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 text-[11px] font-black text-[#015FC9] uppercase`}
+                >
+                  {pessoa.image ? (
+                    <img
+                      src={pessoa.image}
+                      alt={pessoa.full_name || "Integrante"}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display =
+                          "none";
+                      }}
+                    />
+                  ) : (
+                    (pessoa.full_name || "DT").substring(0, 2)
+                  )}
+                </span>
+              );
+
+              return (
+                <div className="flex flex-col gap-5">
+                  {/* CABEÇALHO DA EQUIPE */}
+                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm px-6 py-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-10 h-10 rounded-2xl bg-[#F1F5FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                        <Users className="w-5 h-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-[17px] font-black text-[#0D233A] leading-tight flex items-center gap-2 flex-wrap">
+                          Equipe
+                          <span className="px-2.5 py-1 rounded-full bg-[#EFF4FB] text-[#015FC9] text-[11px] font-black">
+                            {equipeDoCliente.length}{" "}
+                            {equipeDoCliente.length === 1
+                              ? "membro"
+                              : "membros"}
                           </span>
-                          <span>Trazer equipe</span>
-                        </button>
-
-                        <button
-                          onClick={() => setTeamModal("campos")}
-                          title="Escolher o que perguntar no cadastro deste cliente"
-                          className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <PenTool className="w-3.5 h-3.5" />
-                          <span>Campos</span>
-                        </button>
-
-                        <button
-                          onClick={() => setTeamModal("vincular")}
-                          className="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <Link2 className="w-3.5 h-3.5" />
-                          <span>Vincular</span>
-                        </button>
-
-                        <button
-                          onClick={() => setTeamModal("qrcode")}
-                          className="px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-600 border border-indigo-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <QrCode className="w-3.5 h-3.5" />
-                          <span>QR Code</span>
-                        </button>
-
-                        <button
-                          onClick={() => setTeamModal("manual")}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-xl flex items-center gap-1 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
-                        >
-                          <PlusCircle className="w-3.5 h-3.5" />
-                          <span>Cadastrar</span>
-                        </button>
+                        </h3>
+                        <p className="text-[12px] text-slate-400 font-semibold">
+                          Gerencie os membros vinculados a este cliente
+                        </p>
                       </div>
                     </div>
 
-                    {/* SUPPORTERS LIST */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[500px] border-collapse text-left">
-                        <thead>
-                          <tr className="bg-[#FAFBFD] border-b border-slate-100">
-                            <th className="py-3 px-6 text-[9.5px] uppercase font-black text-[#8492A6]">
-                              Integrante
-                            </th>
-                            <th className="py-3 px-6 text-[9.5px] uppercase font-black text-[#8492A6]">
-                              WhatsApp
-                            </th>
-                            <th className="py-3 px-6 text-[9.5px] uppercase font-black text-[#8492A6] text-right">
-                              Ações
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {supporters.filter(
-                            (s) =>
-                              s.candidate_id === inspectedCandidate.id ||
-                              s.candidateId === inspectedCandidate.id,
-                          ).length === 0 ? (
-                            <tr>
-                              <td
-                                colSpan={3}
-                                className="py-12 text-center text-slate-400 font-bold text-xs uppercase tracking-widest bg-slate-50/20"
-                              >
-                                Nenhum integrante registrado na Equipe
-                              </td>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      {/* Chave da importação da equipe da base externa. */}
+                      <button
+                        disabled={togglingTeamId === inspectedCandidate.id}
+                        onClick={() => handleToggleTeamSync(inspectedCandidate)}
+                        title={
+                          inspectedCandidate.syncTeam
+                            ? "A equipe deste cliente está sendo trazida. Clique para parar."
+                            : "A equipe deste cliente não é trazida. Clique para trazer."
+                        }
+                        className={`h-11 px-3.5 font-bold text-xs rounded-2xl flex items-center gap-2 border transition-all cursor-pointer ${
+                          inspectedCandidate.syncTeam
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                        } ${
+                          togglingTeamId === inspectedCandidate.id
+                            ? "opacity-60 cursor-wait"
+                            : ""
+                        }`}
+                      >
+                        <span
+                          className={`w-7 h-4 rounded-full flex items-center px-0.5 transition-all ${
+                            inspectedCandidate.syncTeam
+                              ? "bg-emerald-500 justify-end"
+                              : "bg-slate-300 justify-start"
+                          }`}
+                        >
+                          <span className="w-3 h-3 bg-white rounded-full block" />
+                        </span>
+                        Trazer equipe
+                      </button>
+
+                      <button
+                        onClick={() => setTeamModal("campos")}
+                        className="h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95"
+                      >
+                        <PenTool className="w-4 h-4 text-[#015FC9]" />
+                        Campos
+                      </button>
+                      <button
+                        onClick={() => setTeamModal("vincular")}
+                        className="h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95"
+                      >
+                        <Link2 className="w-4 h-4 text-[#015FC9]" />
+                        Vincular
+                      </button>
+                      <button
+                        onClick={() => setTeamModal("qrcode")}
+                        className="h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95"
+                      >
+                        <QrCode className="w-4 h-4 text-[#015FC9]" />
+                        QR Code
+                      </button>
+                      <button
+                        onClick={() => setTeamModal("manual")}
+                        className="h-11 px-4 bg-[#015FC9] hover:bg-blue-600 text-white font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95"
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                        Cadastrar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* NÚMEROS DA EQUIPE */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div className="bg-white border border-slate-200 rounded-3xl shadow-sm px-6 py-5 flex items-center gap-4">
+                      <span className="w-12 h-12 rounded-2xl bg-[#EFF4FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                        <Users className="w-6 h-6" />
+                      </span>
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          Total de membros
+                        </p>
+                        <p className="text-3xl font-black text-[#0D233A] leading-tight">
+                          {equipeDoCliente.length}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-3xl shadow-sm px-6 py-5 flex items-center gap-4">
+                      <span className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <Megaphone className="w-6 h-6" />
+                      </span>
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          Em campo agora
+                        </p>
+                        <p className="text-3xl font-black text-[#0D233A] leading-tight flex items-baseline gap-2">
+                          {emCampoAgora}
+                          <span className="text-[12px] font-bold text-emerald-600">
+                            {emCampoAgora === 1 ? "Ativo" : "Ativos"}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+                    {/* LISTA DE MEMBROS */}
+                    <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+                      <div className="px-6 pt-5 pb-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Users className="w-5 h-5 text-[#015FC9] shrink-0" />
+                          <div className="min-w-0">
+                            <h4 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                              Membros da equipe
+                            </h4>
+                            <p className="text-[11px] text-slate-400 font-semibold truncate">
+                              Pessoas vinculadas a {inspectedCandidate.name}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <div className="relative flex items-center bg-white border border-slate-200 rounded-2xl h-10 px-3 w-48 focus-within:ring-2 focus-within:ring-blue-500/20">
+                            <Search className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
+                            <input
+                              type="text"
+                              value={buscaEquipe}
+                              onChange={(e) => {
+                                setBuscaEquipe(e.target.value);
+                                setPaginaEquipe(1);
+                              }}
+                              placeholder="Buscar por nome ou telefone..."
+                              className="bg-transparent border-none w-full text-[11.5px] font-semibold text-slate-700 placeholder-slate-400 focus:outline-hidden"
+                            />
+                          </div>
+                          <div className="relative">
+                            <select
+                              value={filtroEquipe}
+                              onChange={(e) => {
+                                setFiltroEquipe(e.target.value as any);
+                                setPaginaEquipe(1);
+                              }}
+                              className="appearance-none h-10 pl-3.5 pr-9 bg-white border border-slate-200 rounded-2xl text-[11.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden"
+                            >
+                              <option value="todos">Todos os status</option>
+                              <option value="campo">Em campo</option>
+                              <option value="ativo">Ativo</option>
+                            </select>
+                            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[640px] border-collapse text-left">
+                          <thead>
+                            <tr className="bg-[#FAFBFD] border-y border-slate-100">
+                              {[
+                                "Membro",
+                                "Telefone",
+                                "Origem",
+                                "Último check-in",
+                                "Status",
+                              ].map((coluna) => (
+                                <th
+                                  key={coluna}
+                                  className="py-3 px-3 text-[9.5px] uppercase font-black text-[#8492A6] whitespace-nowrap"
+                                >
+                                  {coluna}
+                                </th>
+                              ))}
+                              <th className="py-3 px-3 text-[9.5px] uppercase font-black text-[#8492A6] text-right">
+                                Ações
+                              </th>
                             </tr>
-                          ) : (
-                            supporters
-                              .filter(
-                                (s) =>
-                                  s.candidate_id === inspectedCandidate.id ||
-                                  s.candidateId === inspectedCandidate.id,
-                              )
-                              .map((sup) => {
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {daPagina.length === 0 ? (
+                              <tr>
+                                <td
+                                  colSpan={6}
+                                  className="py-14 text-center text-slate-400 font-bold text-[11px] uppercase tracking-widest"
+                                >
+                                  {equipeDoCliente.length === 0
+                                    ? "Nenhum integrante vinculado a este cliente"
+                                    : "Nenhum integrante encontrado"}
+                                </td>
+                              </tr>
+                            ) : (
+                              daPagina.map((membro: any) => {
+                                const origem = origemDoMembro(membro.source);
+                                const desde =
+                                  membro.created_at || membro.createdAt;
                                 return (
                                   <tr
-                                    key={sup.id}
-                                    className="hover:bg-slate-50/50 transition-all"
+                                    key={membro.id}
+                                    className="hover:bg-slate-50/60 transition-all"
                                   >
-                                    <td className="py-3 px-6 flex items-center gap-3">
-                                      <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 text-[#015FC9] font-black flex items-center justify-center text-xs shadow-xs uppercase overflow-hidden shrink-0">
-                                        {sup.image ? (
-                                          <img
-                                            src={sup.image}
-                                            alt={sup.full_name || "Integrante"}
-                                            className="w-full h-full object-cover"
-                                            referrerPolicy="no-referrer"
-                                            onError={(e) => {
-                                              // Foto fora do ar não pode apagar
-                                              // a linha: volta para as iniciais.
-                                              (
-                                                e.currentTarget as HTMLImageElement
-                                              ).style.display = "none";
-                                            }}
-                                          />
-                                        ) : sup.full_name ? (
-                                          sup.full_name.substring(0, 2)
-                                        ) : (
-                                          "DT"
-                                        )}
+                                    <td className="py-3.5 px-3">
+                                      <div className="flex items-center gap-3">
+                                        <Retrato
+                                          pessoa={membro}
+                                          tamanho="w-10 h-10"
+                                        />
+                                        <div className="min-w-0">
+                                          <p className="font-black text-slate-800 text-[13px] leading-tight truncate">
+                                            {membro.full_name}
+                                          </p>
+                                          <p className="text-[10.5px] text-slate-400 font-semibold whitespace-nowrap">
+                                            {desde
+                                              ? `Membro desde ${new Date(
+                                                  desde,
+                                                ).toLocaleDateString("pt-BR")}`
+                                              : "Data de entrada não registrada"}
+                                          </p>
+                                        </div>
                                       </div>
-                                      <span className="font-bold text-slate-800 text-[13.5px]">
-                                        {sup.full_name}
+                                    </td>
+                                    <td className="py-3.5 px-3 text-[12px] font-semibold text-slate-500 whitespace-nowrap">
+                                      {formatarTelefone(membro.whatsapp)}
+                                    </td>
+                                    <td className="py-3.5 px-3">
+                                      <span
+                                        className={`px-2.5 py-1 rounded-lg text-[10.5px] font-black whitespace-nowrap ${origem.cor}`}
+                                      >
+                                        {origem.rotulo}
                                       </span>
                                     </td>
-                                    <td className="py-3 px-6 font-mono text-xs font-semibold text-slate-500">
-                                      {sup.whatsapp}
+                                    <td className="py-3.5 px-3 text-[12px] font-semibold text-slate-500 whitespace-nowrap">
+                                      {quandoFoi(membro.ultimo)}
                                     </td>
-                                    <td className="py-3 px-6 text-right">
-                                      <div className="flex items-center justify-end gap-2">
-                                        {/* WHATSAPP LINK BUTTON */}
-                                        <a
-                                          href={`https://wa.me/55${(sup.whatsapp || "").replace(/\D/g, "")}`}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="p-1 h-7 w-7 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-md border border-transparent hover:border-emerald-100 flex items-center justify-center transition-all cursor-pointer"
-                                          title="Chamar no WhatsApp"
-                                        >
-                                          <Phone className="w-3.5 h-3.5" />
-                                        </a>
-
-                                        {/* APARELHOS DE ACESSO (só o administrador vê) */}
-                                        <button
-                                          onClick={() =>
-                                            setMembroDosAparelhos(sup)
-                                          }
-                                          className="p-1 h-7 w-7 hover:bg-sky-50 text-slate-400 hover:text-sky-700 rounded-md border border-transparent hover:border-sky-100 flex items-center justify-center transition-all cursor-pointer"
-                                          title="Aparelhos de acesso"
-                                        >
-                                          <Smartphone className="w-3.5 h-3.5" />
-                                        </button>
-
-                                        {/* DELETE REMOVE MULTIPLIER BUTTON */}
-                                        <button
-                                          onClick={() => {
-                                            askConfirmation({
-                                              title: "Remover da Equipe",
-                                              message: `${sup.full_name} deixa de receber as missões deste cliente.`,
-                                              confirmLabel: "Remover",
-                                              onConfirm: async () => {
-                                                setSupporters((prev) =>
-                                                  prev.filter(
-                                                    (s) => s.id !== sup.id,
-                                                  ),
-                                                );
-                                                if (isDatabaseConfigured) {
-                                                  const delRes =
-                                                    await DatabaseService.deleteSupporter(
-                                                      sup.id,
-                                                    );
-                                                  if (delRes.success) {
-                                                    triggerNotification(
-                                                      "Multiplicador removido!",
-                                                      "success",
-                                                    );
-                                                  }
-                                                } else {
-                                                  triggerNotification(
-                                                    "Multiplicador removido localmente!",
-                                                    "info",
-                                                  );
-                                                }
-                                              },
-                                            });
-                                          }}
-                                          className="p-1 h-7 w-7 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md border border-transparent hover:border-rose-100 flex items-center justify-center transition-all cursor-pointer"
-                                          title="Remover da Equipe"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
+                                    <td className="py-3.5 px-3">
+                                      <span className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-slate-600 whitespace-nowrap">
+                                        <span
+                                          className={`w-2 h-2 rounded-full ${
+                                            membro.emCampo
+                                              ? "bg-emerald-500"
+                                              : "bg-slate-300"
+                                          }`}
+                                        />
+                                        {membro.emCampo ? "Em campo" : "Ativo"}
+                                      </span>
+                                    </td>
+                                    <td className="py-3.5 px-3 text-right">
+                                      <button
+                                        onClick={() => setMembroDoPerfil(membro)}
+                                        className="h-8 px-3.5 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all whitespace-nowrap"
+                                      >
+                                        Ver perfil
+                                      </button>
                                     </td>
                                   </tr>
                                 );
                               })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="px-6 py-4 flex items-center justify-between gap-3 border-t border-slate-100">
+                        <p className="text-[11px] font-bold text-slate-400">
+                          Mostrando {daPagina.length} de {filtrados.length}{" "}
+                          {filtrados.length === 1 ? "membro" : "membros"}
+                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            disabled={pagina <= 1}
+                            onClick={() => setPaginaEquipe(pagina - 1)}
+                            className="w-8 h-8 rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          {Array.from({ length: totalPaginas }, (_, i) => i + 1).map(
+                            (numero) => (
+                              <button
+                                key={numero}
+                                onClick={() => setPaginaEquipe(numero)}
+                                className={`w-8 h-8 rounded-xl text-[11px] font-black cursor-pointer transition-all ${
+                                  numero === pagina
+                                    ? "bg-[#015FC9] text-white"
+                                    : "border border-slate-200 text-slate-500 hover:bg-slate-50"
+                                }`}
+                              >
+                                {numero}
+                              </button>
+                            ),
                           )}
-                        </tbody>
-                      </table>
+                          <button
+                            disabled={pagina >= totalPaginas}
+                            onClick={() => setPaginaEquipe(pagina + 1)}
+                            className="w-8 h-8 rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* RANKING DE CHECK-INS */}
+                    <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5 flex flex-col gap-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="text-xl leading-none">🏆</span>
+                          <div className="min-w-0">
+                            <h4 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                              Ranking de check-ins
+                            </h4>
+                            <p className="text-[11px] text-slate-400 font-semibold">
+                              Desempenho da equipe no período
+                            </p>
+                          </div>
+                        </div>
+                        <div className="relative shrink-0">
+                          <select
+                            value={periodoRanking}
+                            onChange={(e) =>
+                              setPeriodoRanking(e.target.value as any)
+                            }
+                            className="appearance-none h-9 pl-3 pr-8 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 cursor-pointer focus:outline-hidden"
+                          >
+                            <option value="mes">Este mês</option>
+                            <option value="semana">Últimos 7 dias</option>
+                            <option value="tudo">Todo o período</option>
+                          </select>
+                          <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        </div>
+                      </div>
+
+                      {rankingEquipe.length === 0 ? (
+                        <div className="py-10 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                          Nenhum integrante na equipe
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-3 max-h-[420px] overflow-y-auto pr-1">
+                          {mostrados.map((pessoa: any, posicao: number) => (
+                            <div
+                              key={pessoa.id}
+                              className="flex items-center gap-3"
+                            >
+                              <span
+                                className={`w-8 h-8 rounded-full border text-[11px] font-black flex items-center justify-center shrink-0 ${
+                                  medalhas[posicao] ||
+                                  "bg-slate-50 text-slate-400 border-slate-200"
+                                }`}
+                              >
+                                {posicao + 1}º
+                              </span>
+                              <Retrato pessoa={pessoa} tamanho="w-11 h-11" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[13px] font-black text-slate-800 truncate leading-tight">
+                                  {pessoa.full_name}
+                                </p>
+                                <p className="text-[10.5px] text-slate-400 font-semibold">
+                                  {pessoa.noPeriodo}{" "}
+                                  {pessoa.noPeriodo === 1
+                                    ? "check-in"
+                                    : "check-ins"}
+                                </p>
+                                <span className="mt-1.5 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                  <span
+                                    className="block h-full rounded-full bg-[#015FC9]"
+                                    style={{
+                                      width: `${(pessoa.noPeriodo / maiorDoPeriodo) * 100}%`,
+                                    }}
+                                  />
+                                </span>
+                              </div>
+                              <p className="text-2xl font-black text-[#0D233A] leading-none shrink-0">
+                                {pessoa.noPeriodo}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {rankingEquipe.length > 0 && (
+                        <button
+                          onClick={() => setRankingCompleto((v) => !v)}
+                          className="h-11 w-full border border-slate-200 hover:bg-slate-50 text-slate-600 text-[12px] font-bold rounded-2xl flex items-center justify-center gap-2 cursor-pointer transition-all"
+                        >
+                          <ClipboardList className="w-4 h-4 text-[#015FC9]" />
+                          {rankingCompleto
+                            ? "Ver só o pódio"
+                            : "Ver ranking completo"}
+                        </button>
+                      )}
                     </div>
                   </div>
-              </div>
-            )}
+                </div>
+              );
+            })()}
 
             {/* CHECK-INS */}
             {abaCliente === "checkins" && (
@@ -8710,6 +9194,7 @@ export default function App() {
         notify={triggerNotification}
         askConfirmation={askConfirmation}
       />
+
 
       {/* Toast Notification HUD */}
       <AnimatePresence>
