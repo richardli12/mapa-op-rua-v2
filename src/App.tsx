@@ -2143,6 +2143,9 @@ export default function App() {
   const [externalCandidates, setExternalCandidates] = useState<Candidate[]>([]);
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
   const [linkSearch, setLinkSearch] = useState("");
+  /** Escolha do administrador no momento do vínculo: trazer a equipe ou não. */
+  const [linkWithTeam, setLinkWithTeam] = useState(false);
+  const [togglingTeamId, setTogglingTeamId] = useState<string | null>(null);
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [isLoadingClients, setIsLoadingClients] = useState(false);
 
@@ -2161,6 +2164,66 @@ export default function App() {
     reloadClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Liga ou desliga a busca da equipe de um cliente.
+   *
+   * Ao desligar, a lista volta a ser só o que está no nosso banco: os
+   * integrantes que vieram de fora sairiam da tela no próximo carregamento de
+   * qualquer jeito, e recarregar agora deixa a tela honesta na hora.
+   */
+  const handleToggleTeamSync = async (client: Candidate) => {
+    const novoValor = client.syncTeam !== true;
+
+    setCandidates((prev) =>
+      prev.map((c) => (c.id === client.id ? { ...c, syncTeam: novoValor } : c)),
+    );
+    setInspectedCandidate((atual) =>
+      atual && atual.id === client.id
+        ? { ...atual, syncTeam: novoValor }
+        : atual,
+    );
+
+    if (isSupabaseConfigured) {
+      setTogglingTeamId(client.id);
+      const res = await SupabaseService.upsertClient({
+        ...client,
+        syncTeam: novoValor,
+      });
+      setTogglingTeamId(null);
+
+      if (!res.success) {
+        // Desfaz o que a tela ja mostrou, para nao mentir sobre o que foi salvo.
+        setCandidates((prev) =>
+          prev.map((c) =>
+            c.id === client.id ? { ...c, syncTeam: !novoValor } : c,
+          ),
+        );
+        setInspectedCandidate((atual) =>
+          atual && atual.id === client.id
+            ? { ...atual, syncTeam: !novoValor }
+            : atual,
+        );
+        triggerNotification(
+          `Não foi possível salvar a escolha: ${res.error || "erro desconhecido"}`,
+          "error",
+        );
+        return;
+      }
+
+      if (!novoValor) {
+        const sup = await SupabaseService.fetchSupporters();
+        if (sup.success && sup.data) setSupporters(sup.data);
+      }
+    }
+
+    triggerNotification(
+      novoValor
+        ? `A equipe de ${client.name} passa a ser trazida.`
+        : `A equipe de ${client.name} não será mais trazida.`,
+      novoValor ? "success" : "info",
+    );
+  };
 
   /**
    * Copia uma ficha externa para o nosso banco, inteira.
@@ -2183,6 +2246,7 @@ export default function App() {
       source: "vinculado",
       externalId: ficha.externalId || ficha.id,
       status_active: ficha.status_active !== false,
+      syncTeam: linkWithTeam,
     });
     setLinkingId(null);
 
@@ -2237,16 +2301,18 @@ export default function App() {
     };
   }, []);
 
-  // Equipes dos candidatos, também do Nexus.
+  // Equipes dos clientes, vindas da base de origem.
   //
-  // A equipe é consultada por candidato, então na tela de check-in só a do
-  // candidato daquele link é buscada — a página é pública e não faz sentido
+  // Só entra aqui quem o administrador marcou para trazer a equipe: o padrão é
+  // não trazer nada. A consulta é por cliente, então na tela de check-in só a
+  // do cliente daquele link é buscada — a página é pública e não faz sentido
   // baixar a equipe de todo mundo ali.
   useEffect(() => {
+    const escolhidos = candidates.filter((c) => c.syncTeam === true);
     const targets =
       currentUrlView === "checkin"
-        ? candidates.filter((c) => c.id === checkInCandidateId)
-        : candidates;
+        ? escolhidos.filter((c) => c.id === checkInCandidateId)
+        : escolhidos;
 
     if (targets.length === 0) return;
 
@@ -5819,6 +5885,7 @@ export default function App() {
         partyInitials: candidateEditing?.partyInitials,
         partyLogoUrl: candidateEditing?.partyLogoUrl,
         partyColor: candidateEditing?.partyColor,
+        syncTeam: candidateEditing?.syncTeam === true,
         externalCreatedAt: candidateEditing?.externalCreatedAt,
         raw: candidateEditing?.raw,
       };
@@ -6630,13 +6697,46 @@ export default function App() {
                         </p>
                       </div>
 
-                      <button
-                        onClick={() => setIsAddingSupporter(true)}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-xl flex items-center gap-1 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
-                      >
-                        <PlusCircle className="w-3.5 h-3.5" />
-                        <span>Novo Integrante</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {/* ESCOLHA DE TRAZER OU NÃO A EQUIPE DE FORA */}
+                        <button
+                          disabled={togglingTeamId === inspectedCandidate.id}
+                          onClick={() => handleToggleTeamSync(inspectedCandidate)}
+                          title={
+                            inspectedCandidate.syncTeam
+                              ? "A equipe deste cliente está sendo trazida. Clique para parar."
+                              : "A equipe deste cliente não é trazida. Clique para trazer."
+                          }
+                          className={`px-3 py-1.5 font-bold text-[11px] rounded-xl flex items-center gap-1.5 border transition-all cursor-pointer ${
+                            inspectedCandidate.syncTeam
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                              : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                          } ${
+                            togglingTeamId === inspectedCandidate.id
+                              ? "opacity-60 cursor-wait"
+                              : ""
+                          }`}
+                        >
+                          <span
+                            className={`w-7 h-4 rounded-full flex items-center px-0.5 transition-all ${
+                              inspectedCandidate.syncTeam
+                                ? "bg-emerald-500 justify-end"
+                                : "bg-slate-300 justify-start"
+                            }`}
+                          >
+                            <span className="w-3 h-3 bg-white rounded-full block"></span>
+                          </span>
+                          <span>Trazer equipe</span>
+                        </button>
+
+                        <button
+                          onClick={() => setIsAddingSupporter(true)}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-xl flex items-center gap-1 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
+                        >
+                          <PlusCircle className="w-3.5 h-3.5" />
+                          <span>Novo Integrante</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* ADD NEW SUPPORTER FORM POPUP/CARD INLINE */}
@@ -7040,6 +7140,14 @@ export default function App() {
                                 ? "Vinculado"
                                 : "Manual"}
                             </span>
+                            {client.syncTeam && (
+                              <span
+                                className="inline-flex bg-sky-50 text-sky-700 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md"
+                                title="A equipe deste cliente é trazida da base de origem"
+                              >
+                                Equipe
+                              </span>
+                            )}
                           </div>
 
                           <p className="text-[11px] text-slate-400 font-bold mt-1 truncate">
@@ -7145,7 +7253,25 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="px-6 py-4 border-b border-slate-100">
+              <div className="px-6 py-4 border-b border-slate-100 flex flex-col gap-3">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={linkWithTeam}
+                    onChange={(e) => setLinkWithTeam(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-emerald-600 cursor-pointer"
+                  />
+                  <span>
+                    <span className="block text-xs font-black text-slate-700">
+                      Trazer também a equipe deste cliente
+                    </span>
+                    <span className="block text-[11px] text-slate-400 font-semibold leading-snug">
+                      Desmarcado, vem só a ficha do cliente. Você pode ligar a
+                      equipe depois, a qualquer momento, dentro do cliente.
+                    </span>
+                  </span>
+                </label>
+
                 <div className="relative bg-slate-50 border border-slate-200 rounded-2xl flex items-center px-4 h-11 focus-within:ring-2 focus-within:ring-blue-500/20">
                   <Search className="w-4 h-4 text-slate-400 mr-2.5" />
                   <input
