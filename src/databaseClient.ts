@@ -301,6 +301,7 @@ export const DatabaseService = {
           label: type.label,
           icon: type.icon,
           color: type.color,
+          candidateId: type.candidateId || null,
           createdAt: type.createdAt || new Date().toISOString()
         });
       if (error) throw error;

@@ -42,6 +42,10 @@ begin
   end if;
 end $$;
 
+-- Tipo de Operacao passa a pertencer a um cliente.
+alter table public.operation_types add column if not exists "candidateId" text;
+create index if not exists idx_op_types_cliente on public.operation_types ("candidateId");
+
 create index if not exists idx_candidates_origem on public.candidates (source);
 create unique index if not exists idx_candidates_external
   on public.candidates (external_id) where external_id is not null;

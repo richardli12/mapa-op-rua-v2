@@ -121,14 +121,17 @@ create table if not exists public.time_delta (
 -- ----------------------------------------------------------------------------
 -- 5. operation_types - Tipos de Operacao dos pontos do mapa
 -- ----------------------------------------------------------------------------
--- Lista cadastravel pelo proprio usuario. As colunas em camelCase ficam entre
--- aspas porque e exatamente assim que o app grava e le.
+-- Cada cliente tem os seus tipos: "candidateId" e o dono, e tipo sem dono nao
+-- aparece em tela nenhuma. Nao existe tipo fixo - um cliente novo comeca sem
+-- nenhum. As colunas em camelCase ficam entre aspas porque e exatamente assim
+-- que o app grava e le.
 create table if not exists public.operation_types (
-  id          text primary key,
-  label       text not null,
-  icon        text,
-  color       text,
-  "createdAt" text
+  id            text primary key,
+  label         text not null,
+  icon          text,
+  color         text,
+  "candidateId" text,
+  "createdAt"   text
 );
 
 
@@ -230,6 +233,8 @@ alter table public.candidates        add column if not exists sync_team boolean 
 alter table public.candidates        add column if not exists external_created_at text;
 alter table public.candidates        add column if not exists raw jsonb;
 
+alter table public.operation_types   add column if not exists "candidateId" text;
+
 alter table public.parties           add column if not exists color text;
 alter table public.parties           add column if not exists created_at timestamptz default now();
 
@@ -288,6 +293,8 @@ create index if not exists idx_pins_candidato       on public.campaign_pins ("ca
 create index if not exists idx_pins_ativo           on public.campaign_pins (active);
 create index if not exists idx_pins_tipo            on public.campaign_pins ("iconType");
 
+create index if not exists idx_op_types_cliente    on public.operation_types ("candidateId");
+
 create index if not exists idx_time_delta_candidato on public.time_delta (candidate_id);
 
 create index if not exists idx_candidates_partido   on public.candidates (party_id);
@@ -297,22 +304,7 @@ create unique index if not exists idx_candidates_external
 
 
 -- ----------------------------------------------------------------------------
--- 12. Tipos de Operacao padrao
--- ----------------------------------------------------------------------------
--- Os ids sao os mesmos que os pontos ja gravados usam, entao nada do que esta
--- no mapa perde o icone. O "do nothing" preserva as edicoes do usuario.
-insert into public.operation_types (id, label, icon, color, "createdAt") values
-  ('flag',      'Base Operacional',      'flag',      '#2563eb', now()::text),
-  ('group',     'Reuniao de Equipe',     'group',     '#7c3aed', now()::text),
-  ('star',      'Evento / Acao',         'star',      '#ca8a04', now()::text),
-  ('megaphone', 'Divulgacao',            'megaphone', '#ea580c', now()::text),
-  ('home',      'Visita / Atendimento',  'home',      '#16a34a', now()::text),
-  ('sound',     'Veiculo de Som',        'sound',     '#0891b2', now()::text)
-on conflict (id) do nothing;
-
-
--- ----------------------------------------------------------------------------
--- 13. Usuario inicial do painel
+-- 12. Usuario inicial do painel
 -- ----------------------------------------------------------------------------
 -- TROQUE A SENHA depois do primeiro acesso:
 --   update public.auth_users set password = 'sua-senha' where email = 'admin@totalmapa.com';
@@ -322,7 +314,7 @@ on conflict (email) do nothing;
 
 
 -- ----------------------------------------------------------------------------
--- 14. Storage - bucket "imagens" (fotos e videos do check-in)
+-- 13. Arquivos - bucket "imagens" (fotos e videos do check-in)
 -- ----------------------------------------------------------------------------
 -- O app envia os arquivos para imagens/check_ins/ e usa a URL publica.
 insert into storage.buckets (id, name, public)
@@ -358,7 +350,7 @@ end $$;
 
 
 -- ----------------------------------------------------------------------------
--- 15. Realtime - o mapa atualiza sozinho
+-- 14. Realtime - o mapa atualiza sozinho
 -- ----------------------------------------------------------------------------
 -- Sem isto o pino so aparece depois de recarregar a pagina. O "add table"
 -- reclama se a tabela ja estiver na publicacao, e isso aqui e so um aviso.
@@ -377,7 +369,7 @@ end $$;
 
 
 -- ----------------------------------------------------------------------------
--- 16. Acesso (RLS)
+-- 15. Acesso (RLS)
 -- ----------------------------------------------------------------------------
 -- O app fala com o banco usando a chave anon, sem sessao de usuario do
 -- Supabase Auth. Entao o RLS fica ligado (o painel do Supabase cobra isso)
@@ -402,7 +394,7 @@ end $$;
 
 
 -- ----------------------------------------------------------------------------
--- 17. Recarrega o cache do PostgREST
+-- 16. Recarrega o cache do PostgREST
 -- ----------------------------------------------------------------------------
 -- A API do Supabase guarda em cache o desenho das tabelas. Sem este aviso, uma
 -- coluna recem-criada so aparece para o app depois de alguns minutos - ate la
