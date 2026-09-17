@@ -301,6 +301,49 @@ const normalizeCityName = (value: string) =>
     .toLowerCase()
     .trim();
 
+/**
+ * Endereço do painel da equipe.
+ *
+ * Domínio separado do painel administrativo, e o identificador do cliente vai
+ * depois do `#`: assim o link não carrega o endereço da área administrativa
+ * nem o nome do cliente, e o que vem depois do `#` nunca chega ao servidor —
+ * fica fora de log de acesso, do cabeçalho Referer e das pré-visualizações de
+ * link. Aberta a página, o endereço na barra é limpo e sobra só o domínio.
+ */
+const BASE_EQUIPE = (
+  (import.meta as any).env?.VITE_TEAM_BASE_URL ||
+  "https://time.61636573.74696d656f7065726163696f6e616c63636f.online"
+).replace(/\/$/, "");
+
+/**
+ * Rota de entrada, lida uma única vez quando a página carrega.
+ *
+ * Fica fora do componente de propósito: o endereço é limpo assim que lido, e
+ * uma segunda leitura — o React remonta o componente em desenvolvimento —
+ * encontraria a barra já vazia e jogaria a pessoa para a tela errada.
+ */
+const ROTA_INICIAL = (() => {
+  if (typeof window === "undefined") return { convite: "", equipe: "" };
+
+  const fragmento = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const busca = new URLSearchParams(window.location.search);
+  // Formato novo (depois do `#`) e os formatos antigos, que continuam valendo.
+  const convite = fragmento.get("c") || busca.get("convite") || "";
+  const equipe = fragmento.get("e") || "";
+
+  if (convite || equipe) {
+    try {
+      window.history.replaceState(null, "", window.location.pathname);
+    } catch {
+      /* navegador sem history: o endereço fica como está */
+    }
+  }
+  return { convite, equipe };
+})();
+
+/** Link do painel da equipe para um cliente. Leva o id, nunca o nome. */
+const linkDaEquipe = (candidateId: string) => `${BASE_EQUIPE}/#e=${candidateId}`;
+
 const slugify = (text: string) => {
   return text
     .toString()
@@ -633,22 +676,7 @@ export default function App() {
    * impressos. Lido o token, o endereço na barra é limpo na hora: quem olha a
    * tela, ou copia o que está ali, vê só o domínio.
    */
-  const [inviteToken] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    const fragmento = window.location.hash.replace(/^#/, "");
-    const doFragmento = new URLSearchParams(fragmento).get("c") || "";
-    const daBusca = new URLSearchParams(window.location.search).get("convite") || "";
-    const token = doFragmento || daBusca;
-
-    if (token) {
-      try {
-        window.history.replaceState(null, "", window.location.pathname);
-      } catch {
-        /* navegador sem history: o endereço fica como está */
-      }
-    }
-    return token;
-  });
+  const [inviteToken] = useState<string>(ROTA_INICIAL.convite);
 
   const [currentUrlView, setCurrentUrlView] = useState<"admin" | "checkin">(
     "admin",
@@ -951,8 +979,11 @@ export default function App() {
       const pathname = window.location.pathname;
       const pathParts = pathname.split("/").filter(Boolean);
 
-      let isCheckIn = params.get("view") === "checkin";
+      const doFragmento = ROTA_INICIAL.equipe;
+
+      let isCheckIn = doFragmento !== "" || params.get("view") === "checkin";
       let candidateSlugOrId =
+        doFragmento ||
         params.get("candidate") ||
         params.get("cand") ||
         params.get("candidateId");
@@ -969,6 +1000,7 @@ export default function App() {
 
       if (isCheckIn) {
         setCurrentUrlView("checkin");
+
 
         if (candidateSlugOrId) {
           // Encontra o cliente por ID ou por slug de nome
@@ -1394,9 +1426,7 @@ export default function App() {
       ? candidates.find((c) => c.id === selectedCandidateFilter)
       : undefined;
 
-  const shareCheckInUrl = shareCandidate
-    ? `${window.location.origin}/checkin/${slugify(shareCandidate.name)}`
-    : "";
+  const shareCheckInUrl = shareCandidate ? linkDaEquipe(shareCandidate.id) : "";
 
   /** Ponto de partida do painel de endereço no mapa. */
   const mapDefaultLocation = candidateLocation
@@ -6526,7 +6556,7 @@ export default function App() {
                               {/* COPIAR LINK DE CHECK-IN EXCLUSIVO */}
                               <button
                                 onClick={() => {
-                                  const shareUrl = `${window.location.origin}/checkin/${slugify(cand.name)}`;
+                                  const shareUrl = linkDaEquipe(cand.id);
                                   navigator.clipboard
                                     .writeText(shareUrl)
                                     .then(() => {
@@ -10751,7 +10781,7 @@ export default function App() {
                 </label>
                 <div className="flex gap-2">
                   <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-mono text-xs text-slate-600 truncate select-all">
-                    {shareCheckInUrl || `${window.location.origin}/checkin/...`}
+                    {shareCheckInUrl || `${BASE_EQUIPE}/`}
                   </div>
                   <button
                     type="button"
