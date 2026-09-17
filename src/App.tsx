@@ -26,7 +26,6 @@ import {
 import {
   MapPin,
   Users,
-  ShieldCheck,
   Layers,
   Flag,
   Megaphone,
@@ -4087,11 +4086,6 @@ export default function App() {
                 </>
               )}
             </h1>
-            <p className="mt-3 text-[14px] leading-[1.5] font-semibold text-[#7A8A9B] max-w-[290px]">
-              Use seu WhatsApp para acessar
-              {activeCandidate ? ` a equipe de ${activeCandidate.name}` : " sua equipe"} e
-              iniciar as operações.
-            </p>
           </motion.div>
 
           {/* Cartão de identificação */}
@@ -4142,11 +4136,6 @@ export default function App() {
                   />
                 </div>
 
-                <div className="mt-3.5 flex items-start gap-2 text-[12.5px] leading-snug font-medium text-[#8292A1] select-none">
-                  <Users className="w-4 h-4 text-[#A5B4C2] shrink-0 mt-0.5" />
-                  <span>Usaremos seu número apenas para validar seu acesso.</span>
-                </div>
-
                 <button
                   type="submit"
                   disabled={
@@ -4168,11 +4157,6 @@ export default function App() {
                   )}
                 </button>
               </form>
-
-              <div className="mt-6 pt-4 border-t border-[#EDF1F5] flex items-center justify-center gap-2 text-[12px] font-semibold text-[#8292A1] select-none">
-                <ShieldCheck className="w-4 h-4 text-[#A5B4C2]" />
-                Ambiente seguro e monitorado
-              </div>
 
               {!isDatabaseConfigured && (
                 <div className="mt-4 space-y-2">
