@@ -6394,10 +6394,15 @@ export default function App() {
                     },
                   });
                 }}
-                className="p-3 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-slate-200 rounded-2xl shadow-sm transition-all cursor-pointer"
+                className="h-11 pl-1.5 pr-5 bg-white hover:bg-rose-50 border border-slate-200 rounded-full shadow-sm flex items-center gap-2.5 transition-all cursor-pointer active:scale-95 group"
                 title="Sair do painel"
               >
-                <LogOut className="w-4 h-4" />
+                <span className="w-8 h-8 rounded-full bg-white border border-slate-200 group-hover:border-rose-200 flex items-center justify-center text-rose-500 shrink-0">
+                  <ChevronRight className="w-4 h-4 stroke-[3]" />
+                </span>
+                <span className="text-rose-500 font-black text-xs uppercase tracking-wider">
+                  Sair
+                </span>
               </button>
             )}
           </div>
@@ -6899,9 +6904,6 @@ export default function App() {
                         ).length
                       }
                     </h3>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                      Multiplicadores do cliente
-                    </p>
                   </div>
 
                   <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
