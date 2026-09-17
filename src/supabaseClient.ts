@@ -10,131 +10,378 @@ export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
-// SQL snippet to create tables
-export const SUPABASE_SQL_SETUP = `-- Script de Configuração do Supabase (Acesse o Painel do Supabase -> SQL Editor -> Cole e execute este script)
+// Script completo de criacao do banco.
+// Espelho de supabase/schema.sql - o app mostra este texto na tela de
+// Configuracoes para copiar e colar no SQL Editor do Supabase.
+export const SUPABASE_SQL_SETUP = `-- ============================================================================
+-- MAPA DE LOCALIZACAO REAL - Banco de dados completo (Supabase / PostgreSQL)
+--
+-- Como usar: Painel do Supabase -> SQL Editor -> New query -> cole este
+-- arquivo inteiro -> Run.
+--
+-- O script e idempotente: pode ser executado num banco novo (cria tudo) ou
+-- num banco que ja tem parte das tabelas (so completa o que falta). Nada e
+-- apagado em nenhum dos dois casos.
+--
+-- Cobertura: tela de login, cadastro de candidatos e partidos, Equipe (Time
+-- Delta), tipos de operacao, areas de panfletagem, pontos estrategicos,
+-- check-ins (missao e livre, com fotos e videos), Storage, Realtime e
+-- politicas de acesso.
+-- ============================================================================
 
-create table if not exists panfletagem_areas (
-  id text primary key,
-  title text not null,
-  description text,
-  bairro text,
-  center jsonb not null,
-  radius numeric not null,
-  color text,
-  active boolean default true,
-  "teamSize" integer,
-  "contactName" text,
-  "createdAt" text,
-  "candidateId" text
+
+-- ----------------------------------------------------------------------------
+-- 0. Extensoes
+-- ----------------------------------------------------------------------------
+-- gen_random_uuid() para os ids gerados pelo proprio banco.
+create extension if not exists pgcrypto;
+
+
+-- ----------------------------------------------------------------------------
+-- 1. auth_users - login do painel administrativo
+-- ----------------------------------------------------------------------------
+-- A tela de login consulta email + password direto nesta tabela
+-- (SupabaseService.loginAdmin). A senha fica em texto puro porque e assim que
+-- o app compara hoje; veja a observacao de seguranca no fim do arquivo.
+create table if not exists public.auth_users (
+  email      text primary key,
+  password   text not null,
+  name       text,
+  created_at timestamptz default now()
 );
 
-create table if not exists campaign_pins (
-  id text primary key,
-  title text not null,
-  description text,
-  position jsonb not null,
-  color text,
-  "iconType" text,
-  active boolean default true,
-  "createdAt" text,
-  date text,
-  "candidateId" text
+
+-- ----------------------------------------------------------------------------
+-- 2. candidates - candidatos
+-- ----------------------------------------------------------------------------
+-- O id e text (e nao uuid) de proposito: a lista principal vem da API do
+-- Nexus, que manda o id como string. Com text, tanto os ids do Nexus quanto os
+-- uuid gerados aqui entram sem erro - e o default continua com formato uuid,
+-- que e o que o app espera ao reconhecer um registro ja salvo.
+create table if not exists public.candidates (
+  id               text primary key default gen_random_uuid()::text,
+  name             text not null,
+  phone            text,
+  instagram_handle text,
+  city             text,
+  estado           text,
+  office           text,
+  image            text,
+  party_id         text,          -- partido do candidato (id em parties)
+  status_active    boolean default true,
+  created_at       timestamptz default now()
 );
 
--- Tipos de Operação: a lista é do usuário, que cria, edita e apaga os seus.
-create table if not exists operation_types (
-  id text primary key,
-  label text not null,
-  icon text,
-  color text,
+
+-- ----------------------------------------------------------------------------
+-- 3. parties - partidos
+-- ----------------------------------------------------------------------------
+create table if not exists public.parties (
+  id         text primary key default gen_random_uuid()::text,
+  name       text not null,
+  initials   text not null,
+  logo_url   text,
+  color      text,               -- cor primaria do partido
+  created_at timestamptz default now()
+);
+
+
+-- ----------------------------------------------------------------------------
+-- 4. time_delta - Equipe em campo (quem faz check-in)
+-- ----------------------------------------------------------------------------
+-- O whatsapp e a chave de entrada da tela de check-in: e por ele que o app
+-- reconhece o integrante (checkSupporter) e por ele que o upsert resolve
+-- conflito, entao o unique e obrigatorio.
+--
+-- candidate_id fica sem foreign key porque um integrante pode chegar do Nexus
+-- vinculado a um candidato que ainda nao foi espelhado na tabela candidates.
+create table if not exists public.time_delta (
+  id           text primary key default gen_random_uuid()::text,
+  full_name    text,
+  whatsapp     text not null unique,
+  candidate_id text,
+  image        text,
+  created_at   timestamptz default now()
+);
+
+
+-- ----------------------------------------------------------------------------
+-- 5. operation_types - Tipos de Operacao dos pontos do mapa
+-- ----------------------------------------------------------------------------
+-- Lista cadastravel pelo proprio usuario. As colunas em camelCase ficam entre
+-- aspas porque e exatamente assim que o app grava e le.
+create table if not exists public.operation_types (
+  id          text primary key,
+  label       text not null,
+  icon        text,
+  color       text,
   "createdAt" text
 );
 
-create table if not exists check_ins (
-  id text primary key,
-  name text not null,
-  bairro text,
-  rua text,
-  municipio text,
-  estado text,
-  photo text, -- Armazena a imagem em formato base64
-  coordinates jsonb not null,
-  "userLatitude" double precision,
+
+-- ----------------------------------------------------------------------------
+-- 6. panfletagem_areas - areas de panfletagem (circulos no mapa)
+-- ----------------------------------------------------------------------------
+-- center guarda { lat, lng, assignedDeltas } e "assignedDeltas" guarda a mesma
+-- lista no nivel de cima - o app manda os dois no mesmo upsert, entao as duas
+-- colunas precisam existir.
+create table if not exists public.panfletagem_areas (
+  id                text primary key,
+  title             text not null,
+  description       text,
+  bairro            text,
+  center            jsonb not null,
+  radius            numeric not null,
+  color             text,
+  active            boolean default true,
+  "teamSize"        integer,
+  "contactName"     text,
+  "createdAt"       text,
+  "candidateId"     text,
+  "assignedDeltas"  jsonb
+);
+
+
+-- ----------------------------------------------------------------------------
+-- 7. campaign_pins - pontos estrategicos (pinos no mapa)
+-- ----------------------------------------------------------------------------
+create table if not exists public.campaign_pins (
+  id                text primary key,
+  title             text not null,
+  description       text,
+  position          jsonb not null,   -- { lat, lng, assignedDeltas }
+  color             text,
+  "iconType"        text,             -- id em operation_types
+  active            boolean default true,
+  "createdAt"       text,
+  date              text,
+  "candidateId"     text,
+  "assignedDeltas"  jsonb
+);
+
+
+-- ----------------------------------------------------------------------------
+-- 8. check_ins - registros feitos em campo
+-- ----------------------------------------------------------------------------
+-- coordinates    = ponto escolhido para aparecer no mapa
+-- userLatitude/Longitude = onde o aparelho estava de fato
+-- photo          = primeira imagem (miniatura e registros antigos)
+-- media          = todas as fotos e videos: [{ url, type: 'image' | 'video' }]
+-- mode           = 'missao' (missao enviada pelo comite) ou 'livre'
+-- priority       = 'baixa' | 'media' | 'alta' | 'urgente' (check-in livre)
+create table if not exists public.check_ins (
+  id              text primary key,
+  name            text not null,
+  bairro          text,
+  rua             text,
+  municipio       text,
+  estado          text,
+  photo           text,
+  media           jsonb,
+  coordinates     jsonb not null,
+  "userLatitude"  double precision,
   "userLongitude" double precision,
-  "createdAt" text,
-  "candidateId" text,
-  mode text,
-  priority text,
-  "missionId" text,
-  "missionTitle" text,
-  media jsonb
+  "createdAt"     text,
+  "candidateId"   text,
+  mode            text,
+  priority        text,
+  "missionId"     text,
+  "missionTitle"  text
 );
 
--- Migração para bancos já existentes: adiciona as colunas do check-in livre
--- (modalidade sem missão, com grau de prioridade/impacto).
-alter table check_ins add column if not exists mode text;
-alter table check_ins add column if not exists priority text;
-alter table check_ins add column if not exists "missionId" text;
-alter table check_ins add column if not exists "missionTitle" text;
 
--- Varias fotos e videos por check-in (a coluna photo segue guardando a primeira foto).
-alter table check_ins add column if not exists media jsonb;
+-- ----------------------------------------------------------------------------
+-- 9. Migracoes - completa bancos que ja existiam antes
+-- ----------------------------------------------------------------------------
+-- Num banco novo nada aqui muda coisa alguma; num banco antigo, adiciona as
+-- colunas que entraram depois.
+alter table public.auth_users        add column if not exists name text;
+alter table public.auth_users        add column if not exists created_at timestamptz default now();
 
-create table if not exists auth_users (
-  email text primary key,
-  password text not null
-);
+alter table public.candidates        add column if not exists estado text;
+alter table public.candidates        add column if not exists party_id text;
+alter table public.candidates        add column if not exists status_active boolean default true;
+alter table public.candidates        add column if not exists created_at timestamptz default now();
 
-create table if not exists candidates (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  phone text,
-  instagram_handle text,
-  city text,
-  estado text,
-  office text,
-  image text
-);
+alter table public.parties           add column if not exists color text;
+alter table public.parties           add column if not exists created_at timestamptz default now();
 
-create table if not exists parties (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  initials text not null,
-  logo_url text
-);
+alter table public.time_delta        add column if not exists image text;
+alter table public.time_delta        add column if not exists created_at timestamptz default now();
 
-create table if not exists time_delta (
-  id uuid primary key default gen_random_uuid(),
-  full_name text,
-  whatsapp text not null unique,
-  candidate_id uuid references candidates(id),
-  image text
-);
+alter table public.panfletagem_areas add column if not exists "candidateId" text;
+alter table public.panfletagem_areas add column if not exists "assignedDeltas" jsonb;
 
--- Realtime: sem isso o Supabase nao emite os eventos e o pino so aparece
--- depois de recarregar a pagina.
-alter publication supabase_realtime add table check_ins;
-alter publication supabase_realtime add table panfletagem_areas;
-alter publication supabase_realtime add table campaign_pins;
+alter table public.campaign_pins     add column if not exists "candidateId" text;
+alter table public.campaign_pins     add column if not exists "assignedDeltas" jsonb;
 
--- O add table estoura se a tabela já estiver na publicação; aqui isso é
--- só um aviso, não um motivo para o script inteiro parar.
+alter table public.check_ins         add column if not exists municipio text;
+alter table public.check_ins         add column if not exists estado text;
+alter table public.check_ins         add column if not exists media jsonb;
+alter table public.check_ins         add column if not exists mode text;
+alter table public.check_ins         add column if not exists priority text;
+alter table public.check_ins         add column if not exists "missionId" text;
+alter table public.check_ins         add column if not exists "missionTitle" text;
+
+
+-- ----------------------------------------------------------------------------
+-- 10. Restricoes de dominio do check-in
+-- ----------------------------------------------------------------------------
+-- Aceitam nulo para nao invalidar registros antigos, gravados antes do
+-- check-in livre existir.
 do $$
 begin
-  alter publication supabase_realtime add table operation_types;
-exception when others then null;
+  alter table public.check_ins
+    add constraint check_ins_mode_valido
+    check (mode is null or mode in ('missao', 'livre'));
+exception when duplicate_object then null;
 end $$;
 
--- Ativar RLS ou desativar conforme sua necessidade. Por padrão, se você quiser ler/escrever anonimamente,
--- pode desabilitar RLS ou criar políticas de leitura e gravação para todos.
-alter table panfletagem_areas disable row level security;
-alter table campaign_pins disable row level security;
-alter table operation_types disable row level security;
-alter table check_ins disable row level security;
-alter table auth_users disable row level security;
-alter table candidates disable row level security;
-alter table parties disable row level security;
-alter table time_delta disable row level security;
+do $$
+begin
+  alter table public.check_ins
+    add constraint check_ins_priority_valida
+    check (priority is null or priority in ('baixa', 'media', 'alta', 'urgente'));
+exception when duplicate_object then null;
+end $$;
+
+
+-- ----------------------------------------------------------------------------
+-- 11. Indices - as consultas que o app faz o tempo todo
+-- ----------------------------------------------------------------------------
+create index if not exists idx_check_ins_candidato  on public.check_ins ("candidateId");
+create index if not exists idx_check_ins_criacao    on public.check_ins ("createdAt" desc);
+create index if not exists idx_check_ins_modo       on public.check_ins (mode);
+create index if not exists idx_check_ins_missao     on public.check_ins ("missionId");
+
+create index if not exists idx_areas_candidato      on public.panfletagem_areas ("candidateId");
+create index if not exists idx_areas_ativa          on public.panfletagem_areas (active);
+
+create index if not exists idx_pins_candidato       on public.campaign_pins ("candidateId");
+create index if not exists idx_pins_ativo           on public.campaign_pins (active);
+create index if not exists idx_pins_tipo            on public.campaign_pins ("iconType");
+
+create index if not exists idx_time_delta_candidato on public.time_delta (candidate_id);
+
+create index if not exists idx_candidates_partido   on public.candidates (party_id);
+
+
+-- ----------------------------------------------------------------------------
+-- 12. Tipos de Operacao padrao
+-- ----------------------------------------------------------------------------
+-- Os ids sao os mesmos que os pontos ja gravados usam, entao nada do que esta
+-- no mapa perde o icone. O "do nothing" preserva as edicoes do usuario.
+insert into public.operation_types (id, label, icon, color, "createdAt") values
+  ('flag',      'Base Operacional',      'flag',      '#2563eb', now()::text),
+  ('group',     'Reuniao de Equipe',     'group',     '#7c3aed', now()::text),
+  ('star',      'Evento / Acao',         'star',      '#ca8a04', now()::text),
+  ('megaphone', 'Divulgacao',            'megaphone', '#ea580c', now()::text),
+  ('home',      'Visita / Atendimento',  'home',      '#16a34a', now()::text),
+  ('sound',     'Veiculo de Som',        'sound',     '#0891b2', now()::text)
+on conflict (id) do nothing;
+
+
+-- ----------------------------------------------------------------------------
+-- 13. Usuario inicial do painel
+-- ----------------------------------------------------------------------------
+-- TROQUE A SENHA depois do primeiro acesso:
+--   update public.auth_users set password = 'sua-senha' where email = 'admin@totalmapa.com';
+insert into public.auth_users (email, password, name)
+values ('admin@totalmapa.com', 'troque-esta-senha', 'Administrador')
+on conflict (email) do nothing;
+
+
+-- ----------------------------------------------------------------------------
+-- 14. Storage - bucket "imagens" (fotos e videos do check-in)
+-- ----------------------------------------------------------------------------
+-- O app envia os arquivos para imagens/check_ins/ e usa a URL publica.
+insert into storage.buckets (id, name, public)
+values ('imagens', 'imagens', true)
+on conflict (id) do update set public = true;
+
+do $$
+begin
+  drop policy if exists "imagens_leitura"     on storage.objects;
+  drop policy if exists "imagens_envio"       on storage.objects;
+  drop policy if exists "imagens_atualizacao" on storage.objects;
+  drop policy if exists "imagens_remocao"     on storage.objects;
+
+  create policy "imagens_leitura" on storage.objects
+    for select to anon, authenticated
+    using (bucket_id = 'imagens');
+
+  create policy "imagens_envio" on storage.objects
+    for insert to anon, authenticated
+    with check (bucket_id = 'imagens');
+
+  create policy "imagens_atualizacao" on storage.objects
+    for update to anon, authenticated
+    using (bucket_id = 'imagens')
+    with check (bucket_id = 'imagens');
+
+  create policy "imagens_remocao" on storage.objects
+    for delete to anon, authenticated
+    using (bucket_id = 'imagens');
+exception when insufficient_privilege then
+  raise notice 'Sem permissao para criar policies em storage.objects. Crie-as pelo painel: Storage > imagens > Policies.';
+end $$;
+
+
+-- ----------------------------------------------------------------------------
+-- 15. Realtime - o mapa atualiza sozinho
+-- ----------------------------------------------------------------------------
+-- Sem isto o pino so aparece depois de recarregar a pagina. O "add table"
+-- reclama se a tabela ja estiver na publicacao, e isso aqui e so um aviso.
+do $$
+declare t text;
+begin
+  foreach t in array array['check_ins', 'panfletagem_areas', 'campaign_pins', 'operation_types']
+  loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when others then
+      raise notice 'Realtime ja ativo para %', t;
+    end;
+  end loop;
+end $$;
+
+
+-- ----------------------------------------------------------------------------
+-- 16. Acesso (RLS)
+-- ----------------------------------------------------------------------------
+-- O app fala com o banco usando a chave anon, sem sessao de usuario do
+-- Supabase Auth. Entao o RLS fica ligado (o painel do Supabase cobra isso)
+-- com uma policy liberando leitura e escrita para essa chave - o efeito
+-- pratico e o mesmo de deixar o RLS desligado, sem os alertas.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'auth_users', 'candidates', 'parties', 'time_delta',
+    'operation_types', 'panfletagem_areas', 'campaign_pins', 'check_ins'
+  ]
+  loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('drop policy if exists "acesso_app" on public.%I', t);
+    execute format(
+      'create policy "acesso_app" on public.%I for all to anon, authenticated using (true) with check (true)',
+      t
+    );
+  end loop;
+end $$;
+
+
+-- ============================================================================
+-- Observacao de seguranca
+--
+-- auth_users guarda a senha em texto puro e a policy acima deixa a tabela
+-- legivel pela chave anon, que vai no bundle do navegador - ou seja, hoje
+-- qualquer pessoa com a URL do app consegue ler as senhas do painel. O script
+-- foi mantido assim porque e o formato que o login do app compara. Para
+-- fechar isso de verdade, o caminho e migrar o login para o Supabase Auth ou
+-- guardar so o hash (pgcrypto) e comparar numa funcao RPC - as duas mudancas
+-- pedem ajuste no codigo do app tambem.
+-- ============================================================================
 `;
 
 /**
