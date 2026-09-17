@@ -13,7 +13,7 @@ import {
   StreetOption,
 } from '../services/streetSources';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2 } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, getCheckInPriority } from '../types';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, corDaDependencia, getCheckInPriority } from '../types';
 import { buildOperationIconSvg } from '../operationIcons';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
@@ -263,6 +263,12 @@ interface MapContainerProps {
   areas: PanfletagemArea[];
   pins: CampaignPin[];
   checkIns?: CheckIn[];
+  /** Escolas do municipio do cliente, camada publica do mapa. */
+  escolas?: Escola[];
+  /** A camada de escolas so desenha quando esta ligada no dock. */
+  escolasVisiveis?: boolean;
+  /** Clique numa escola: quem mostra a ficha e a tela de cima. */
+  onEscolaSelecionada?: (escola: Escola) => void;
   selectedId: string | null;
   onSelectItem: (id: string, type: 'area' | 'pin') => void;
   clickToPickCoords: boolean;
@@ -373,6 +379,9 @@ export default function MapContainer({
   areas,
   pins,
   checkIns,
+  escolas,
+  escolasVisiveis = false,
+  onEscolaSelecionada,
   selectedId,
   onSelectItem,
   clickToPickCoords,
@@ -426,6 +435,14 @@ export default function MapContainer({
   const raioRef = useRef(tempPlacementRadius);
   raioRef.current = tempPlacementRadius;
   const checkInsGroupRef = useRef<L.LayerGroup | null>(null);
+  const escolasGroupRef = useRef<L.LayerGroup | null>(null);
+  // Guarda se a camada ja estava ligada: o enquadramento acontece na virada,
+  // e nao a cada vez que a lista de escolas e recalculada.
+  const camadaEscolasLigadaRef = useRef(false);
+  // O clique da escola muda a cada render; o marcador le pela ref e nao
+  // precisa ser refeito so por isso.
+  const aoClicarEscolaRef = useRef(onEscolaSelecionada);
+  aoClicarEscolaRef.current = onEscolaSelecionada;
   const delimitationGroupRef = useRef<L.LayerGroup | null>(null);
 
   const [mouseCoords, setMouseCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -1058,12 +1075,14 @@ export default function MapContainer({
     const pinsGroup = L.layerGroup().addTo(map);
     const tempGroup = L.layerGroup().addTo(map);
     const checkInsGroup = L.layerGroup().addTo(map);
+    const escolasGroup = L.layerGroup().addTo(map);
     const delimitationGroup = L.layerGroup().addTo(map);
 
     circlesGroupRef.current = circlesGroup;
     pinsGroupRef.current = pinsGroup;
     tempGroupRef.current = tempGroup;
     checkInsGroupRef.current = checkInsGroup;
+    escolasGroupRef.current = escolasGroup;
     delimitationGroupRef.current = delimitationGroup;
     mapRef.current = map;
 
@@ -1568,6 +1587,70 @@ export default function MapContainer({
       checkInsGroup.addLayer(marker);
     });
   }, [checkIns, mapFilter]);
+
+  // Camada de escolas do municipio: so desenha quando ligada no dock.
+  useEffect(() => {
+    const grupo = escolasGroupRef.current;
+    if (!grupo) return;
+    grupo.clearLayers();
+    if (!escolasVisiveis || !escolas || escolas.length === 0) {
+      camadaEscolasLigadaRef.current = false;
+      return;
+    }
+
+    escolas.forEach(escola => {
+      if (!Number.isFinite(escola.latitude) || !Number.isFinite(escola.longitude)) return;
+      const cor = corDaDependencia(escola.dependencia);
+      const parada = escola.situacao ? escola.situacao !== 'EM ATIVIDADE' : false;
+
+      // O tamanho conta a historia do porte da escola sem precisar de rotulo.
+      const alunos = escola.matriculas || 0;
+      const tamanho = alunos >= 1000 ? 38 : alunos >= 400 ? 32 : 26;
+
+      const icone = L.divIcon({
+        className: '',
+        html:
+          `<span style="display:flex;align-items:center;justify-content:center;` +
+          `width:${tamanho}px;height:${tamanho}px;border-radius:50%;background:${cor};` +
+          `border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);` +
+          `${parada ? 'opacity:.45;' : ''}">` +
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#fff" ` +
+          `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" ` +
+          `width="${Math.round(tamanho * 0.5)}" height="${Math.round(tamanho * 0.5)}">` +
+          '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>' +
+          '<path d="M6 12v5c3 3 9 3 12 0v-5"/>' +
+          '</svg></span>',
+        iconSize: [tamanho, tamanho],
+        iconAnchor: [tamanho / 2, tamanho / 2]
+      });
+
+      const marcador = L.marker([escola.latitude, escola.longitude], { icon: icone });
+      marcador.bindTooltip(
+        `<b>${escola.nome}</b><br>${escola.dependencia || ''}` +
+          (escola.matriculas ? ` &middot; ${escola.matriculas} alunos` : ''),
+        { direction: 'top', offset: [0, -tamanho / 2] }
+      );
+      marcador.on('click', evento => {
+        // O clique e da escola: nao pode virar marcacao de ponto no mapa.
+        L.DomEvent.stopPropagation(evento);
+        aoClicarEscolaRef.current?.(escola);
+      });
+      grupo.addLayer(marcador);
+    });
+
+    // Ligar a camada e nao ver nada seria um botao quebrado: o mapa vai onde
+    // as escolas estao, mas so no momento em que a camada acende.
+    const mapa = mapRef.current;
+    if (mapa && !camadaEscolasLigadaRef.current) {
+      const pontos = escolas
+        .filter(e => Number.isFinite(e.latitude) && Number.isFinite(e.longitude))
+        .map(e => [e.latitude, e.longitude] as [number, number]);
+      if (pontos.length > 0) {
+        mapa.fitBounds(L.latLngBounds(pontos), { padding: [60, 60], maxZoom: 14 });
+      }
+    }
+    camadaEscolasLigadaRef.current = escolasVisiveis;
+  }, [escolas, escolasVisiveis]);
 
   // Render Temporary Placement Marker (when placing or picking coords)
   useEffect(() => {
