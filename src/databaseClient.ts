@@ -411,12 +411,13 @@ export const DatabaseService = {
     }
   },
 
-  async fetchSupporters() {
+  /** Equipe. Com candidateId, so a daquele cliente. */
+  async fetchSupporters(candidateId?: string) {
     if (!db) return { success: false, data: [] };
     try {
-      const { data, error } = await db
-        .from('time_delta')
-        .select('*');
+      let query = db.from('time_delta').select('*');
+      if (candidateId) query = query.eq('candidate_id', candidateId);
+      const { data, error } = await query;
       if (error) throw error;
       return { success: true, data };
     } catch (err: any) {
@@ -425,7 +426,15 @@ export const DatabaseService = {
     }
   },
 
-  async upsertSupporter(supporter: { id: string; full_name: string; whatsapp: string; candidate_id?: string; image?: string }) {
+  async upsertSupporter(supporter: {
+    id: string;
+    full_name: string;
+    whatsapp: string;
+    candidate_id?: string;
+    image?: string;
+    extra_fields?: any;
+    source?: string;
+  }) {
     if (!db) {
       return { success: false, error: 'banco de dados não configurado.' };
     }
@@ -442,18 +451,27 @@ export const DatabaseService = {
       if (supporter.image) {
         payload.image = supporter.image;
       }
+      if (supporter.extra_fields !== undefined) {
+        payload.extra_fields = supporter.extra_fields;
+      }
+      if (supporter.source) {
+        payload.source = supporter.source;
+      }
 
       const isUuid = (str?: string) => str ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str) : false;
       
       let targetId = supporter.id;
       if (isUuid(targetId)) {
         payload.id = targetId;
-      } else {
-        // Se o ID não for um UUID válido (pode ser o ID gerado localmente na autenticação inicial), tenta achar pelo whatsapp
+      } else if (supporter.candidate_id) {
+        // Sem id valido, procura pelo telefone DENTRO do cliente: o mesmo
+        // numero pode estar na equipe de outro cliente e aquele cadastro nao
+        // tem nada a ver com este.
         const { data } = await db
           .from('time_delta')
           .select('id')
-          .or(`whatsapp.eq."${supporter.whatsapp}",whatsapp.eq."${cleanWhatsapp}"`)
+          .eq('candidate_id', supporter.candidate_id)
+          .eq('whatsapp', cleanWhatsapp)
           .limit(1);
         if (data && data.length > 0) {
           payload.id = data[0].id;
@@ -462,7 +480,7 @@ export const DatabaseService = {
 
       const { data, error } = await db
         .from('time_delta')
-        .upsert(payload, { onConflict: 'whatsapp' })
+        .upsert(payload, { onConflict: 'candidate_id,whatsapp' })
         .select();
 
       if (error) throw error;
@@ -470,6 +488,158 @@ export const DatabaseService = {
     } catch (err: any) {
       console.error('Erro ao atualizar delta no banco de dados:', err);
       return { success: false, error: err.message || 'Erro ao salvar dados do integrante da Equipe.' };
+    }
+  },
+
+  // --------------------------------------------------------------------------
+  // Campos de coleta que o ADM configura para a equipe de cada cliente
+  // --------------------------------------------------------------------------
+  async fetchTeamFields(candidateId: string) {
+    if (!db || !candidateId) return { success: false, data: [] as any[] };
+    try {
+      const { data, error } = await db
+        .from('team_field_defs')
+        .select('*')
+        .eq('candidate_id', candidateId)
+        .order('position', { ascending: true });
+      if (error) throw error;
+      return { success: true, data: data || [] };
+    } catch (err: any) {
+      console.warn('Erro ao buscar campos de coleta:', err);
+      return { success: false, error: err.message, data: [] as any[] };
+    }
+  },
+
+  async upsertTeamField(field: any) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const payload: any = {
+        candidate_id: field.candidate_id,
+        label: field.label,
+        type: field.type || 'text',
+        options: field.options || null,
+        required: field.required === true,
+        position: field.position || 0
+      };
+      if (field.id) payload.id = field.id;
+
+      const { data, error } = await db
+        .from('team_field_defs')
+        .upsert(payload)
+        .select();
+      if (error) throw error;
+      return { success: true, data: data?.[0] };
+    } catch (err: any) {
+      console.error('Erro ao salvar campo de coleta:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  async deleteTeamField(id: string) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const { error } = await db.from('team_field_defs').delete().eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // --------------------------------------------------------------------------
+  // Convites de QR Code (um por pessoa, de uso unico)
+  // --------------------------------------------------------------------------
+  async fetchTeamInvites(candidateId: string) {
+    if (!db || !candidateId) return { success: false, data: [] as any[] };
+    try {
+      const { data, error } = await db
+        .from('team_invites')
+        .select('*')
+        .eq('candidate_id', candidateId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return { success: true, data: data || [] };
+    } catch (err: any) {
+      console.warn('Erro ao buscar convites:', err);
+      return { success: false, error: err.message, data: [] as any[] };
+    }
+  },
+
+  async createTeamInvite(candidateId: string, note?: string) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      // Token longo e aleatorio: o link do QR e a unica credencial dessa tela.
+      const token =
+        (crypto as any)?.randomUUID?.().replace(/-/g, '') ||
+        Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+      const { data, error } = await db
+        .from('team_invites')
+        .insert({ token, candidate_id: candidateId, note: note || null })
+        .select();
+      if (error) throw error;
+      return { success: true, data: data?.[0] };
+    } catch (err: any) {
+      console.error('Erro ao criar convite:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  async revokeTeamInvite(id: string) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const { error } = await db
+        .from('team_invites')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('id', id)
+        .is('used_at', null);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Leitura publica do convite, pela pessoa que abriu o QR. */
+  async getTeamInvite(token: string) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const { data, error } = await db.rpc('get_team_invite', { p_token: token });
+      if (error) throw error;
+      return { success: true, data };
+    } catch (err: any) {
+      console.error('Erro ao ler convite:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Conclui o cadastro pelo QR Code.
+   *
+   * O consumo do convite e a criacao do integrante acontecem dentro da mesma
+   * funcao no banco, entao nao ha janela para o mesmo QR ser usado duas vezes.
+   */
+  async claimTeamInvite(payload: {
+    token: string;
+    name: string;
+    whatsapp: string;
+    image: string;
+    extra: any;
+  }) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const { data, error } = await db.rpc('claim_team_invite', {
+        p_token: payload.token,
+        p_name: payload.name,
+        p_whatsapp: payload.whatsapp,
+        p_image: payload.image,
+        p_extra: payload.extra || {}
+      });
+      if (error) throw error;
+      return { success: true, data };
+    } catch (err: any) {
+      console.error('Erro ao concluir cadastro:', err);
+      return { success: false, error: err.message };
     }
   },
 

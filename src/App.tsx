@@ -14,6 +14,13 @@ import {
 import { fetchExternalData, fetchExternalTeam } from "./services/externalApi";
 import { PARTY_LOGOS, BRAND_LOGO, CHECKIN_COVER } from "./mediaUrls";
 import OperationTypeSelect from "./components/OperationTypeSelect";
+import TeamSignupPage from "./components/TeamSignupPage";
+import {
+  VincularMembroModal,
+  QrConviteModal,
+  CadastroManualModal,
+  CamposColetaModal,
+} from "./components/TeamManagerModals";
 import {
   MapPin,
   Users,
@@ -47,6 +54,7 @@ import {
   Calendar,
   Search,
   Link2,
+  QrCode,
   Building2,
   ChevronDown,
   Loader2,
@@ -588,9 +596,13 @@ export default function App() {
           },
         ];
   });
-  const [isAddingSupporter, setIsAddingSupporter] = useState(false);
-  const [newSupName, setNewSupName] = useState("");
-  const [newSupPhone, setNewSupPhone] = useState("");
+
+  /** Qual caminho de cadastro de integrante está aberto. */
+  const [teamModal, setTeamModal] = useState<
+    "vincular" | "qrcode" | "manual" | "campos" | null
+  >(null);
+  /** Campos de coleta do cliente em foco, configurados pelo ADM. */
+  const [teamFields, setTeamFields] = useState<any[]>([]);
 
   // UI state variables
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -606,6 +618,12 @@ export default function App() {
   );
 
   // Modo de visualização (admin / checkin)
+  /** Token do QR Code, quando alguém abre o link de cadastro. */
+  const [inviteToken] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("convite") || "";
+  });
+
   const [currentUrlView, setCurrentUrlView] = useState<"admin" | "checkin">(
     "admin",
   );
@@ -2134,6 +2152,23 @@ export default function App() {
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [isLoadingClients, setIsLoadingClients] = useState(false);
 
+  /** Campos de coleta e equipe do cliente aberto na ficha. */
+  const reloadTeamOfClient = async (candidateId: string) => {
+    if (!isDatabaseConfigured || !candidateId) return;
+    const [campos, equipe] = await Promise.all([
+      DatabaseService.fetchTeamFields(candidateId),
+      DatabaseService.fetchSupporters(candidateId),
+    ]);
+    if (campos.success) setTeamFields(campos.data);
+    if (equipe.success && equipe.data) {
+      // Troca só a equipe deste cliente: a dos outros continua como está.
+      setSupporters((prev: any[]) => [
+        ...prev.filter((m) => m.candidate_id !== candidateId),
+        ...equipe.data,
+      ]);
+    }
+  };
+
   /** Carrega os clientes do nosso banco: é esta lista que a tela mostra. */
   const reloadClients = async () => {
     if (!isDatabaseConfigured) return;
@@ -2149,6 +2184,16 @@ export default function App() {
     reloadClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Ao abrir a ficha de um cliente, carrega a equipe e os campos dele.
+  useEffect(() => {
+    if (inspectedCandidate?.id) {
+      reloadTeamOfClient(inspectedCandidate.id);
+    } else {
+      setTeamFields([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectedCandidate?.id]);
 
   /**
    * Liga ou desliga a busca da equipe de um cliente.
@@ -5521,6 +5566,11 @@ export default function App() {
     );
   }
 
+  // O link do QR Code é público e não depende de login nem de check-in.
+  if (inviteToken) {
+    return <TeamSignupPage token={inviteToken} />;
+  }
+
   if (currentUrlView !== "checkin" && !adminUser) {
     const handleAdminLoginSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -6725,115 +6775,39 @@ export default function App() {
                         </button>
 
                         <button
-                          onClick={() => setIsAddingSupporter(true)}
+                          onClick={() => setTeamModal("campos")}
+                          title="Escolher o que perguntar no cadastro deste cliente"
+                          className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <PenTool className="w-3.5 h-3.5" />
+                          <span>Campos</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTeamModal("vincular")}
+                          className="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          <span>Vincular</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTeamModal("qrcode")}
+                          className="px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-600 border border-indigo-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>QR Code</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTeamModal("manual")}
                           className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-xl flex items-center gap-1 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
                         >
                           <PlusCircle className="w-3.5 h-3.5" />
-                          <span>Novo Integrante</span>
+                          <span>Cadastrar</span>
                         </button>
                       </div>
                     </div>
-
-                    {/* ADD NEW SUPPORTER FORM POPUP/CARD INLINE */}
-                    {isAddingSupporter && (
-                      <div className="p-5 bg-emerald-50/50 border-b border-slate-100">
-                        <h5 className="text-xs font-black text-emerald-800 uppercase tracking-wider mb-3">
-                          Novo Integrante da Equipe
-                        </h5>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[10px] uppercase font-black tracking-wider text-slate-500 mb-1">
-                              Nome Completo
-                            </label>
-                            <input
-                              type="text"
-                              value={newSupName}
-                              onChange={(e) => setNewSupName(e.target.value)}
-                              placeholder="Ex: Carlos Santos"
-                              className="w-full h-10 px-3 border border-slate-200 bg-white rounded-xl text-xs font-semibold focus:outline-hidden"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] uppercase font-black tracking-wider text-slate-500 mb-1">
-                              WhatsApp (DDD + Celular)
-                            </label>
-                            <input
-                              type="text"
-                              value={newSupPhone}
-                              onChange={(e) => setNewSupPhone(e.target.value)}
-                              placeholder="Ex: 82999991234"
-                              className="w-full h-10 px-3 border border-slate-200 bg-white rounded-xl text-xs font-semibold focus:outline-hidden"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex justify-end gap-2.5 mt-4">
-                          <button
-                            onClick={() => {
-                              setIsAddingSupporter(false);
-                              setNewSupName("");
-                              setNewSupPhone("");
-                            }}
-                            className="px-3.5 py-2 hover:bg-slate-100 text-slate-500 font-bold text-xs rounded-xl"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (!newSupName.trim() || !newSupPhone.trim()) {
-                                triggerNotification(
-                                  "Preencha o nome e o whatsapp.",
-                                  "error",
-                                );
-                                return;
-                              }
-                              const cleanPhone = newSupPhone.replace(/\D/g, "");
-                              const currentId = "sup-local-" + Date.now();
-                              const item = {
-                                id: currentId,
-                                full_name: newSupName,
-                                whatsapp: cleanPhone,
-                                candidate_id: inspectedCandidate.id,
-                              };
-
-                              setSupporters((prev) => [...prev, item]);
-
-                              if (isDatabaseConfigured) {
-                                const addRes =
-                                  await DatabaseService.upsertSupporter(item);
-                                if (addRes.success) {
-                                  triggerNotification(
-                                    `${newSupName} cadastrado!`,
-                                    "success",
-                                  );
-                                  // Recarrega lista
-                                  const supRes =
-                                    await DatabaseService.fetchSupporters();
-                                  if (supRes.success && supRes.data) {
-                                    setSupporters(supRes.data);
-                                  }
-                                } else {
-                                  triggerNotification(
-                                    `${newSupName} salvo localmente somente.`,
-                                    "info",
-                                  );
-                                }
-                              } else {
-                                triggerNotification(
-                                  `${newSupName} salvo localmente!`,
-                                  "success",
-                                );
-                              }
-                              setNewSupName("");
-                              setNewSupPhone("");
-                              setIsAddingSupporter(false);
-                            }}
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
-                          >
-                            Adicionar ao Time
-                          </button>
-                        </div>
-                      </div>
-                    )}
 
                     {/* SUPPORTERS LIST */}
                     <div className="overflow-x-auto">
@@ -7221,6 +7195,50 @@ export default function App() {
               </span>
             </div>
           </div>
+        )}
+
+        {/* MODAIS DA EQUIPE DO CLIENTE */}
+        {teamModal && inspectedCandidate && (
+          <>
+            {teamModal === "vincular" && (
+              <VincularMembroModal
+                client={inspectedCandidate}
+                allMembers={supporters}
+                notify={triggerNotification}
+                onClose={() => setTeamModal(null)}
+                onChanged={() => reloadTeamOfClient(inspectedCandidate.id)}
+              />
+            )}
+            {teamModal === "qrcode" && (
+              <QrConviteModal
+                client={inspectedCandidate}
+                notify={triggerNotification}
+                onClose={() => {
+                  setTeamModal(null);
+                  reloadTeamOfClient(inspectedCandidate.id);
+                }}
+                onChanged={() => reloadTeamOfClient(inspectedCandidate.id)}
+              />
+            )}
+            {teamModal === "manual" && (
+              <CadastroManualModal
+                client={inspectedCandidate}
+                fields={teamFields}
+                notify={triggerNotification}
+                onClose={() => setTeamModal(null)}
+                onChanged={() => reloadTeamOfClient(inspectedCandidate.id)}
+              />
+            )}
+            {teamModal === "campos" && (
+              <CamposColetaModal
+                client={inspectedCandidate}
+                fields={teamFields}
+                notify={triggerNotification}
+                onClose={() => setTeamModal(null)}
+                onChanged={() => reloadTeamOfClient(inspectedCandidate.id)}
+              />
+            )}
+          </>
         )}
 
         {/* MODAL: VINCULAR CLIENTE */}
