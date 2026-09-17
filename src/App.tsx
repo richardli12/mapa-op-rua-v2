@@ -88,12 +88,14 @@ import {
   ChevronLeft,
   Target,
   Brain,
+  Clock,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
 import OperationIcon from "./components/OperationIcon";
 import ConfirmDialog, { ConfirmRequest } from "./components/ConfirmDialog";
 import MindMapPanel from "./components/MindMapPanel";
+import MiniMapa from "./components/MiniMapa";
 import { OPERATION_ICONS } from "./operationIcons";
 import {
   PanfletagemArea,
@@ -822,6 +824,11 @@ export default function App() {
   const [reguaLigada, setReguaLigada] = useState(false);
   const [pontosRegua, setPontosRegua] = useState<{ lat: number; lng: number }[]>([]);
   const [corRegua, setCorRegua] = useState("#F58220");
+
+  /** Aba aberta dentro da ficha do cliente. */
+  const [abaCliente, setAbaCliente] = useState<
+    "geral" | "equipe" | "checkins"
+  >("geral");
 
   /** Tela aberta na área do administrador. */
   const [telaAdm, setTelaAdm] = useState<'clientes' | 'configuracoes'>('clientes');
@@ -6584,8 +6591,8 @@ export default function App() {
           />
         )}
 
-        {/* QUADROS DE NÚMEROS DO SISTEMA */}
-        {telaAdm !== "clientes" ? null : (
+        {/* QUADROS DE NÚMEROS DO SISTEMA — só na lista, a ficha tem os seus */}
+        {telaAdm !== "clientes" || inspectedCandidate ? null : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8">
             {[
               {
@@ -6976,115 +6983,455 @@ export default function App() {
             </div>
           </div>
         ) : inspectedCandidate ? (
-          /* FICHA DO CLIENTE: equipe, áreas, pontos e check-ins */
-          <div className="flex flex-col flex-1 gap-6">
-              <div className="flex flex-col flex-1 gap-6 font-sans">
-                {/* CANDIDATE HEADER PROFILE CARD */}
-                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-                  <div className="flex flex-col md:flex-row items-start md:items-center gap-5 w-full">
-                    {/* RED WRAPPED BACK BUTTON */}
-                    <button
-                      onClick={() => setInspectedCandidate(null)}
-                      className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-[1.02] active:scale-95 shrink-0"
-                    >
-                      <ChevronLeft className="w-4 h-4 text-rose-500" />
-                      <span>Voltar</span>
-                    </button>
+          /* FICHA DO CLIENTE */
+          (() => {
+            const equipeDoCliente = supporters.filter(
+              (s: any) =>
+                s.candidate_id === inspectedCandidate.id ||
+                s.candidateId === inspectedCandidate.id,
+            );
+            const checkInsDoCliente = checkIns.filter(
+              (c: any) =>
+                c.candidateId === inspectedCandidate.id ||
+                c.candidate_id === inspectedCandidate.id,
+            );
+            const hoje = new Date().toDateString();
+            const checkInsDeHoje = checkInsDoCliente.filter(
+              (c: any) => new Date(c.createdAt).toDateString() === hoje,
+            );
+            // "Em campo" são os integrantes que registraram algo hoje: é o
+            // sinal mais honesto de atividade que o sistema tem hoje.
+            const emCampo = new Set(
+              checkInsDeHoje.map((c: any) => c.memberId || c.name).filter(Boolean),
+            );
+            const tiposDoCliente = operationTypes.filter(
+              (t) => t.candidateId === inspectedCandidate.id,
+            );
+            const centro =
+              checkInsDoCliente[0]?.coordinates ||
+              (candidateLocation?.lat
+                ? { lat: candidateLocation.lat, lng: candidateLocation.lng }
+                : null);
 
-                    <div className="relative">
-                      <img
-                        src={
-                          inspectedCandidate.image ||
-                          "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150"
-                        }
-                        alt={inspectedCandidate.name}
-                        className="w-16 h-16 rounded-full object-cover border-2 border-slate-100 shadow-sm"
-                        referrerPolicy="no-referrer"
-                      />
-                      <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full animate-pulse"></span>
-                    </div>
+            const abas = [
+              { id: "geral" as const, rotulo: "Visão geral" },
+              { id: "equipe" as const, rotulo: "Equipe" },
+              { id: "checkins" as const, rotulo: "Check-ins" },
+            ];
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md">
-                          {inspectedCandidate.office || "Sem Cargo"}
-                        </span>
-                        <span className="text-xs text-slate-400 font-bold flex items-center gap-1">
-                          <MapPin className="w-3.5 h-3.5 text-slate-300" />
-                          {inspectedCandidate.city}
-                        </span>
+            const AcaoRapida = ({
+              icone,
+              titulo,
+              descricao,
+              onClick,
+            }: {
+              icone: React.ReactNode;
+              titulo: string;
+              descricao: string;
+              onClick: () => void;
+            }) => (
+              <button
+                type="button"
+                onClick={onClick}
+                className="w-full flex items-center gap-3 p-3.5 rounded-2xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50/70 transition-all cursor-pointer text-left"
+              >
+                <span className="w-10 h-10 rounded-xl bg-[#F1F5FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                  {icone}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-black text-slate-800 leading-tight">
+                    {titulo}
+                  </span>
+                  <span className="block text-[11px] text-slate-400 font-semibold truncate">
+                    {descricao}
+                  </span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+              </button>
+            );
+
+            return (
+          <div className="flex flex-col flex-1 gap-5 font-sans">
+            {/* CABEÇALHO DO CLIENTE */}
+            <div className="bg-white border border-slate-200 rounded-3xl px-6 py-5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="flex items-center gap-4 min-w-0">
+                <button
+                  onClick={() => setInspectedCandidate(null)}
+                  title="Voltar para os clientes"
+                  className="w-9 h-9 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="relative shrink-0">
+                  <img
+                    src={
+                      inspectedCandidate.image ||
+                      "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150"
+                    }
+                    alt={inspectedCandidate.name}
+                    referrerPolicy="no-referrer"
+                    className="w-12 h-12 rounded-2xl object-cover border border-slate-100 bg-slate-50"
+                  />
+                  <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h2 className="text-[19px] font-extrabold text-[#0D233A] tracking-tight truncate">
+                      {inspectedCandidate.name}
+                    </h2>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Cliente ativo
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-slate-400 font-semibold flex items-center gap-1 mt-0.5">
+                    <MapPin className="w-3.5 h-3.5 shrink-0" />
+                    {candidateLocationText(inspectedCandidate) || "Sem localização"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  onClick={() => handleOpenEditModal(inspectedCandidate)}
+                  className="h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <Edit2 className="w-4 h-4" />
+                  Editar cliente
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedCandidateFilter(inspectedCandidate.id);
+                    setAdminTab("map");
+                  }}
+                  className="h-11 px-4 bg-[#0D233A] hover:bg-[#123255] text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <Map className="w-4 h-4" />
+                  Entrar no mapa
+                </button>
+                <button
+                  onClick={() => setIsShareModalOpen(true)}
+                  className="h-11 px-4 bg-[#015FC9] hover:bg-blue-600 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  Novo check-in
+                </button>
+              </div>
+            </div>
+
+            {/* ABAS DA FICHA */}
+            <div className="bg-white border border-slate-200 rounded-2xl px-2 shadow-xs flex items-center gap-1 overflow-x-auto">
+              {abas.map((aba) => (
+                <button
+                  key={aba.id}
+                  onClick={() => setAbaCliente(aba.id)}
+                  className={`px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 transition-all cursor-pointer ${
+                    abaCliente === aba.id
+                      ? "border-[#015FC9] text-[#015FC9]"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {aba.rotulo}
+                </button>
+              ))}
+              <button
+                onClick={openOperationTypesManager}
+                className="px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 border-transparent text-slate-500 hover:text-slate-700 cursor-pointer"
+              >
+                Tipos de operação
+              </button>
+              <button
+                onClick={() => setTeamModal("campos")}
+                className="px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 border-transparent text-slate-500 hover:text-slate-700 cursor-pointer"
+              >
+                Campos de coleta
+              </button>
+            </div>
+
+            {/* VISÃO GERAL */}
+            {abaCliente === "geral" && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                {/* COLUNA DA ESQUERDA */}
+                <div className="lg:col-span-2 flex flex-col gap-5">
+                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+                    <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <Map className="w-5 h-5 text-[#015FC9]" />
+                        <div>
+                          <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                            Mapa operacional
+                          </h3>
+                          <p className="text-[11px] text-slate-400 font-semibold">
+                            Localização dos registros em{" "}
+                            {inspectedCandidate.city || "campo"}
+                          </p>
+                        </div>
                       </div>
-                      <h2 className="text-xl font-black text-[#0D233A] mt-1 truncate">
-                        {inspectedCandidate.name}
-                      </h2>
-                      <p className="text-xs text-slate-400 font-bold mt-0.5">
-                        WhatsApp:{" "}
-                        <span className="text-slate-600 font-mono">
-                          {inspectedCandidate.phone || "Privado"}
-                        </span>{" "}
-                        | Instagram:{" "}
-                        <span className="text-slate-600">
-                          @
-                          {inspectedCandidate.instagram_handle ||
-                            "Não informado"}
-                        </span>
-                      </p>
+                      <button
+                        onClick={() => {
+                          setSelectedCandidateFilter(inspectedCandidate.id);
+                          setAdminTab("map");
+                        }}
+                        className="h-9 px-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        Entrar no mapa
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {centro ? (
+                      <MiniMapa lat={centro.lat} lng={centro.lng} height={260} />
+                    ) : (
+                      <div className="h-[260px] bg-slate-50 flex items-center justify-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                        Sem registros para mostrar
+                      </div>
+                    )}
+
+                    {tiposDoCliente.length > 0 && (
+                      <div className="px-5 py-3 flex flex-wrap gap-2 border-t border-slate-100">
+                        {tiposDoCliente.map((tipo) => (
+                          <span
+                            key={tipo.id}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-50 border border-slate-200 text-slate-600"
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: tipo.color }}
+                            />
+                            {tipo.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* CHECK-INS RECENTES */}
+                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="w-5 h-5 text-[#015FC9]" />
+                        <div>
+                          <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                            Check-ins recentes
+                          </h3>
+                          <p className="text-[11px] text-slate-400 font-semibold">
+                            Últimos registros realizados pela equipe
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setAbaCliente("checkins")}
+                        className="text-[11px] font-black text-[#015FC9] hover:text-blue-700 flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        Ver todos
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {checkInsDoCliente.length === 0 ? (
+                      <div className="py-10 text-center text-slate-400 font-bold text-[11px] uppercase tracking-widest bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                        Nenhum check-in registrado ainda
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-100">
+                        {checkInsDoCliente.slice(0, 5).map((ci: any) => (
+                          <div
+                            key={ci.id}
+                            className="py-3 flex items-center gap-3 flex-wrap"
+                          >
+                            <span className="w-9 h-9 rounded-full bg-slate-100 overflow-hidden flex items-center justify-center shrink-0">
+                              {ci.memberPhoto ? (
+                                <img
+                                  src={ci.memberPhoto}
+                                  alt={ci.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <Users className="w-4 h-4 text-slate-400" />
+                              )}
+                            </span>
+                            <span className="text-[13px] font-bold text-slate-800 min-w-0 truncate">
+                              {ci.name}
+                            </span>
+                            {ci.operationTypeLabel && (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-50 border border-slate-200 text-slate-600">
+                                {ci.operationTypeLabel}
+                              </span>
+                            )}
+                            <span className="text-[11px] text-slate-400 font-semibold flex items-center gap-1 min-w-0 truncate">
+                              <MapPin className="w-3 h-3 shrink-0" />
+                              {[ci.rua, ci.bairro].filter(Boolean).join(", ") ||
+                                "Sem endereço"}
+                            </span>
+                            <span className="text-[11px] text-slate-400 font-semibold flex items-center gap-1 ml-auto shrink-0">
+                              <Clock className="w-3 h-3" />
+                              {new Date(ci.createdAt).toLocaleTimeString("pt-BR", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* COLUNA DA DIREITA */}
+                <div className="flex flex-col gap-5">
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      {
+                        rotulo: "Equipe",
+                        valor: equipeDoCliente.length,
+                        apoio: "membros",
+                        icone: <Users className="w-4 h-4" />,
+                        cor: "text-blue-600 bg-blue-50",
+                      },
+                      {
+                        rotulo: "Check-ins",
+                        valor: checkInsDeHoje.length,
+                        apoio: "hoje",
+                        icone: <MapPin className="w-4 h-4" />,
+                        cor: "text-purple-600 bg-purple-50",
+                      },
+                      {
+                        rotulo: "Em campo",
+                        valor: emCampo.size,
+                        apoio: "ativo",
+                        icone: <Compass className="w-4 h-4" />,
+                        cor: "text-emerald-600 bg-emerald-50",
+                      },
+                    ].map((item) => (
+                      <div
+                        key={item.rotulo}
+                        className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${item.cor}`}
+                          >
+                            {item.icone}
+                          </span>
+                          <span className="text-[9px] font-extrabold uppercase tracking-widest text-[#8492A6] leading-tight">
+                            {item.rotulo}
+                          </span>
+                        </div>
+                        <p className="text-xl font-black text-[#0D233A] leading-none mt-2">
+                          {item.valor}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-semibold">
+                          {item.apoio}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <Sparkles className="w-5 h-5 text-[#015FC9]" />
+                      <h3 className="text-[15px] font-black text-[#0D233A]">
+                        Ações rápidas
+                      </h3>
+                    </div>
+                    <div className="space-y-2">
+                      <AcaoRapida
+                        icone={<Users className="w-4 h-4" />}
+                        titulo="Gerenciar equipe"
+                        descricao="Membros, convites e campos"
+                        onClick={() => setAbaCliente("equipe")}
+                      />
+                      <AcaoRapida
+                        icone={<Settings className="w-4 h-4" />}
+                        titulo="Tipos de operação"
+                        descricao="Configurar opções deste cliente"
+                        onClick={openOperationTypesManager}
+                      />
+                      <AcaoRapida
+                        icone={<MapPin className="w-4 h-4" />}
+                        titulo="Campos de coleta"
+                        descricao="Personalizar dados da equipe"
+                        onClick={() => setTeamModal("campos")}
+                      />
                     </div>
                   </div>
 
-                  {/* MINI MAP ACCESSIBILITY */}
-                  <button
-                    onClick={() => {
-                      setSelectedCandidateFilter(inspectedCandidate.id);
-                      setAdminTab("map");
-                      triggerNotification(
-                        `Exibindo o mapa exclusivo de: ${inspectedCandidate.name}`,
-                        "success",
-                      );
-                    }}
-                    className="px-4.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95 shrink-0"
-                  >
-                    <Map className="w-4 h-4 text-indigo-500" />
-                    <span>Ver no Mapa</span>
-                  </button>
-                </div>
+                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <Compass className="w-5 h-5 text-emerald-600" />
+                      <div>
+                        <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                          Equipe em campo
+                        </h3>
+                        <p className="text-[11px] text-slate-400 font-semibold">
+                          Membros que registraram algo hoje
+                        </p>
+                      </div>
+                    </div>
 
-                {/* METRICS ROW */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
-                    <span className="text-slate-400 font-bold text-[9.5px] uppercase tracking-wider">
-                      Integrantes da Equipe
-                    </span>
-                    <h3 className="text-2xl font-black text-[#0D233A] mt-1">
-                      {
-                        supporters.filter(
-                          (s) => s.candidate_id === inspectedCandidate.id,
-                        ).length
-                      }
-                    </h3>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex -space-x-2">
+                        {equipeDoCliente.slice(0, 4).map((m: any) => (
+                          <span
+                            key={m.id}
+                            className="w-10 h-10 rounded-full border-2 border-white bg-slate-100 overflow-hidden flex items-center justify-center"
+                            title={m.full_name}
+                          >
+                            {m.image ? (
+                              <img
+                                src={m.image}
+                                alt={m.full_name}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-[10px] font-black text-slate-500 uppercase">
+                                {(m.full_name || "?").substring(0, 2)}
+                              </span>
+                            )}
+                          </span>
+                        ))}
+                        {equipeDoCliente.length === 0 && (
+                          <span className="text-[11px] text-slate-400 font-semibold">
+                            Sem integrantes vinculados
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xl font-black text-[#0D233A] leading-none">
+                          {emCampo.size}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-semibold">
+                          ativo agora
+                        </p>
+                      </div>
+                    </div>
+
+                    {checkInsDeHoje.length > 0 && (
+                      <div className="mt-3 bg-emerald-50/70 border border-emerald-100 rounded-2xl px-3.5 py-2.5">
+                        <p className="text-[12px] font-bold text-emerald-900">
+                          {checkInsDeHoje[0].name} está em campo
+                        </p>
+                        <p className="text-[10.5px] text-emerald-700/80 font-semibold">
+                          Último registro às{" "}
+                          {new Date(
+                            checkInsDeHoje[0].createdAt,
+                          ).toLocaleTimeString("pt-BR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                    )}
                   </div>
-
-                  <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
-                    <span className="text-slate-400 font-bold text-[9.5px] uppercase tracking-wider">
-                      Check-ins de Campo
-                    </span>
-                    <h3 className="text-2xl font-black text-indigo-600 mt-1">
-                      {
-                        checkIns.filter(
-                          (c) =>
-                            c.candidateId === inspectedCandidate.id ||
-                            c.candidate_id === inspectedCandidate.id,
-                        ).length
-                      }
-                    </h3>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                      Evidências e visitas
-                    </p>
-                  </div>
                 </div>
+              </div>
+            )}
 
-                {/* PRIMARY TWO COLUMN WORKSPACE */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* EQUIPE */}
+            {abaCliente === "equipe" && (
+              <div className="grid grid-cols-1 gap-6">
                   {/* LEFT COLUMN: INTERACTIVE TIME DELTA (2/3 Grid length) */}
                   <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden flex flex-col min-h-[350px]">
                     <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
@@ -7240,7 +7587,7 @@ export default function App() {
                                       <div className="flex items-center justify-end gap-2">
                                         {/* WHATSAPP LINK BUTTON */}
                                         <a
-                                          href={`https://wa.me/55${sup.whatsapp.replace(/\D/g, "")}`}
+                                          href={`https://wa.me/55${(sup.whatsapp || "").replace(/\D/g, "")}`}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="p-1 h-7 w-7 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-md border border-transparent hover:border-emerald-100 flex items-center justify-center transition-all cursor-pointer"
@@ -7308,7 +7655,12 @@ export default function App() {
                       </table>
                     </div>
                   </div>
+              </div>
+            )}
 
+            {/* CHECK-INS */}
+            {abaCliente === "checkins" && (
+              <div className="grid grid-cols-1 gap-6">
                   {/* RIGHT COLUMN: ACTION HISTORY & ACTIVITIES */}
                   <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5 flex flex-col space-y-4">
                     <div>
@@ -7379,8 +7731,11 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </div>
+            )}
           </div>
+            );
+          })()
+
         ) : (
           /* GRADE DE CLIENTES */
           <div className="flex flex-col flex-1 gap-6">
