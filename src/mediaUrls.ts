@@ -34,7 +34,15 @@ export const PARTY_LOGOS: Record<string, string> = {
   PT: mediaUrl('PT_LOGO.png'),
 };
 
-export const BRAND_LOGO = brandUrl('LOGO%20TRIAD3%20.png');
+/**
+ * Logo do sistema, usada no topo do painel, no login e na marca do chat.
+ *
+ * Endereco proprio, fora do padrao dos demais arquivos, porque a marca vive
+ * num bucket separado do restante das imagens.
+ */
+export const BRAND_LOGO =
+  (import.meta as any).env?.VITE_BRAND_LOGO_URL ||
+  'https://zpfhqweydlujotqbuwse.supabase.co/storage/v1/object/public/imagem_url/img.png';
 export const CHECKIN_COVER = mediaUrl(
   'ChatGPT%20Image%2017%20de%20jun.%20de%202026,%2016_27_00.png',
 );

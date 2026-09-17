@@ -8,6 +8,9 @@ import { useEffect, useRef, useState } from 'react';
  * aberto. O aviso fica por cima de tudo, então o conteúdo do sistema some da
  * tela no mesmo instante.
  *
+ * Só vale no computador: no celular não há painel para abrir, e as pistas que
+ * o bloqueio usa apontariam para quem não fez nada.
+ *
  * Vale o que vale: isto afasta o curioso, não o determinado. Quem sabe
  * desligar o JavaScript ou ler o pacote já baixado passa por aqui. Segredo de
  * verdade (chave, regra de negócio, dado de outro cliente) continua sendo
@@ -36,6 +39,20 @@ export default function ProtecaoInspecao() {
       setBloqueado(true);
     };
 
+    /**
+     * Aparelho de toque (celular, tablet).
+     *
+     * Ali não existe painel de ferramentas para vigiar, e as duas pistas que
+     * este bloqueio usa mentem: a barra de endereço do navegador deixa um vão
+     * enorme entre a janela e a página, e o toque demorado sobre a tela dispara
+     * o mesmo evento do botão direito. Por isso o celular fica de fora — antes
+     * disso, quem só abria a tela de login pelo iPhone já caía no bloqueio.
+     */
+    const aparelhoDeToque =
+      (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) ||
+      (typeof window.matchMedia === 'function' &&
+        window.matchMedia('(pointer: coarse)').matches);
+
     const teclado = (e: KeyboardEvent) => {
       const tecla = e.key?.toUpperCase();
       const atalhoInspecao =
@@ -53,12 +70,23 @@ export default function ProtecaoInspecao() {
       bloquear('acao');
     };
 
-    // Painel aberto acoplado à janela: sobra um vão entre a janela e a página.
-    const VAO = 170;
+    /**
+     * Painel aberto acoplado à janela: sobra um vão entre a janela e a página.
+     *
+     * A medida de partida é a do próprio navegador em uso — barra lateral,
+     * zoom e barra do sistema já entram nela. O bloqueio só vem quando o vão
+     * cresce bem acima desse ponto de partida, que é o que acontece quando o
+     * painel de ferramentas abre.
+     */
+    const FOLGA = 200;
+    const base = {
+      largura: window.outerWidth - window.innerWidth,
+      altura: window.outerHeight - window.innerHeight
+    };
     const vigiar = () => {
       const aberto =
-        window.outerWidth - window.innerWidth > VAO ||
-        window.outerHeight - window.innerHeight > VAO;
+        window.outerWidth - window.innerWidth > base.largura + FOLGA ||
+        window.outerHeight - window.innerHeight > base.altura + FOLGA;
       if (aberto) {
         bloquear('painel');
         return;
@@ -69,6 +97,16 @@ export default function ProtecaoInspecao() {
         setBloqueado(false);
       }
     };
+
+    // No celular só ficam os atalhos de teclado (teclado externo), sem o menu
+    // de toque longo e sem a vigilância de tamanho.
+    if (aparelhoDeToque) {
+      window.addEventListener('keydown', teclado, true);
+      return () => {
+        vivo = false;
+        window.removeEventListener('keydown', teclado, true);
+      };
+    }
 
     window.addEventListener('keydown', teclado, true);
     window.addEventListener('contextmenu', menu, true);
