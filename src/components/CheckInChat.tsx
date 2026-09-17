@@ -1,37 +1,39 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, Check, Camera, MapPin, Clock, Loader2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ChevronLeft, Check, Camera, MapPin, Clock, Loader2, RefreshCw } from 'lucide-react';
 import { reverseGeocode } from '../services/streetSources';
 import { DatabaseService } from '../databaseClient';
 import { OperationType, CheckIn } from '../types';
 import OperationIcon from './OperationIcon';
+import BrandMark from './BrandMark';
+import MiniMapa from './MiniMapa';
 
 interface CheckInChatProps {
-  /** Integrante autenticado: nome e foto reais dele. */
   member: any;
-  /** Cliente do link de check-in. */
   clientId: string;
   clientName: string;
-  /** Logo do sistema, usada no topo e nas falas do sistema. */
-  brandLogo: string;
-  /** Tipos de operação cadastrados para este cliente. */
   operationTypes: OperationType[];
   onSaved: (checkIn: CheckIn) => void;
   onBack: () => void;
   notify: (texto: string, tipo?: 'success' | 'error' | 'info') => void;
 }
 
+/** Cores da marca, fixadas aqui para o fio inteiro falar a mesma língua. */
+const AZUL = '#0C3556';
+const FUNDO = '#F3F6FA';
+const VERDE = '#08A47B';
+
+const TOTAL_ETAPAS = 4;
+
 type Autor = 'sistema' | 'membro';
+type Bloco = 'local' | 'foto';
 
 interface Mensagem {
   id: string;
   autor: Autor;
   hora: string;
   texto?: string;
-  /** Conteúdo especial da bolha: o cartão de localização ou o da foto. */
-  bloco?: 'mapa' | 'foto';
+  bloco?: Bloco;
 }
-
-const TOTAL_ETAPAS = 4;
 
 const horaAgora = () =>
   new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -39,16 +41,15 @@ const horaAgora = () =>
 /**
  * Check-in de campo em forma de conversa.
  *
- * A tela conduz o integrante por quatro etapas — localização, foto, operação e
- * confirmação — e cada passo concluído vira uma mensagem no fio. Tudo o que
- * aparece é real: o nome e a foto vêm do cadastro do integrante, o endereço do
- * GPS do aparelho e os tipos de operação são os que o cliente cadastrou.
+ * Cada etapa só termina quando a pessoa conclui a ação: a localização vira
+ * mensagem depois de ela confirmar, a foto depois do envio, a operação depois
+ * da escolha. Nada aqui é de enfeite — endereço, precisão, foto, horário e
+ * tipos de operação são os dados reais do aparelho e do cliente.
  */
 export default function CheckInChat({
   member,
   clientId,
   clientName,
-  brandLogo,
   operationTypes,
   onSaved,
   onBack,
@@ -59,23 +60,20 @@ export default function CheckInChat({
 
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [precisao, setPrecisao] = useState<number | null>(null);
-  const [endereco, setEndereco] = useState<{
-    rua: string;
-    bairro: string;
-    cidade: string;
-    uf: string;
-  } | null>(null);
+  const [endereco, setEndereco] = useState<{ rua: string; resto: string } | null>(null);
+  const [mapaPronto, setMapaPronto] = useState(false);
+  const [buscandoGps, setBuscandoGps] = useState(true);
   const [erroGps, setErroGps] = useState<string | null>(null);
+  const [localConfirmado, setLocalConfirmado] = useState(false);
+  const [horaLocal, setHoraLocal] = useState('');
 
-  const [foto, setFoto] = useState<string>('');
+  const [foto, setFoto] = useState('');
   const [enviandoFoto, setEnviandoFoto] = useState(false);
   const [operacao, setOperacao] = useState<OperationType | null>(null);
   const [salvando, setSalvando] = useState(false);
 
   const fimRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
-  const mapaRef = useRef<HTMLDivElement>(null);
-  const pediuGps = useRef(false);
   const abriuFio = useRef(false);
 
   const nomeMembro: string =
@@ -88,7 +86,6 @@ export default function CheckInChat({
       { id: `m${prev.length}_${Date.now()}`, hora: msg.hora || horaAgora(), ...msg }
     ]);
 
-  // O fio já começa pedindo a localização: sem pergunta de abertura.
   useEffect(() => {
     if (abriuFio.current) return;
     abriuFio.current = true;
@@ -96,21 +93,24 @@ export default function CheckInChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Rola sozinho a cada mensagem nova.
   useEffect(() => {
-    // Um quadro de espera: o cartão que acabou de entrar precisa ter altura
-    // antes de o fio saber até onde rolar.
     const t = setTimeout(
       () => fimRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }),
-      80
+      90
     );
     return () => clearTimeout(t);
-  }, [mensagens, etapa, foto, operacao]);
+  }, [mensagens, etapa, mapaPronto, coords, foto, operacao]);
 
-  // ---------------------------------------------------------------- etapa 1
-  useEffect(() => {
-    if (pediuGps.current || !navigator.geolocation) return;
-    pediuGps.current = true;
+  // ------------------------------------------------------------ localização
+  const capturarLocal = () => {
+    if (!navigator.geolocation) {
+      setErroGps('Este aparelho não oferece localização.');
+      setBuscandoGps(false);
+      return;
+    }
+    setBuscandoGps(true);
+    setErroGps(null);
+    setMapaPronto(false);
 
     navigator.geolocation.getCurrentPosition(
       async pos => {
@@ -118,61 +118,44 @@ export default function CheckInChat({
         setCoords({ lat: latitude, lng: longitude });
         setPrecisao(accuracy ? Math.round(accuracy) : null);
 
-        let achado = { rua: '', bairro: '', cidade: '', uf: '' };
+        let rua = 'Local capturado por GPS';
+        let resto = '';
         try {
           const addr = await reverseGeocode(latitude, longitude);
-          achado = {
-            rua: addr?.road || addr?.displayName || 'Local sem nome de rua',
-            bairro: addr?.suburb || '',
-            cidade: addr?.city || '',
-            uf: addr?.uf || ''
-          };
+          rua = addr?.road || addr?.displayName || rua;
+          resto = [addr?.suburb, addr?.city, addr?.uf].filter(Boolean).join(', ');
         } catch {
-          achado.rua = 'Local capturado por GPS';
+          /* sem endereço, fica o ponto do GPS */
         }
-        setEndereco(achado);
-        setEtapa(2);
-        empilhar({ autor: 'sistema', bloco: 'mapa' });
-        empilhar({ autor: 'sistema', texto: 'Agora envie uma foto do local.' });
+        setEndereco({ rua, resto });
+        setBuscandoGps(false);
       },
       err => {
+        setBuscandoGps(false);
         setErroGps(
           err?.code === 1
             ? 'Permita o acesso à localização para continuar.'
             : 'Não foi possível capturar sua localização agora.'
         );
       },
-      { enableHighAccuracy: true, timeout: 15000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
+  };
+
+  useEffect(() => {
+    capturarLocal();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Mini mapa do cartão de localização, com o pino onde a pessoa está.
-  useEffect(() => {
-    if (!coords || !mapaRef.current) return;
-    let mapa: any;
-    (async () => {
-      const L = (await import('leaflet')).default;
-      if (!mapaRef.current) return;
-      mapa = L.map(mapaRef.current, {
-        zoomControl: false,
-        attributionControl: false,
-        dragging: false,
-        scrollWheelZoom: false,
-        doubleClickZoom: false,
-        touchZoom: false,
-        keyboard: false
-      }).setView([coords.lat, coords.lng], 16);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapa);
-      L.marker([coords.lat, coords.lng]).addTo(mapa);
-      setTimeout(() => mapa.invalidateSize(), 120);
-    })();
-    return () => {
-      if (mapa) mapa.remove();
-    };
-  }, [coords]);
+  const confirmarLocal = () => {
+    setLocalConfirmado(true);
+    setHoraLocal(horaAgora());
+    setEtapa(2);
+    empilhar({ autor: 'membro', bloco: 'local' });
+    empilhar({ autor: 'sistema', texto: 'Agora envie uma foto do local.' });
+  };
 
-  // ---------------------------------------------------------------- etapa 2
+  // ------------------------------------------------------------------ foto
   const enviarFoto = async (file: File) => {
     setEnviandoFoto(true);
     const res = await DatabaseService.uploadMedia(file);
@@ -183,30 +166,31 @@ export default function CheckInChat({
     }
     setFoto(res.url);
     setEtapa(3);
-    empilhar({ autor: 'sistema', bloco: 'foto' });
+    empilhar({ autor: 'membro', bloco: 'foto' });
     empilhar({ autor: 'sistema', texto: 'Qual operação você vai iniciar?' });
   };
 
-  // ---------------------------------------------------------------- etapa 3
+  // -------------------------------------------------------------- operação
   const escolherOperacao = (tipo: OperationType) => {
     setOperacao(tipo);
     setEtapa(4);
     empilhar({ autor: 'membro', texto: tipo.label });
   };
 
-  // ---------------------------------------------------------------- etapa 4
+  // ------------------------------------------------------------ confirmação
   const confirmar = async () => {
     if (!coords || !foto || !operacao) return;
     setSalvando(true);
 
     const agora = new Date();
+    const partes = (endereco?.resto || '').split(',').map(t => t.trim());
     const registro: any = {
       id: 'checkin_' + Math.random().toString(36).substr(2, 9),
       name: nomeMembro,
-      bairro: endereco?.bairro || '',
       rua: endereco?.rua || '',
-      municipio: endereco?.cidade || '',
-      estado: endereco?.uf || '',
+      bairro: partes[0] || '',
+      municipio: partes[1] || '',
+      estado: partes[2] || '',
       photo: foto,
       media: [{ url: foto, type: 'image' }],
       coordinates: { lat: coords.lat, lng: coords.lng },
@@ -224,7 +208,6 @@ export default function CheckInChat({
 
     const res = await DatabaseService.upsertCheckIn(registro);
     setSalvando(false);
-
     if (!res.success) {
       notify(`Não foi possível salvar: ${res.error || 'erro'}`, 'error');
       return;
@@ -233,38 +216,41 @@ export default function CheckInChat({
     onSaved(registro as CheckIn);
   };
 
-  const enderecoLinha1 = endereco?.rua || 'Localização capturada';
-  const enderecoLinha2 = [endereco?.bairro, endereco?.cidade, endereco?.uf]
-    .filter(Boolean)
-    .join(', ');
+  const pronto = Boolean(localConfirmado && foto && operacao);
 
-  const pronto = Boolean(coords && foto && operacao);
+  const AvatarSistema = () => (
+    <span className="shrink-0">
+      <BrandMark size={28} rounded={7} />
+    </span>
+  );
 
-  const Avatar = ({ autor }: { autor: Autor }) =>
-    autor === 'sistema' ? (
-      <div className="w-7 h-7 rounded-full bg-[#0F4C9B] flex items-center justify-center shrink-0 overflow-hidden">
-        {brandLogo ? (
-          <img src={brandLogo} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-        ) : (
-          <MapPin className="w-3.5 h-3.5 text-white" />
-        )}
-      </div>
-    ) : (
-      <div className="w-7 h-7 rounded-full bg-slate-200 shrink-0 overflow-hidden flex items-center justify-center">
-        {fotoMembro ? (
-          <img src={fotoMembro} alt={nomeMembro} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-        ) : (
-          <span className="text-[10px] font-black text-slate-500 uppercase">
-            {nomeMembro.substring(0, 2)}
-          </span>
-        )}
-      </div>
-    );
+  const AvatarMembro = () => (
+    <span className="w-7 h-7 rounded-full bg-slate-200 shrink-0 overflow-hidden flex items-center justify-center">
+      {fotoMembro ? (
+        <img
+          src={fotoMembro}
+          alt={nomeMembro}
+          className="w-full h-full object-cover"
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <span className="text-[10px] font-black text-slate-500 uppercase">
+          {nomeMembro.substring(0, 2)}
+        </span>
+      )}
+    </span>
+  );
 
   return (
-    <div className="h-[100dvh] bg-[#EEF2F7] flex flex-col font-sans overflow-hidden">
-      {/* TOPO */}
-      <header className="bg-[#0F4C9B] text-white px-3 py-3 flex items-center gap-2.5 shrink-0">
+    <div
+      className="h-[100dvh] flex flex-col font-sans overflow-hidden"
+      style={{ backgroundColor: FUNDO }}
+    >
+      {/* CABEÇALHO */}
+      <header
+        className="text-white px-3 py-3 flex items-center gap-2.5 shrink-0"
+        style={{ backgroundColor: AZUL }}
+      >
         <button
           onClick={onBack}
           className="p-1.5 -ml-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
@@ -272,17 +258,11 @@ export default function CheckInChat({
         >
           <ChevronLeft className="w-5 h-5" />
         </button>
-        <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center overflow-hidden shrink-0">
-          {brandLogo ? (
-            <img src={brandLogo} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-          ) : (
-            <MapPin className="w-4 h-4" />
-          )}
-        </div>
+        <BrandMark size={32} rounded={8} />
         <h1 className="text-[15px] font-bold tracking-tight">Check-in de campo</h1>
       </header>
 
-      {/* PROGRESSO */}
+      {/* ETAPAS */}
       <div className="bg-white px-5 pt-3 pb-2.5 border-b border-slate-100 shrink-0">
         <div className="flex items-center gap-1.5">
           {Array.from({ length: TOTAL_ETAPAS }).map((_, i) => {
@@ -292,15 +272,13 @@ export default function CheckInChat({
             return (
               <React.Fragment key={n}>
                 <span
-                  className={`w-2.5 h-2.5 rounded-full shrink-0 transition-colors ${
-                    feito || atual ? 'bg-emerald-500' : 'bg-slate-200'
-                  }`}
+                  className="w-2.5 h-2.5 rounded-full shrink-0 transition-colors"
+                  style={{ backgroundColor: feito || atual ? VERDE : '#E2E8F0' }}
                 />
                 {n < TOTAL_ETAPAS && (
                   <span
-                    className={`flex-1 h-0.5 rounded-full transition-colors ${
-                      feito ? 'bg-emerald-500' : 'bg-slate-200'
-                    }`}
+                    className="flex-1 h-0.5 rounded-full transition-colors"
+                    style={{ backgroundColor: feito ? VERDE : '#E2E8F0' }}
                   />
                 )}
               </React.Fragment>
@@ -312,95 +290,164 @@ export default function CheckInChat({
         </p>
       </div>
 
-      {/* FIO DA CONVERSA */}
-      <div
-        className="flex-1 min-h-0 px-3 pt-4 pb-6 space-y-3 overflow-y-auto"
-      >
+      {/* FIO */}
+      <div className="flex-1 min-h-0 px-3 pt-4 pb-6 space-y-3 overflow-y-auto">
         {mensagens.map(msg => {
           const doSistema = msg.autor === 'sistema';
+
+          // Localização e foto viram cartão azul do lado do integrante.
+          if (msg.bloco === 'local' && coords) {
+            return (
+              <div key={msg.id} className="flex items-end gap-2 flex-row-reverse">
+                <AvatarMembro />
+                <div
+                  className="max-w-[80%] rounded-2xl rounded-br-md overflow-hidden shadow-sm"
+                  style={{ backgroundColor: AZUL }}
+                >
+                  <MiniMapa lat={coords.lat} lng={coords.lng} height={124} />
+                  <div className="p-3">
+                    <p className="text-[13px] font-bold text-white leading-tight">
+                      {endereco?.rua}
+                    </p>
+                    <p className="text-[11px] text-white/70 font-semibold mt-0.5">
+                      {endereco?.resto}
+                      {precisao !== null && (
+                        <span className="whitespace-nowrap">
+                          {endereco?.resto ? ' • ' : ''}Precisão {precisao} m
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-[10px] text-white/50 font-semibold mt-1.5 text-right">
+                      {msg.hora}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (msg.bloco === 'foto' && foto) {
+            return (
+              <div key={msg.id} className="flex items-end gap-2 flex-row-reverse">
+                <AvatarMembro />
+                <div
+                  className="max-w-[80%] rounded-2xl rounded-br-md overflow-hidden shadow-sm"
+                  style={{ backgroundColor: AZUL }}
+                >
+                  <img src={foto} alt="Foto do local" className="w-full h-36 object-cover" />
+                  <div className="px-3 py-2 flex items-center justify-between gap-3">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white">
+                      <Check className="w-3 h-3 stroke-[3]" style={{ color: VERDE }} />
+                      Foto enviada
+                    </span>
+                    <span className="text-[10px] text-white/50 font-semibold">{msg.hora}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
           return (
             <div
               key={msg.id}
               className={`flex items-end gap-2 ${doSistema ? '' : 'flex-row-reverse'}`}
             >
-              <Avatar autor={msg.autor} />
+              {doSistema ? <AvatarSistema /> : <AvatarMembro />}
               <div className={`max-w-[78%] ${doSistema ? '' : 'flex flex-col items-end'}`}>
-                {msg.bloco === 'mapa' ? (
-                  <div className="bg-white rounded-2xl rounded-bl-md shadow-sm border border-slate-100 overflow-hidden">
-                    <div ref={mapaRef} className="h-28 w-full bg-slate-100" />
-                    <div className="p-3">
-                      <p className="text-[13px] font-bold text-slate-800 leading-tight">
-                        {enderecoLinha1}
-                      </p>
-                      <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
-                        {[enderecoLinha2, precisao !== null ? `Precisão ${precisao} m` : '']
-                          .filter(Boolean)
-                          .join(' • ')}
-                      </p>
-                      <div className="mt-2 flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-[11px] font-bold px-2 py-1 rounded-lg">
-                          <Check className="w-3 h-3 stroke-[3]" />
-                          Localização confirmada
-                        </span>
-                        <span className="text-[10px] text-slate-300 font-semibold">
-                          {msg.hora}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ) : msg.bloco === 'foto' ? (
-                  <div className="bg-white rounded-2xl rounded-bl-md shadow-sm border border-slate-100 overflow-hidden">
-                    <img src={foto} alt="Foto do local" className="w-full h-32 object-cover" />
-                    <div className="p-3 flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-[11px] font-bold px-2 py-1 rounded-lg">
-                        <Check className="w-3 h-3 stroke-[3]" />
-                        Foto enviada
-                      </span>
-                      <span className="text-[10px] text-slate-300 font-semibold">
-                        {msg.hora}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className={`px-3.5 py-2.5 text-[13px] leading-snug shadow-sm ${
-                      doSistema
-                        ? 'bg-white text-slate-700 rounded-2xl rounded-bl-md border border-slate-100'
-                        : 'bg-[#1D6FD8] text-white rounded-2xl rounded-br-md font-semibold'
-                    }`}
-                  >
-                    {msg.texto}
-                  </div>
-                )}
-                {!msg.bloco && (
-                  <span
-                    className={`block text-[10px] text-slate-300 font-semibold mt-1 ${
-                      doSistema ? '' : 'text-right'
-                    }`}
-                  >
-                    {msg.hora}
-                  </span>
-                )}
+                <div
+                  className={`px-3.5 py-2.5 text-[13px] leading-snug shadow-sm ${
+                    doSistema
+                      ? 'bg-white text-slate-700 rounded-2xl rounded-bl-md border border-slate-100'
+                      : 'text-white rounded-2xl rounded-br-md font-semibold'
+                  }`}
+                  style={doSistema ? undefined : { backgroundColor: AZUL }}
+                >
+                  {msg.texto}
+                </div>
+                <span
+                  className={`block text-[10px] text-slate-400 font-semibold mt-1 ${
+                    doSistema ? '' : 'text-right'
+                  }`}
+                >
+                  {msg.hora}
+                </span>
               </div>
             </div>
           );
         })}
 
-        {/* Etapa 1 sem GPS */}
-        {etapa === 1 && (
-          <div className="flex items-center gap-2 pl-9 text-[12px] font-semibold text-slate-400">
-            {erroGps ? (
-              <span className="text-rose-600">{erroGps}</span>
-            ) : (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Capturando sua localização...
-              </>
-            )}
+        {/* ETAPA 1: mapa do ponto capturado + confirmação */}
+        {!localConfirmado && (
+          <div className="flex items-end gap-2">
+            <AvatarSistema />
+            <div className="max-w-[80%] w-full">
+              {buscandoGps && !coords ? (
+                <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm px-3.5 py-3 flex items-center gap-2 text-[12px] font-semibold text-slate-500">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Capturando sua localização...
+                </div>
+              ) : erroGps ? (
+                <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm px-3.5 py-3">
+                  <p className="text-[12px] font-bold text-rose-600">{erroGps}</p>
+                  <button
+                    onClick={capturarLocal}
+                    className="mt-2 px-3 py-2 text-[11px] font-black uppercase tracking-wider text-white rounded-xl cursor-pointer"
+                    style={{ backgroundColor: AZUL }}
+                  >
+                    Tentar de novo
+                  </button>
+                </div>
+              ) : coords ? (
+                <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm overflow-hidden">
+                  <MiniMapa
+                    lat={coords.lat}
+                    lng={coords.lng}
+                    height={150}
+                    onReady={() => setMapaPronto(true)}
+                  />
+                  <div className="p-3">
+                    <p className="text-[13px] font-bold text-slate-800 leading-tight">
+                      {endereco?.rua || 'Localizando endereço...'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+                      {endereco?.resto}
+                      {precisao !== null && (
+                        <span className="whitespace-nowrap">
+                          {endereco?.resto ? ' • ' : ''}Precisão {precisao} m
+                        </span>
+                      )}
+                    </p>
+
+                    <p className="text-[13px] font-bold text-slate-800 mt-3">
+                      Este é o seu local atual?
+                    </p>
+
+                    <div className="mt-2 flex flex-col gap-2">
+                      <button
+                        onClick={confirmarLocal}
+                        disabled={!mapaPronto || buscandoGps}
+                        className="w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                        style={{ backgroundColor: AZUL }}
+                      >
+                        {mapaPronto ? 'Confirmar local' : 'Carregando mapa...'}
+                      </button>
+                      <button
+                        onClick={capturarLocal}
+                        disabled={buscandoGps}
+                        className="w-full py-2.5 bg-white border border-slate-200 text-slate-600 text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all active:scale-[0.99] disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${buscandoGps ? 'animate-spin' : ''}`} />
+                        Atualizar localização
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
 
-        {/* Etapa 2: abrir a câmera */}
+        {/* ETAPA 2: câmera */}
         {etapa === 2 && (
           <div className="pl-9">
             <input
@@ -417,7 +464,8 @@ export default function CheckInChat({
             <button
               onClick={() => cameraRef.current?.click()}
               disabled={enviandoFoto}
-              className="px-4 py-2.5 bg-[#1D6FD8] hover:bg-blue-700 text-white text-[13px] font-bold rounded-2xl shadow-sm flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+              className="px-4 py-2.5 text-white text-[13px] font-bold rounded-2xl shadow-sm flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+              style={{ backgroundColor: AZUL }}
             >
               {enviandoFoto ? (
                 <>
@@ -434,7 +482,7 @@ export default function CheckInChat({
           </div>
         )}
 
-        {/* Etapa 3: tipos de operação do cliente */}
+        {/* ETAPA 3: operações do cliente */}
         {etapa === 3 && (
           <div className="pl-9 flex flex-wrap gap-2">
             {operationTypes.length === 0 ? (
@@ -461,29 +509,35 @@ export default function CheckInChat({
           </div>
         )}
 
-        {/* Etapa 4: resumo */}
+        {/* ETAPA 4: resumo */}
         {pronto && (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 mt-1">
+          <div
+            className="rounded-2xl p-4 mt-1 border"
+            style={{ backgroundColor: '#E9F8F3', borderColor: '#B6E6D7' }}
+          >
             <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+              <div
+                className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+                style={{ backgroundColor: VERDE }}
+              >
                 <Check className="w-5 h-5 text-white stroke-[3]" />
               </div>
               <div className="min-w-0">
-                <p className="text-[14px] font-black text-emerald-900 leading-tight">
+                <p className="text-[14px] font-black leading-tight" style={{ color: '#05603F' }}>
                   Tudo pronto para iniciar
                 </p>
                 <ul className="mt-2 space-y-1.5">
-                  <li className="flex items-center gap-2 text-[12px] font-semibold text-emerald-800">
-                    <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <li className="flex items-center gap-2 text-[12px] font-semibold" style={{ color: '#05603F' }}>
+                    <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: VERDE }} />
                     Localização confirmada
                   </li>
-                  <li className="flex items-center gap-2 text-[12px] font-semibold text-emerald-800">
-                    <Camera className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <li className="flex items-center gap-2 text-[12px] font-semibold" style={{ color: '#05603F' }}>
+                    <Camera className="w-3.5 h-3.5 shrink-0" style={{ color: VERDE }} />
                     Foto anexada
                   </li>
-                  <li className="flex items-center gap-2 text-[12px] font-semibold text-emerald-800">
-                    <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    Horário: {horaAgora()}
+                  <li className="flex items-center gap-2 text-[12px] font-semibold" style={{ color: '#05603F' }}>
+                    <Clock className="w-3.5 h-3.5 shrink-0" style={{ color: VERDE }} />
+                    Horário: {horaLocal || horaAgora()}
                   </li>
                 </ul>
               </div>
@@ -494,13 +548,14 @@ export default function CheckInChat({
         <div ref={fimRef} />
       </div>
 
-      {/* BOTÃO FINAL */}
+      {/* CONFIRMAÇÃO FINAL */}
       {pronto && (
         <div className="p-3 bg-white border-t border-slate-100 shrink-0">
           <button
             onClick={confirmar}
             disabled={salvando}
-            className="w-full py-3.5 bg-[#1D6FD8] hover:bg-blue-700 disabled:opacity-60 text-white text-[13px] font-black uppercase tracking-wider rounded-2xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+            className="w-full py-3.5 text-white text-[13px] font-black uppercase tracking-wider rounded-2xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-60"
+            style={{ backgroundColor: AZUL }}
           >
             {salvando ? (
               <>

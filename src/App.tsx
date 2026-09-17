@@ -4243,7 +4243,6 @@ export default function App() {
           member={authenticatedSupporter}
           clientId={checkInCandidateId}
           clientName={clienteDoLink?.name || ""}
-          brandLogo={BRAND_LOGO}
           operationTypes={operationTypes.filter(
             (t) => t.candidateId === checkInCandidateId,
           )}
