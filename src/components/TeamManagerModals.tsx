@@ -16,6 +16,20 @@ import { Candidate } from '../types';
 
 type Aviso = (texto: string, tipo?: 'success' | 'error' | 'info') => void;
 
+/** Prazos que o ADM pode escolher para o QR Code. */
+const PRAZOS = [
+  { minutos: 2, label: '2 minutos' },
+  { minutos: 5, label: '5 minutos' },
+  { minutos: 10, label: '10 minutos' },
+  { minutos: 30, label: '30 minutos' },
+  { minutos: 60, label: '1 hora' },
+  { minutos: 60 * 24, label: '24 horas' },
+  { minutos: 60 * 24 * 7, label: '7 dias' }
+];
+
+const rotuloPrazo = (min: number) =>
+  PRAZOS.find(p => p.minutos === min)?.label || `${min} minutos`;
+
 interface BaseProps {
   client: Candidate;
   onClose: () => void;
@@ -205,7 +219,11 @@ export function VincularMembroModal({
 export function QrConviteModal({ client, onClose, notify }: BaseProps) {
   const [convites, setConvites] = useState<any[]>([]);
   const [nota, setNota] = useState('');
+  /** Prazo de validade escolhido pelo ADM, em minutos. */
+  const [minutos, setMinutos] = useState(10);
   const [gerando, setGerando] = useState(false);
+  /** Relógio do modal, para a contagem dos convites andar sozinha. */
+  const [agora, setAgora] = useState(() => Date.now());
   const [ativo, setAtivo] = useState<any>(null);
   const [imagemQr, setImagemQr] = useState('');
 
@@ -219,6 +237,11 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client.id]);
 
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   const linkDe = (token: string) =>
     `${window.location.origin}/?convite=${token}`;
 
@@ -231,7 +254,11 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
 
   const gerar = async () => {
     setGerando(true);
-    const res = await DatabaseService.createTeamInvite(client.id, nota.trim());
+    const res = await DatabaseService.createTeamInvite(
+      client.id,
+      nota.trim(),
+      minutos,
+    );
     setGerando(false);
     if (!res.success || !res.data) {
       notify(`Não foi possível gerar: ${res.error || 'erro'}`, 'error');
@@ -240,7 +267,10 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
     setNota('');
     setAtivo(res.data);
     carregar();
-    notify('QR Code gerado. Ele vale para uma pessoa só.', 'success');
+    notify(
+      `QR Code gerado. Vale para uma pessoa só e expira em ${rotuloPrazo(minutos)}.`,
+      'success',
+    );
   };
 
   const cancelar = async (convite: any) => {
@@ -251,8 +281,28 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
     notify('Convite cancelado.', 'info');
   };
 
+  const expirado = (c: any) =>
+    !!c.expires_at && new Date(c.expires_at).getTime() <= agora;
+
   const situacao = (c: any) =>
-    c.used_at ? 'Utilizado' : c.revoked_at ? 'Cancelado' : 'Aguardando';
+    c.used_at
+      ? 'Utilizado'
+      : c.revoked_at
+        ? 'Cancelado'
+        : expirado(c)
+          ? 'Expirado'
+          : 'Aguardando';
+
+  /** Quanto falta, em mm:ss, para o convite morrer. */
+  const restante = (c: any) => {
+    if (!c.expires_at) return '';
+    const ms = new Date(c.expires_at).getTime() - agora;
+    if (ms <= 0) return '';
+    const seg = Math.floor(ms / 1000);
+    const m = Math.floor(seg / 60);
+    const sgs = seg % 60;
+    return `${m}:${String(sgs).padStart(2, '0')}`;
+  };
 
   return (
     <div className={fundo}>
@@ -271,6 +321,18 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
               placeholder="Para quem é este QR? (opcional)"
               className={input}
             />
+            <select
+              value={minutos}
+              onChange={e => setMinutos(Number(e.target.value))}
+              title="Depois desse tempo o QR Code deixa de valer"
+              className={`${input} sm:w-44 cursor-pointer`}
+            >
+              {PRAZOS.map(op => (
+                <option key={op.minutos} value={op.minutos}>
+                  Expira em {op.label}
+                </option>
+              ))}
+            </select>
             <button
               onClick={gerar}
               disabled={gerando}
@@ -297,6 +359,19 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
               <p className="text-[11px] text-slate-500 font-bold text-center leading-snug">
                 Mostre este QR para {ativo.note || 'a pessoa'}. Assim que o
                 cadastro for concluído, ele deixa de funcionar.
+                {restante(ativo) && (
+                  <>
+                    {' '}
+                    Expira em{' '}
+                    <span className="font-mono text-amber-700">
+                      {restante(ativo)}
+                    </span>
+                    .
+                  </>
+                )}
+                {expirado(ativo) && (
+                  <span className="text-rose-600"> Este QR já expirou.</span>
+                )}
               </p>
               <button
                 onClick={() => {
@@ -328,7 +403,7 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
                     className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
                       c.used_at
                         ? 'bg-emerald-50 text-emerald-700'
-                        : c.revoked_at
+                        : c.revoked_at || expirado(c)
                           ? 'bg-slate-100 text-slate-500'
                           : 'bg-amber-50 text-amber-700'
                     }`}
@@ -338,7 +413,12 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
                   <span className="flex-1 text-xs font-bold text-slate-700 truncate">
                     {c.note || 'Sem identificação'}
                   </span>
-                  {!c.used_at && !c.revoked_at && (
+                  {!c.used_at && !c.revoked_at && !expirado(c) && restante(c) && (
+                    <span className="text-[10px] font-black font-mono text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md">
+                      {restante(c)}
+                    </span>
+                  )}
+                  {!c.used_at && !c.revoked_at && !expirado(c) && (
                     <>
                       <button
                         onClick={() => setAtivo(c)}

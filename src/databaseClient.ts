@@ -565,7 +565,13 @@ export const DatabaseService = {
     }
   },
 
-  async createTeamInvite(candidateId: string, note?: string) {
+  /**
+   * Cria o convite do QR.
+   *
+   * O prazo vem do ADM. Sem prazo o convite so morre quando alguem usar, entao
+   * o padrao e sempre ter um: quem chama passa os minutos.
+   */
+  async createTeamInvite(candidateId: string, note?: string, minutes?: number) {
     if (!db) return { success: false, error: 'banco de dados não configurado.' };
     try {
       // Token longo e aleatorio: o link do QR e a unica credencial dessa tela.
@@ -573,9 +579,19 @@ export const DatabaseService = {
         (crypto as any)?.randomUUID?.().replace(/-/g, '') ||
         Math.random().toString(36).slice(2) + Date.now().toString(36);
 
+      const expiresAt =
+        minutes && minutes > 0
+          ? new Date(Date.now() + minutes * 60000).toISOString()
+          : null;
+
       const { data, error } = await db
         .from('team_invites')
-        .insert({ token, candidate_id: candidateId, note: note || null })
+        .insert({
+          token,
+          candidate_id: candidateId,
+          note: note || null,
+          expires_at: expiresAt
+        })
         .select();
       if (error) throw error;
       return { success: true, data: data?.[0] };
