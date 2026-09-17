@@ -18,6 +18,9 @@ import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
 import { lerDispositivo } from "./services/dispositivo";
 import DispositivosMembroModal from "./components/DispositivosMembroModal";
+import ConfiguracoesAdmin, {
+  CHAVE_REDIRECIONAMENTO,
+} from "./components/ConfiguracoesAdmin";
 import BrandMark from "./components/BrandMark";
 import {
   VincularMembroModal,
@@ -28,6 +31,7 @@ import {
 import {
   MapPin,
   Users,
+  Settings,
   Smartphone,
   Layers,
   Flag,
@@ -337,7 +341,11 @@ const dominioDe = (url: string) => {
  * mostrar o sistema a essa pessoa é entregar de graça a porta de entrada: ela
  * é mandada para outro lugar, escolhido pelo administrador em Compartilhar.
  */
-const CHAVE_REDIRECIONAMENTO = "redirect_sem_link";
+/** Domínios que só servem para quem chega por link. */
+const DOMINIOS_DE_ACESSO = [dominioDe(BASE_EQUIPE), dominioDe(BASE_CADASTRO)].filter(
+  Boolean,
+);
+
 const REDIRECIONAMENTO_PADRAO =
   (import.meta as any).env?.VITE_FALLBACK_REDIRECT_URL ||
   "https://www.youtube.com";
@@ -368,15 +376,12 @@ const ROTA_INICIAL = (() => {
 
   // Chegou num domínio de acesso sem link nenhum? Não é gente do sistema.
   const caminho = window.location.pathname.replace(/\/+$/, "");
-  const dominiosDeAcesso = [dominioDe(BASE_EQUIPE), dominioDe(BASE_CADASTRO)].filter(
-    Boolean,
-  );
   const semLink =
     !convite &&
     !equipe &&
     caminho === "" &&
     busca.toString() === "" &&
-    dominiosDeAcesso.includes(window.location.hostname.toLowerCase());
+    DOMINIOS_DE_ACESSO.includes(window.location.hostname.toLowerCase());
 
   return { convite, equipe, semLink };
 })();
@@ -719,9 +724,8 @@ export default function App() {
   const [inviteToken] = useState<string>(ROTA_INICIAL.convite);
   /** Endereço para onde vai quem abriu o domínio de acesso sem link. */
   const [saidaSemLink, setSaidaSemLink] = useState('');
-  /** Ajuste editável pelo administrador, na tela de compartilhar. */
-  const [redirecionamentoAdm, setRedirecionamentoAdm] = useState('');
-  const [salvandoRedirecionamento, setSalvandoRedirecionamento] = useState(false);
+  /** Tela aberta na área do administrador. */
+  const [telaAdm, setTelaAdm] = useState<'clientes' | 'configuracoes'>('clientes');
 
   const [currentUrlView, setCurrentUrlView] = useState<"admin" | "checkin">(
     "admin",
@@ -1032,15 +1036,6 @@ export default function App() {
     return () => {
       vivo = false;
     };
-  }, []);
-
-  // O ajuste aparece preenchido na tela de compartilhar.
-  useEffect(() => {
-    if (ROTA_INICIAL.semLink) return;
-    (async () => {
-      const res = await DatabaseService.lerConfiguracao(CHAVE_REDIRECIONAMENTO);
-      setRedirecionamentoAdm(res.value || '');
-    })();
   }, []);
 
   // Monitorar query parameter e caminhos para entrar no modo check-in (com suporte a checkin/slug)
@@ -6253,7 +6248,18 @@ export default function App() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
           <div>
             <h1 className="text-3xl font-extrabold text-[#0D233A] tracking-tight flex items-center gap-2">
-              {inspectedCandidate ? (
+              {telaAdm === "configuracoes" ? (
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-slate-400 font-medium hover:text-slate-600 cursor-pointer text-2xl"
+                    onClick={() => setTelaAdm("clientes")}
+                  >
+                    Clientes
+                  </span>
+                  <ChevronRight className="w-5 h-5 text-slate-300" />
+                  <span className="text-2xl font-black">Configurações</span>
+                </div>
+              ) : inspectedCandidate ? (
                 <div className="flex items-center gap-2">
                   <span
                     className="text-slate-400 font-medium hover:text-slate-600 cursor-pointer text-2xl"
@@ -6271,15 +6277,21 @@ export default function App() {
               )}
             </h1>
             <p className="text-[#8492A6] text-xs font-semibold mt-1">
-              {inspectedCandidate
-                ? `Equipe, áreas e registros de campo de ${inspectedCandidate.name}`
-                : "Clientes cadastrados no sistema"}
+              {telaAdm === "configuracoes"
+                ? "Ajustes que valem para todo o sistema"
+                : inspectedCandidate
+                  ? `Equipe, áreas e registros de campo de ${inspectedCandidate.name}`
+                  : "Clientes cadastrados no sistema"}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* SEARCH BOX */}
-            <div className="relative bg-white border border-slate-200 rounded-2xl flex items-center px-4 w-60 h-11 shadow-xs focus-within:ring-2 focus-within:ring-blue-500/20">
+            {/* SEARCH BOX — não tem o que buscar nas configurações */}
+            <div
+              className={`relative bg-white border border-slate-200 rounded-2xl items-center px-4 w-60 h-11 shadow-xs focus-within:ring-2 focus-within:ring-blue-500/20 ${
+                telaAdm === "configuracoes" ? "hidden" : "flex"
+              }`}
+            >
               <Search className="w-4 h-4 text-slate-400 mr-2.5" />
               <input
                 type="text"
@@ -6297,7 +6309,15 @@ export default function App() {
             </div>
 
             {/* AÇÕES DO ADMINISTRADOR */}
-            {inspectedCandidate ? (
+            {telaAdm === "configuracoes" ? (
+              <button
+                onClick={() => setTelaAdm("clientes")}
+                className="px-5 h-11 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
+              >
+                <ChevronLeft className="w-4 h-4 text-rose-500" />
+                <span>Voltar</span>
+              </button>
+            ) : inspectedCandidate ? (
               <button
                 onClick={() => setInspectedCandidate(null)}
                 className="px-5 h-11 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95 animate-fade-in"
@@ -6327,8 +6347,19 @@ export default function App() {
               </>
             )}
 
+            {/* CONFIGURAÇÕES DO SISTEMA */}
+            {!inspectedCandidate && telaAdm !== "configuracoes" && (
+              <button
+                onClick={() => setTelaAdm("configuracoes")}
+                className="p-3 bg-white hover:bg-slate-50 text-slate-400 hover:text-[#015FC9] border border-slate-200 rounded-2xl shadow-sm transition-all cursor-pointer"
+                title="Configurações do sistema"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            )}
+
             {/* LOG OUT BADGE */}
-            {!inspectedCandidate && (
+            {!inspectedCandidate && telaAdm !== "configuracoes" && (
               <button
                 onClick={() => {
                   askConfirmation({
@@ -6356,8 +6387,17 @@ export default function App() {
           </div>
         </div>
 
+        {/* CONFIGURAÇÕES DO SISTEMA */}
+        {telaAdm === "configuracoes" && (
+          <ConfiguracoesAdmin
+            padraoRedirecionamento={REDIRECIONAMENTO_PADRAO}
+            dominiosDeAcesso={DOMINIOS_DE_ACESSO}
+            notify={triggerNotification}
+          />
+        )}
+
         {/* STATISTICS DASHBOARD CARDS */}
-        {adminSubTab === "candidates" ? (
+        {telaAdm !== "clientes" ? null : adminSubTab === "candidates" ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8">
             {/* Card 1: Total */}
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs flex items-center gap-4.5">
@@ -6462,7 +6502,7 @@ export default function App() {
         )}
 
         {/* DETAILS TABLE RENDER CONTAINER */}
-        {adminSubTab === "candidates" ? (
+        {telaAdm !== "clientes" ? null : adminSubTab === "candidates" ? (
           /* CANDIDATES MASTER DATA TABLE */
           <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden flex flex-col flex-1 min-h-[400px]">
             <div className="overflow-x-auto">
@@ -10909,60 +10949,6 @@ export default function App() {
                     Sem cliente, o check-in não teria a quem ser atribuído.
                   </p>
                 )}
-              </div>
-
-              {/* PARA ONDE VAI QUEM CHEGA SEM LINK */}
-              <div className="space-y-1.5 pt-1 border-t border-slate-100">
-                <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-405 pt-3">
-                  Quem abrir o domínio sem link vai para
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={redirecionamentoAdm}
-                    onChange={(e) => setRedirecionamentoAdm(e.target.value)}
-                    placeholder="https://www.youtube.com"
-                    className="flex-1 bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-700 font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
-                  />
-                  <button
-                    type="button"
-                    disabled={salvandoRedirecionamento}
-                    onClick={async () => {
-                      const destino = redirecionamentoAdm.trim();
-                      if (destino && !/^https?:\/\//i.test(destino)) {
-                        triggerNotification(
-                          "O endereço precisa começar com http:// ou https://.",
-                          "error",
-                        );
-                        return;
-                      }
-                      setSalvandoRedirecionamento(true);
-                      const res = await DatabaseService.gravarConfiguracao(
-                        CHAVE_REDIRECIONAMENTO,
-                        destino,
-                      );
-                      setSalvandoRedirecionamento(false);
-                      triggerNotification(
-                        res.success
-                          ? "Endereço de saída salvo!"
-                          : "Não foi possível salvar o endereço.",
-                        res.success ? "success" : "error",
-                      );
-                    }}
-                    className="px-4 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white font-bold text-xs rounded-xl transition-colors whitespace-nowrap cursor-pointer active:scale-95"
-                  >
-                    {salvandoRedirecionamento ? "Salvando..." : "Salvar"}
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-400 leading-snug">
-                  Vale para os domínios de acesso da equipe e do cadastro: quem
-                  digita o endereço na barra, sem o link, é mandado para fora do
-                  sistema. Em branco, vai para{" "}
-                  <span className="font-bold text-slate-600">
-                    {REDIRECIONAMENTO_PADRAO}
-                  </span>
-                  .
-                </p>
               </div>
 
               {/* Botão de Simulação Instantânea */}
