@@ -109,6 +109,26 @@ function normalizeFields<T>(obj: any): T {
   return result as T;
 }
 
+/**
+ * Deixa no registro do check-in só o que a tabela `check_ins` tem.
+ *
+ * Observações e operações moram em tabelas próprias; se forem junto no mesmo
+ * envio, o banco recusa a gravação inteira por causa de uma coluna que não
+ * existe — e o check-in não é salvo.
+ */
+const somenteColunasDoCheckIn = (checkIn: any) => {
+  // status, confirmedAt e updatedAt saem daqui e voltam na primeira tentativa:
+  // assim a tentativa seguinte, para bancos sem a migração, fica sem eles.
+  const { notes, operations, status, confirmedAt, updatedAt, ...colunas } = checkIn || {};
+  return colunas;
+};
+
+/** Reclamação de coluna que não existe naquele banco. */
+const colunaDesconhecida = (erro: any) =>
+  /column|schema cache|PGRST204/i.test(
+    `${erro?.message || ''} ${erro?.code || ''} ${erro?.details || ''}`
+  );
+
 function prepareUpsertPayload(obj: any, table: string): any {
   if (!obj) return obj;
   const casing = detectedCasing[table] || 'camel';
@@ -374,14 +394,26 @@ export const DatabaseService = {
     if (!db) return { success: false };
     try {
       const agora = new Date().toISOString();
+      const base = somenteColunasDoCheckIn(checkIn);
       const payload = prepareUpsertPayload(
-        { ...checkIn, status: 'confirmado', confirmedAt: agora, updatedAt: agora },
+        { ...base, status: 'confirmado', confirmedAt: agora, updatedAt: agora },
         'check_ins'
       );
-      const { error } = await db
-        .from('check_ins')
-        .upsert(payload);
-      if (error) throw error;
+
+      const { error } = await db.from('check_ins').upsert(payload);
+      if (!error) return { success: true };
+
+      // Banco que ainda não recebeu a migração do rascunho não tem status,
+      // confirmedAt nem updatedAt. O check-in é mais importante que as três
+      // colunas: grava sem elas em vez de perder o registro de campo.
+      if (!colunaDesconhecida(error)) throw error;
+
+      const semExtras = prepareUpsertPayload(base, 'check_ins');
+      const { error: erroSemExtras } = await db.from('check_ins').upsert(semExtras);
+      if (erroSemExtras) throw erroSemExtras;
+      console.warn(
+        'check-in salvo sem status/confirmedAt/updatedAt: rode a migração 2026-09-19.'
+      );
       return { success: true };
     } catch (err: any) {
       console.error('Erro ao salvar check-in no banco de dados:', err);
@@ -836,13 +868,18 @@ export const DatabaseService = {
   async salvarRascunhoCheckIn(checkIn: CheckIn) {
     if (!db) return { success: false };
     try {
+      const base = somenteColunasDoCheckIn(checkIn);
       const payload = prepareUpsertPayload(
-        { ...checkIn, status: 'rascunho', updatedAt: new Date().toISOString() },
+        { ...base, status: 'rascunho', updatedAt: new Date().toISOString() },
         'check_ins'
       );
+
       const { error } = await db.from('check_ins').upsert(payload);
-      if (error) throw error;
-      return { success: true };
+      if (!error) return { success: true };
+      // Sem a migração do rascunho, o rascunho simplesmente não existe: o
+      // check-in segue e é gravado inteiro na confirmação.
+      if (!colunaDesconhecida(error)) throw error;
+      return { success: false, error: error.message };
     } catch (err: any) {
       console.error('Erro ao salvar rascunho do check-in:', err);
       return { success: false, error: err.message };
