@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { candidateLocationText } from '../services/candidateLocation';
+import { DatabaseService } from '../databaseClient';
 import {
   expandBox,
   fetchCepStreets,
@@ -11,7 +12,7 @@ import {
   mergeStreetLists,
   StreetOption,
 } from '../services/streetSources';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, getCheckInPriority } from '../types';
 import { buildOperationIconSvg } from '../operationIcons';
 
@@ -397,6 +398,33 @@ export default function MapContainer({
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
+  /**
+   * Observações, operações e mídias do check-in aberto.
+   *
+   * Moram em tabelas próprias, então a ficha as busca ao abrir. Banco sem as
+   * tabelas novas devolve listas vazias e o resto da ficha continua de pé.
+   */
+  const [detalhesCheckIn, setDetalhesCheckIn] = useState<{
+    notas: any[];
+    operacoes: any[];
+    midias: any[];
+  }>({ notas: [], operacoes: [], midias: [] });
+
+  useEffect(() => {
+    if (!selectedCheckInForModal?.id) {
+      setDetalhesCheckIn({ notas: [], operacoes: [], midias: [] });
+      return;
+    }
+    let vivo = true;
+    (async () => {
+      const res = await DatabaseService.lerDetalhesCheckIn(selectedCheckInForModal.id);
+      if (!vivo) return;
+      setDetalhesCheckIn({ notas: res.notas, operacoes: res.operacoes, midias: res.midias });
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [selectedCheckInForModal?.id]);
   const [reverseGeocodedAddress, setReverseGeocodedAddress] = useState<string | null>(null);
   const [isReverseGeocoding, setIsReverseGeocoding] = useState<boolean>(false);
 
@@ -1954,8 +1982,21 @@ export default function MapContainer({
 
               {/* Seção principal de identificação */}
               <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-xl flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
-                  <User className="w-6 h-6" />
+                <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+                  {(selectedCheckInForModal as any).memberPhoto ? (
+                    <img
+                      src={(selectedCheckInForModal as any).memberPhoto}
+                      alt={selectedCheckInForModal.name}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                      onError={e => {
+                        // Foto fora do ar volta para o boneco, sem quebrar a ficha.
+                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <User className="w-6 h-6" />
+                  )}
                 </div>
                 <div className="min-w-0">
                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none">Nome do Voluntário</p>
@@ -1973,6 +2014,133 @@ export default function MapContainer({
                   </div>
                 </div>
               </div>
+
+              {/* Operações escolhidas */}
+              {(() => {
+                const operacoes = detalhesCheckIn.operacoes.length > 0
+                  ? detalhesCheckIn.operacoes.map((o: any) => o.operation_type_label || o.operation_type_id)
+                  : (selectedCheckInForModal as any).operationTypeLabel
+                    ? [(selectedCheckInForModal as any).operationTypeLabel]
+                    : [];
+                if (operacoes.length === 0) return null;
+                return (
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                      Operações{operacoes.length > 1 ? ` (${operacoes.length})` : ''}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {operacoes.map((label: string, i: number) => (
+                        <span
+                          key={`${label}-${i}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100"
+                        >
+                          <Flag className="w-3 h-3" />
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Observações digitadas e áudios gravados em campo */}
+              {detalhesCheckIn.notas.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                    Observações ({detalhesCheckIn.notas.length})
+                  </p>
+                  <div className="space-y-2.5">
+                    {detalhesCheckIn.notas.map((nota: any) => (
+                      <div
+                        key={nota.id}
+                        className="border border-slate-150 rounded-xl p-3 bg-slate-50/60"
+                      >
+                        {nota.kind === 'audio' ? (
+                          <div className="flex items-center gap-2.5">
+                            <Mic className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <audio
+                              src={nota.url}
+                              controls
+                              preload="metadata"
+                              className="w-full h-9"
+                            />
+                            {nota.duration_seconds ? (
+                              <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                                {Math.floor(nota.duration_seconds / 60)}:
+                                {String(Math.floor(nota.duration_seconds % 60)).padStart(2, '0')}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-2.5">
+                            <MessageSquare className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                            <p className="text-xs text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                              {nota.content}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Fotos e vídeos anexados */}
+              {(() => {
+                // A lista vem da tabela própria; o jsonb e a foto única cobrem os
+                // registros antigos, gravados antes das tabelas existirem.
+                const daTabela = detalhesCheckIn.midias.map((m: any) => ({
+                  url: m.url,
+                  type: (m.kind === 'video' ? 'video' : 'image') as 'image' | 'video'
+                }));
+                const media = daTabela.length > 0
+                  ? daTabela
+                  : selectedCheckInForModal.media && selectedCheckInForModal.media.length > 0
+                    ? selectedCheckInForModal.media
+                    : selectedCheckInForModal.photo
+                      ? [{ url: selectedCheckInForModal.photo, type: 'image' as const }]
+                      : [];
+
+                return (
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                      Fotos e vídeos{media.length > 1 ? ` (${media.length})` : ''}
+                    </p>
+                    {media.length > 0 ? (
+                      <div className={media.length > 1 ? 'grid grid-cols-2 gap-2.5' : ''}>
+                        {media.map((item, index) => (
+                          <div
+                            key={`${item.url}-${index}`}
+                            className="shadow-inner border border-slate-150 rounded-2xl overflow-hidden bg-slate-50 flex items-center justify-center relative"
+                          >
+                            {item.type === 'video' ? (
+                              <video
+                                src={item.url}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className="w-full h-full object-cover max-h-64 sm:max-h-80 bg-black"
+                              />
+                            ) : (
+                              <img
+                                referrerPolicy="no-referrer"
+                                src={item.url}
+                                alt="Arquivo anexado ao check-in"
+                                className="w-full h-full object-cover max-h-64 sm:max-h-80 animate-in fade-in zoom-in-95 duration-500"
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center gap-1.5 select-none">
+                        <User className="w-8 h-8 text-slate-300" />
+                        <p className="text-xs text-slate-400 font-semibold" id="no-photo-attached-text">Nenhuma foto foi anexada neste check-in.</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Endereço e Localização */}
               <div className="space-y-3">
@@ -2090,54 +2258,6 @@ export default function MapContainer({
                 )}
               </div>
 
-              {/* Fotos e vídeos anexados */}
-              {(() => {
-                const media = selectedCheckInForModal.media && selectedCheckInForModal.media.length > 0
-                  ? selectedCheckInForModal.media
-                  : selectedCheckInForModal.photo
-                    ? [{ url: selectedCheckInForModal.photo, type: 'image' as const }]
-                    : [];
-
-                return (
-                  <div>
-                    <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
-                      Imagens de Comprovação{media.length > 1 ? ` (${media.length})` : ''}
-                    </p>
-                    {media.length > 0 ? (
-                      <div className={media.length > 1 ? 'grid grid-cols-2 gap-2.5' : ''}>
-                        {media.map((item, index) => (
-                          <div
-                            key={`${item.url}-${index}`}
-                            className="shadow-inner border border-slate-150 rounded-2xl overflow-hidden bg-slate-50 flex items-center justify-center relative"
-                          >
-                            {item.type === 'video' ? (
-                              <video
-                                src={item.url}
-                                controls
-                                playsInline
-                                preload="metadata"
-                                className="w-full h-full object-cover max-h-64 sm:max-h-80 bg-black"
-                              />
-                            ) : (
-                              <img
-                                referrerPolicy="no-referrer"
-                                src={item.url}
-                                alt="Arquivo anexado ao check-in"
-                                className="w-full h-full object-cover max-h-64 sm:max-h-80 animate-in fade-in zoom-in-95 duration-500"
-                              />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center gap-1.5 select-none">
-                        <User className="w-8 h-8 text-slate-300" />
-                        <p className="text-xs text-slate-400 font-semibold" id="no-photo-attached-text">Nenhuma foto foi anexada neste check-in.</p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
 
             </div>
 

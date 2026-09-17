@@ -1150,6 +1150,41 @@ export const DatabaseService = {
     }
   },
 
+  /** Observações e operações de um check-in, para a ficha do administrador. */
+  async lerDetalhesCheckIn(checkInId: string) {
+    if (!db) return { success: false, notas: [] as any[], operacoes: [] as any[], midias: [] as any[] };
+    try {
+      const [notas, operacoes, midias] = await Promise.all([
+        db
+          .from('check_in_notes')
+          .select('*')
+          .eq('check_in_id', checkInId)
+          .order('position', { ascending: true }),
+        db
+          .from('check_in_operations')
+          .select('*')
+          .eq('check_in_id', checkInId)
+          .order('position', { ascending: true }),
+        db
+          .from('check_in_media')
+          .select('*')
+          .eq('check_in_id', checkInId)
+          .order('position', { ascending: true })
+      ]);
+
+      return {
+        success: true,
+        notas: notas.data || [],
+        operacoes: operacoes.data || [],
+        midias: midias.data || []
+      };
+    } catch (err: any) {
+      // Banco sem as tabelas novas não pode derrubar a ficha do check-in.
+      console.warn('Não foi possível ler os detalhes do check-in:', err);
+      return { success: false, notas: [] as any[], operacoes: [] as any[], midias: [] as any[] };
+    }
+  },
+
   async loginAdmin(email: string, password: string) {
     if (!db) {
       return { success: false, error: 'banco de dados não configurado.' };
