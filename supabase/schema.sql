@@ -399,6 +399,15 @@ begin
 end $$;
 
 
+-- ----------------------------------------------------------------------------
+-- 17. Recarrega o cache do PostgREST
+-- ----------------------------------------------------------------------------
+-- A API do Supabase guarda em cache o desenho das tabelas. Sem este aviso, uma
+-- coluna recem-criada so aparece para o app depois de alguns minutos - ate la
+-- ele responde "Could not find the ... column ... in the schema cache".
+notify pgrst, 'reload schema';
+
+
 -- ============================================================================
 -- Observacao de seguranca
 --
