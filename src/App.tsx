@@ -8279,7 +8279,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-bold text-sm tracking-tight flex items-center gap-1.5 leading-none">
-                Mapa Interativo{" "}
+                Mapa Operacional{" "}
                 <Flag className="w-4 h-4 text-red-500 fill-red-500" />
               </h1>
               <p className="text-[10px] text-slate-400 mt-1 uppercase font-mono tracking-widest">
