@@ -316,6 +316,15 @@ create unique index if not exists idx_member_devices_unico
   where member_id is not null and device_id_hash is not null;
 
 -- ----------------------------------------------------------------------------
+-- 8.5 app_settings - ajustes que o administrador muda em tela
+-- ----------------------------------------------------------------------------
+create table if not exists public.app_settings (
+  key        text primary key,
+  value      text,
+  updated_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 9. Migracoes - completa bancos que ja existiam antes
 -- ----------------------------------------------------------------------------
 -- Num banco novo nada aqui muda coisa alguma; num banco antigo, adiciona as
@@ -499,7 +508,7 @@ begin
     'auth_users', 'candidates', 'parties', 'time_delta',
     'operation_types', 'panfletagem_areas', 'campaign_pins', 'check_ins',
     'check_in_media', 'check_in_notes', 'check_in_operations',
-    'member_devices'
+    'member_devices', 'app_settings'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);

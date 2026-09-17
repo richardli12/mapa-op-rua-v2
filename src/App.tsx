@@ -310,10 +310,37 @@ const normalizeCityName = (value: string) =>
  * fica fora de log de acesso, do cabeçalho Referer e das pré-visualizações de
  * link. Aberta a página, o endereço na barra é limpo e sobra só o domínio.
  */
+const BASE_CADASTRO = (
+  (import.meta as any).env?.VITE_SIGNUP_BASE_URL ||
+  "https://cadastro.657169.74696d656f7065726163696f6e616c63636f.online"
+).replace(/\/$/, "");
+
 const BASE_EQUIPE = (
   (import.meta as any).env?.VITE_TEAM_BASE_URL ||
   "https://time.61636573.74696d656f7065726163696f6e616c63636f.online"
 ).replace(/\/$/, "");
+
+/** Domínio de um endereço, sem o resto. */
+const dominioDe = (url: string) => {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * Endereço de saída para quem chega sem link.
+ *
+ * Os domínios de acesso existem para receber quem veio de um QR Code ou do
+ * link da equipe. Quem digita o domínio na barra não tem o que fazer aqui, e
+ * mostrar o sistema a essa pessoa é entregar de graça a porta de entrada: ela
+ * é mandada para outro lugar, escolhido pelo administrador em Compartilhar.
+ */
+const CHAVE_REDIRECIONAMENTO = "redirect_sem_link";
+const REDIRECIONAMENTO_PADRAO =
+  (import.meta as any).env?.VITE_FALLBACK_REDIRECT_URL ||
+  "https://www.youtube.com";
 
 /**
  * Rota de entrada, lida uma única vez quando a página carrega.
@@ -338,7 +365,20 @@ const ROTA_INICIAL = (() => {
       /* navegador sem history: o endereço fica como está */
     }
   }
-  return { convite, equipe };
+
+  // Chegou num domínio de acesso sem link nenhum? Não é gente do sistema.
+  const caminho = window.location.pathname.replace(/\/+$/, "");
+  const dominiosDeAcesso = [dominioDe(BASE_EQUIPE), dominioDe(BASE_CADASTRO)].filter(
+    Boolean,
+  );
+  const semLink =
+    !convite &&
+    !equipe &&
+    caminho === "" &&
+    busca.toString() === "" &&
+    dominiosDeAcesso.includes(window.location.hostname.toLowerCase());
+
+  return { convite, equipe, semLink };
 })();
 
 /** Link do painel da equipe para um cliente. Leva o id, nunca o nome. */
@@ -677,6 +717,11 @@ export default function App() {
    * tela, ou copia o que está ali, vê só o domínio.
    */
   const [inviteToken] = useState<string>(ROTA_INICIAL.convite);
+  /** Endereço para onde vai quem abriu o domínio de acesso sem link. */
+  const [saidaSemLink, setSaidaSemLink] = useState('');
+  /** Ajuste editável pelo administrador, na tela de compartilhar. */
+  const [redirecionamentoAdm, setRedirecionamentoAdm] = useState('');
+  const [salvandoRedirecionamento, setSalvandoRedirecionamento] = useState(false);
 
   const [currentUrlView, setCurrentUrlView] = useState<"admin" | "checkin">(
     "admin",
@@ -971,6 +1016,32 @@ export default function App() {
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [isSyncingDatabase, setIsSyncingDatabase] = useState(false);
   const [showDatabaseModal, setShowDatabaseModal] = useState(false);
+
+  // Quem digitou só o domínio de acesso, sem link, vai para fora do sistema.
+  useEffect(() => {
+    if (!ROTA_INICIAL.semLink) return;
+    let vivo = true;
+    (async () => {
+      const res = await DatabaseService.lerConfiguracao(CHAVE_REDIRECIONAMENTO);
+      if (!vivo) return;
+      const destino = res.value || REDIRECIONAMENTO_PADRAO;
+      setSaidaSemLink(destino);
+      // replace, e não href: o botão de voltar não traz a pessoa de volta.
+      window.location.replace(destino);
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
+  // O ajuste aparece preenchido na tela de compartilhar.
+  useEffect(() => {
+    if (ROTA_INICIAL.semLink) return;
+    (async () => {
+      const res = await DatabaseService.lerConfiguracao(CHAVE_REDIRECIONAMENTO);
+      setRedirecionamentoAdm(res.value || '');
+    })();
+  }, []);
 
   // Monitorar query parameter e caminhos para entrar no modo check-in (com suporte a checkin/slug)
   useEffect(() => {
@@ -5657,6 +5728,20 @@ export default function App() {
   }
 
   // O link do QR Code é público e não depende de login nem de check-in.
+  // Entrada nua num domínio de acesso: nada do sistema aparece enquanto a
+  // pessoa é mandada embora — nem por um instante.
+  if (ROTA_INICIAL.semLink) {
+    return (
+      <div className="min-h-[100dvh] w-full bg-white" aria-hidden="true">
+        {saidaSemLink && (
+          <noscript>
+            <meta httpEquiv="refresh" content={`0; url=${saidaSemLink}`} />
+          </noscript>
+        )}
+      </div>
+    );
+  }
+
   if (inviteToken) {
     return <TeamSignupPage token={inviteToken} />;
   }
@@ -10824,6 +10909,60 @@ export default function App() {
                     Sem cliente, o check-in não teria a quem ser atribuído.
                   </p>
                 )}
+              </div>
+
+              {/* PARA ONDE VAI QUEM CHEGA SEM LINK */}
+              <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-405 pt-3">
+                  Quem abrir o domínio sem link vai para
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={redirecionamentoAdm}
+                    onChange={(e) => setRedirecionamentoAdm(e.target.value)}
+                    placeholder="https://www.youtube.com"
+                    className="flex-1 bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-700 font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-200"
+                  />
+                  <button
+                    type="button"
+                    disabled={salvandoRedirecionamento}
+                    onClick={async () => {
+                      const destino = redirecionamentoAdm.trim();
+                      if (destino && !/^https?:\/\//i.test(destino)) {
+                        triggerNotification(
+                          "O endereço precisa começar com http:// ou https://.",
+                          "error",
+                        );
+                        return;
+                      }
+                      setSalvandoRedirecionamento(true);
+                      const res = await DatabaseService.gravarConfiguracao(
+                        CHAVE_REDIRECIONAMENTO,
+                        destino,
+                      );
+                      setSalvandoRedirecionamento(false);
+                      triggerNotification(
+                        res.success
+                          ? "Endereço de saída salvo!"
+                          : "Não foi possível salvar o endereço.",
+                        res.success ? "success" : "error",
+                      );
+                    }}
+                    className="px-4 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white font-bold text-xs rounded-xl transition-colors whitespace-nowrap cursor-pointer active:scale-95"
+                  >
+                    {salvandoRedirecionamento ? "Salvando..." : "Salvar"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  Vale para os domínios de acesso da equipe e do cadastro: quem
+                  digita o endereço na barra, sem o link, é mandado para fora do
+                  sistema. Em branco, vai para{" "}
+                  <span className="font-bold text-slate-600">
+                    {REDIRECIONAMENTO_PADRAO}
+                  </span>
+                  .
+                </p>
               </div>
 
               {/* Botão de Simulação Instantânea */}
