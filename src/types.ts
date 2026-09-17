@@ -157,8 +157,24 @@ export const PRESET_COLORS = [
   { name: 'Teal Gestão', value: '#0d9488' }
 ];
 
+/**
+ * Cliente do sistema.
+ *
+ * É a entidade principal do painel: cada área, ponto e check-in do mapa aponta
+ * para um cliente. O cadastro pode nascer de dois jeitos, e o campo `source`
+ * diz qual deles:
+ *
+ * - 'manual'    — o administrador digitou os dados na mão;
+ * - 'vinculado' — o administrador escolheu alguém de uma base externa e o
+ *                 sistema copiou a ficha inteira para o nosso banco, incluindo
+ *                 a foto e o id de origem (guardado em `externalId` e também
+ *                 usado como `id`, para os vínculos continuarem batendo).
+ *
+ * O nome do tipo continua Candidate porque é assim que o resto do código o
+ * chama desde o começo; na tela, ele aparece como Cliente.
+ */
 export interface Candidate {
-  id: string; // uuid
+  id: string;
   name: string;
   phone: string;
   instagram_handle: string;
@@ -166,9 +182,34 @@ export interface Candidate {
   estado?: string;
   office: string;
   image?: string;
-  status_active?: boolean; // optional client-side helper or extra column
-  partyId?: string; // vínculo com o partido, vindo do Nexus
+  status_active?: boolean;
+  partyId?: string;
+
+  /** Origem do cadastro. */
+  source?: 'manual' | 'vinculado';
+  /** Id na base de origem, quando o cliente veio de um vínculo. */
+  externalId?: string;
+
+  email?: string;
+  campanha?: string;
+  numeroCampanha?: string;
+  linkGrupoWhatsapp?: string;
+  favorito?: boolean;
+
+  /** Partido copiado junto com a ficha, para a tela não depender de outra lista. */
+  partyName?: string;
+  partyInitials?: string;
+  partyLogoUrl?: string;
+  partyColor?: string;
+
+  /** Data de cadastro na base de origem. */
+  externalCreatedAt?: string;
+  /** Ficha crua da origem, guardada inteira para não perder nada. */
+  raw?: any;
 }
+
+/** Nome que a interface usa para a mesma entidade. */
+export type Client = Candidate;
 
 export interface Party {
   id: string; // uuid

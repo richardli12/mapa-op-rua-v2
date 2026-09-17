@@ -44,6 +44,7 @@ import {
   PenTool,
   Calendar,
   Search,
+  Link2,
   Building2,
   ChevronDown,
   Loader2,
@@ -424,9 +425,18 @@ export default function App() {
         color: "bg-slate-100 text-slate-700 border-slate-200",
       };
 
-    // O Nexus entrega o partido de cada candidato, então quando esse vínculo
-    // existe não há nada a deduzir. Todo o resto abaixo é adivinhação pelo
-    // texto do cargo, mantida só para dados antigos que não têm o vínculo.
+    // O cliente guarda o próprio partido, então quando esse dado existe não há
+    // nada a deduzir. Todo o resto abaixo é adivinhação pelo texto do cargo,
+    // mantida só para cadastros antigos que não têm o vínculo.
+    if (cand.partyInitials) {
+      return {
+        name: cand.partyInitials,
+        logo: cand.partyLogoUrl || "",
+        fullName: cand.partyName || cand.partyInitials,
+        color: partyBadgeColor(cand.partyInitials),
+      };
+    }
+
     if (cand.partyId) {
       const linked = parties.find((p) => p.id === cand.partyId);
       if (linked) {
@@ -553,7 +563,6 @@ export default function App() {
     "parties",
   );
   const [partySearch, setPartySearch] = useState("");
-  const [inspectedParty, setInspectedParty] = useState<Party | null>(null);
   const [inspectedCandidate, setInspectedCandidate] =
     useState<Candidate | null>(null);
   const [supporters, setSupporters] = useState<any[]>(() => {
@@ -2130,23 +2139,93 @@ export default function App() {
   const [isLoadingNexus, setIsLoadingNexus] = useState(true);
   const [nexusError, setNexusError] = useState<string | null>(null);
 
+  /** Fichas disponíveis para vínculo. Só o modal de vincular usa esta lista. */
+  const [externalCandidates, setExternalCandidates] = useState<Candidate[]>([]);
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [isLoadingClients, setIsLoadingClients] = useState(false);
+
+  /** Carrega os clientes do nosso banco: é esta lista que a tela mostra. */
+  const reloadClients = async () => {
+    if (!isSupabaseConfigured) return;
+    setIsLoadingClients(true);
+    const res = await SupabaseService.fetchClients();
+    if (res.success && res.data) {
+      setCandidates(res.data);
+    }
+    setIsLoadingClients(false);
+  };
+
+  useEffect(() => {
+    reloadClients();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Copia uma ficha externa para o nosso banco, inteira.
+   *
+   * O id de origem vira o id do cliente aqui, entao vincular a mesma pessoa de
+   * novo atualiza o cadastro em vez de criar um segundo.
+   */
+  const handleLinkClient = async (ficha: Candidate) => {
+    if (!isSupabaseConfigured) {
+      triggerNotification(
+        "Configure o banco de dados para vincular clientes.",
+        "error",
+      );
+      return;
+    }
+
+    setLinkingId(ficha.id);
+    const res = await SupabaseService.upsertClient({
+      ...ficha,
+      source: "vinculado",
+      externalId: ficha.externalId || ficha.id,
+      status_active: ficha.status_active !== false,
+    });
+    setLinkingId(null);
+
+    if (!res.success) {
+      triggerNotification(
+        `Não foi possível vincular: ${res.error || "erro desconhecido"}`,
+        "error",
+      );
+      return;
+    }
+
+    await reloadClients();
+    triggerNotification(`${ficha.name} vinculado como cliente!`, "success");
+  };
+
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
 
     (async () => {
       try {
-        const { candidates: nexusCandidates, parties: nexusParties } =
+        const { candidates: externos, parties: partidosExternos } =
           await fetchNexusData(controller.signal);
         if (!active) return;
 
-        setCandidates(nexusCandidates);
-        setParties(nexusParties);
+        // A base externa nao alimenta mais a tela: ela so abastece a lista de
+        // onde o administrador escolhe quem vincular. Os clientes exibidos sao
+        // os que estao no nosso banco.
+        setExternalCandidates(externos);
+        setParties(partidosExternos);
         setNexusError(null);
+
+        // Sem banco configurado nao ha onde guardar cliente, entao a lista
+        // externa vira a lista da tela para o painel nao ficar vazio.
+        if (!isSupabaseConfigured) {
+          setCandidates(externos);
+        }
       } catch (err: any) {
         if (!active || err?.name === "AbortError") return;
-        console.error("Erro ao carregar dados do Nexus:", err);
-        setNexusError(err?.message || "Não foi possível consultar o Nexus.");
+        console.error("Erro ao carregar a lista de vínculo:", err);
+        setNexusError(
+          err?.message || "Não foi possível carregar a lista para vínculo.",
+        );
       } finally {
         if (active) setIsLoadingNexus(false);
       }
@@ -5670,16 +5749,17 @@ export default function App() {
       }
     });
 
-    const activePartiesWithLogo = parties.filter(
-      (p) => p.logo_url && p.logo_url.trim().length > 0,
-    ).length;
-
-    // Parties dynamic filtering matching query
-    const pq = partySearch.toLowerCase();
-    const filteredParties = parties.filter((p) => {
-      const nameMatch = (p.name || "").toLowerCase().includes(pq);
-      const initialsMatch = (p.initials || "").toLowerCase().includes(pq);
-      return nameMatch || initialsMatch;
+    // Busca de clientes: nome, cargo, localização ou sigla do partido.
+    const pq = partySearch.trim().toLowerCase();
+    const filteredClients = candidates.filter((c) => {
+      if (!pq) return true;
+      return (
+        (c.name || "").toLowerCase().includes(pq) ||
+        (c.office || "").toLowerCase().includes(pq) ||
+        candidateLocationText(c).toLowerCase().includes(pq) ||
+        (c.partyInitials || "").toLowerCase().includes(pq) ||
+        (c.partyName || "").toLowerCase().includes(pq)
+      );
     });
 
 
@@ -5708,18 +5788,11 @@ export default function App() {
     const handleSaveCandidateSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!candName.trim()) {
-        triggerNotification("O nome do candidato é obrigatório.", "error");
+        triggerNotification("O nome do cliente é obrigatório.", "error");
         return;
       }
 
-      const targetParty = inspectedParty;
-      let finalOffice = candOffice.trim();
-      if (targetParty) {
-        const initials = targetParty.initials.trim().toUpperCase();
-        if (!finalOffice.toUpperCase().includes(initials)) {
-          finalOffice = `${finalOffice} (${initials})`;
-        }
-      }
+      const finalOffice = candOffice.trim();
 
       const payload = {
         name: candName.trim(),
@@ -5732,16 +5805,32 @@ export default function App() {
           candImage.trim() ||
           "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150",
         status_active: candidateEditing ? candidateEditing.status_active : true,
+        // Editar um cliente vinculado não o transforma num cadastro manual:
+        // a origem e o id externo continuam sendo os que ele já tinha.
+        source: candidateEditing?.source || ("manual" as const),
+        externalId: candidateEditing?.externalId,
+        email: candidateEditing?.email,
+        campanha: candidateEditing?.campanha,
+        numeroCampanha: candidateEditing?.numeroCampanha,
+        linkGrupoWhatsapp: candidateEditing?.linkGrupoWhatsapp,
+        favorito: candidateEditing?.favorito,
+        partyId: candidateEditing?.partyId,
+        partyName: candidateEditing?.partyName,
+        partyInitials: candidateEditing?.partyInitials,
+        partyLogoUrl: candidateEditing?.partyLogoUrl,
+        partyColor: candidateEditing?.partyColor,
+        externalCreatedAt: candidateEditing?.externalCreatedAt,
+        raw: candidateEditing?.raw,
       };
 
       if (isSupabaseConfigured) {
-        triggerNotification("Salvando candidato no Supabase...", "info");
+        triggerNotification("Salvando cliente...", "info");
         const res = await SupabaseService.upsertCandidate({
           id: candidateEditing?.id,
           ...payload,
         });
         if (res.success) {
-          triggerNotification("Candidato registrado no Supabase!", "success");
+          triggerNotification("Cliente salvo com sucesso!", "success");
           const reload = await SupabaseService.fetchCandidates();
           if (reload.success && reload.data) {
             setCandidates(reload.data);
@@ -5791,22 +5880,22 @@ export default function App() {
 
     const handleDeleteCandidate = (id: string, name: string) => {
       askConfirmation({
-        title: "Remover candidato",
+        title: "Remover cliente",
         message: `${name} sai do painel junto com o mapa isolado dele.`,
-        confirmLabel: "Remover candidato",
+        confirmLabel: "Remover cliente",
         onConfirm: async () => {
           if (isSupabaseConfigured) {
-            triggerNotification("Excluindo candidato do Supabase...", "info");
+            triggerNotification("Excluindo cliente...", "info");
             const res = await SupabaseService.deleteCandidate(id);
             if (res.success) {
               setCandidates((prev) => prev.filter((c) => c.id !== id));
-              triggerNotification("Candidato deletado com sucesso!", "success");
+              triggerNotification("Cliente removido com sucesso!", "success");
             } else {
               triggerNotification(`Erro Supabase: ${res.error}`, "error");
             }
           } else {
             setCandidates((prev) => prev.filter((c) => c.id !== id));
-            triggerNotification("Candidato removido localmente!", "info");
+            triggerNotification("Cliente removido localmente!", "info");
           }
         },
       });
@@ -5823,15 +5912,9 @@ export default function App() {
       );
 
       if (isSupabaseConfigured) {
-        await SupabaseService.upsertCandidate({
-          id: cand.id,
-          name: cand.name,
-          phone: cand.phone,
-          instagram_handle: cand.instagram_handle,
-          city: cand.city,
-          office: cand.office,
-          image: cand.image,
-        });
+        // A ficha inteira vai junto: o upsert grava o registro completo, e
+        // mandar só alguns campos apagaria o resto do cadastro.
+        await SupabaseService.upsertClient({ ...cand, status_active: newStatus });
       }
       triggerNotification(`Status de ${cand.name} atualizado.`, "success");
     };
@@ -5883,27 +5966,27 @@ export default function App() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
           <div>
             <h1 className="text-3xl font-extrabold text-[#0D233A] tracking-tight flex items-center gap-2">
-              {inspectedParty ? (
+              {inspectedCandidate ? (
                 <div className="flex items-center gap-2">
                   <span
                     className="text-slate-400 font-medium hover:text-slate-600 cursor-pointer text-2xl"
-                    onClick={() => setInspectedParty(null)}
+                    onClick={() => setInspectedCandidate(null)}
                   >
-                    Partidos
+                    Clientes
                   </span>
                   <ChevronRight className="w-5 h-5 text-slate-300" />
-                  <span className="text-emerald-600 text-2xl font-black">
-                    {inspectedParty.initials}
+                  <span className="text-emerald-600 text-2xl font-black truncate max-w-[420px]">
+                    {inspectedCandidate.name}
                   </span>
                 </div>
               ) : (
-                "Partidos Políticos"
+                "Clientes"
               )}
             </h1>
             <p className="text-[#8492A6] text-xs font-semibold mt-1">
-              {inspectedParty
-                ? `Inspecionando os candidatos associados ao partido ${inspectedParty.name} (${inspectedParty.initials})`
-                : "Siglas partidárias parceiras, sincronizadas do Nexus"}
+              {inspectedCandidate
+                ? `Equipe, áreas e registros de campo de ${inspectedCandidate.name}`
+                : "Clientes cadastrados no sistema"}
             </p>
           </div>
 
@@ -5913,9 +5996,7 @@ export default function App() {
               <Search className="w-4 h-4 text-slate-400 mr-2.5" />
               <input
                 type="text"
-                placeholder={
-                  inspectedParty ? "Buscar candidato..." : "Buscar partido..."
-                }
+                placeholder="Buscar cliente..."
                 value={partySearch}
                 onChange={(e) => setPartySearch(e.target.value)}
                 className="bg-transparent border-none w-full text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-hidden"
@@ -5928,28 +6009,39 @@ export default function App() {
               )}
             </div>
 
-            {/* BTN REGISTER CANDIDATE OR PARTY */}
-            {inspectedParty ? (
+            {/* AÇÕES DO ADMINISTRADOR */}
+            {inspectedCandidate ? (
+              <button
+                onClick={() => setInspectedCandidate(null)}
+                className="px-5 h-11 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95 animate-fade-in"
+              >
+                <ChevronLeft className="w-4 h-4 text-rose-500" />
+                <span>Voltar</span>
+              </button>
+            ) : (
               <>
                 <button
-                  onClick={() => setInspectedParty(null)}
-                  className="px-5 h-11 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95 animate-fade-in"
+                  onClick={() => {
+                    setLinkSearch("");
+                    setIsLinkModalOpen(true);
+                  }}
+                  className="px-5 h-11 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
                 >
-                  <ChevronLeft className="w-4 h-4 text-rose-500" />
-                  <span>Voltar</span>
+                  <Link2 className="w-4 h-4" />
+                  <span>Vincular Cliente</span>
                 </button>
                 <button
                   onClick={handleOpenCreateModal}
                   className="px-5 h-11 bg-[#015FC9] hover:bg-blue-600 text-white font-bold text-xs rounded-2xl shadow-lg border border-blue-700/30 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
                 >
                   <PlusCircle className="w-4 h-4" />
-                  <span>Novo Candidato</span>
+                  <span>Novo Cliente</span>
                 </button>
               </>
-            ) : null}
+            )}
 
             {/* LOG OUT BADGE */}
-            {!inspectedParty && (
+            {!inspectedCandidate && (
               <button
                 onClick={() => {
                   askConfirmation({
@@ -6026,33 +6118,56 @@ export default function App() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
-            {/* Card 1: Total Partidos */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8">
+            {/* Card 1: Total de Clientes */}
             <div className="bg-white border border-[#E1E8ED] rounded-3xl p-5 shadow-xs flex items-center gap-4.5">
               <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
                 <Building2 className="w-5 h-5" />
               </div>
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-widest text-[#8492A6]">
-                  Total Partidos
+                  Total de Clientes
                 </p>
                 <p className="text-2xl font-black text-slate-800 mt-0.5">
-                  {parties.length}
+                  {candidates.length}
                 </p>
               </div>
             </div>
 
-            {/* Card 2: Siglas Ativas */}
+            {/* Card 2: Clientes Ativos */}
             <div className="bg-white border border-[#E1E8ED] rounded-3xl p-5 shadow-xs flex items-center gap-4.5">
-              <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center">
-                <Flag className="w-5 h-5 text-rose-600" />
+              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
+                <Check className="w-5 h-5 stroke-[3]" />
               </div>
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-widest text-[#8492A6]">
-                  Siglas Ativas
+                  Clientes Ativos
                 </p>
                 <p className="text-2xl font-black text-slate-800 mt-0.5">
-                  {parties.filter((p) => p.initials).length}
+                  {candidates.filter((c) => c.status_active !== false).length}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 3: Estados atendidos */}
+            <div className="bg-white border border-[#E1E8ED] rounded-3xl p-5 shadow-xs flex items-center gap-4.5">
+              <div className="w-12 h-12 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center">
+                <MapPin className="w-5 h-5 fill-purple-100" />
+              </div>
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-[#8492A6]">
+                  Estados
+                </p>
+                <p className="text-2xl font-black text-slate-800 mt-0.5">
+                  {
+                    new Set(
+                      candidates
+                        .map((c) =>
+                          candidateLocationText(c).toLowerCase().trim(),
+                        )
+                        .filter(Boolean),
+                    ).size
+                  }
                 </p>
               </div>
             </div>
@@ -6280,16 +6395,6 @@ export default function App() {
                               {/* INSPECCIONAR MULTIPLICADORES / TIME DELTA */}
                               <button
                                 onClick={() => {
-                                  const candParty = parties.find((p) => {
-                                    const b = getPartidoBadge(cand);
-                                    return (
-                                      b.name.toUpperCase() ===
-                                      p.initials.toUpperCase()
-                                    );
-                                  });
-                                  if (candParty) {
-                                    setInspectedParty(candParty);
-                                  }
                                   setInspectedCandidate(cand);
                                   triggerNotification(
                                     `Inspecionando a Equipe de: ${cand.name}`,
@@ -6364,91 +6469,9 @@ export default function App() {
               </div>
             </div>
           </div>
-        ) : inspectedParty ? (
-          /* DETAILED PARTY INSPECTION VIEW - CANDIDATES REPORT */
+        ) : inspectedCandidate ? (
+          /* FICHA DO CLIENTE: equipe, áreas, pontos e check-ins */
           <div className="flex flex-col flex-1 gap-6">
-            {/* PARTY INFOCARD BANNER */}
-            <div className="bg-gradient-to-r from-[#0C1525] via-[#162541] to-[#0C1525] text-white rounded-3xl p-6 shadow-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
-
-              <div className="flex items-center gap-5 relative z-10">
-                <div className="w-20 h-20 bg-white border border-slate-200 rounded-2xl flex items-center justify-center p-2 shrink-0 shadow-lg">
-                  {inspectedParty.logo_url ? (
-                    <img
-                      src={inspectedParty.logo_url}
-                      alt={inspectedParty.initials}
-                      className="w-full h-full rounded-xl object-contain"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div className="w-full h-full rounded-xl bg-slate-900 flex items-center justify-center">
-                      <span className="text-xl font-black text-white">
-                        {inspectedParty.initials.substring(0, 3)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-lg">
-                      {inspectedParty.initials}
-                    </span>
-                    <span className="text-xs text-slate-400 font-bold">
-                      Partido Parceiro Registrado
-                    </span>
-                  </div>
-                  <h2 className="text-2xl font-black text-white mt-1.5 tracking-tight">
-                    {inspectedParty.name}
-                  </h2>
-                </div>
-              </div>
-
-              {/* QUICK STATS INSIDE INSPECTOR BANNER */}
-              <div className="flex gap-4.5 sm:gap-6 relative z-10">
-                <div className="px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-center backdrop-blur-md min-w-[110px]">
-                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">
-                    Total Candidatos
-                  </p>
-                  <p className="text-2xl font-black text-emerald-400 mt-1">
-                    {
-                      candidates.filter((c) => {
-                        const badge = getPartidoBadge(c);
-                        return (
-                          badge.name.toUpperCase() ===
-                          inspectedParty.initials.toUpperCase()
-                        );
-                      }).length
-                    }
-                  </p>
-                </div>
-                <div className="px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-center backdrop-blur-md min-w-[110px]">
-                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">
-                    Estados
-                  </p>
-                  <p className="text-2xl font-black text-sky-400 mt-1">
-                    {
-                      new Set(
-                        candidates
-                          .filter((c) => {
-                            const badge = getPartidoBadge(c);
-                            return (
-                              badge.name.toUpperCase() ===
-                              inspectedParty.initials.toUpperCase()
-                            );
-                          })
-                          .map((c) => candidateLocationText(c).toLowerCase().trim())
-                          .filter(Boolean),
-                      ).size
-                    }
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* CANDIDATES TABLE SPECIFIC TO THIS PARTY */}
-            {inspectedCandidate ? (
-              /* DETAILED CANDIDATE INSPECTION VIEW (TIME DELTA) */
               <div className="flex flex-col flex-1 gap-6 font-sans">
                 {/* CANDIDATE HEADER PROFILE CARD */}
                 <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
@@ -6906,436 +6929,175 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            ) : (
-              /* CANDIDATES TABLE SPECIFIC TO THIS PARTY */
-              <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden flex flex-col flex-1 min-h-[350px]">
-                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                  <div>
-                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">
-                      Candidatos Filiados
-                    </h3>
-                    <p className="text-[10px] text-slate-400 font-bold mt-0.5">
-                      Disposição territorial dos agentes políticos do partido
-                    </p>
-                  </div>
-                  <span className="text-xs bg-emerald-50 border border-emerald-150 text-emerald-700 font-bold px-2.5 py-1 rounded-xl">
-                    {
-                      candidates.filter((c) => {
-                        const badge = getPartidoBadge(c);
-                        return (
-                          badge.name.toUpperCase() ===
-                          inspectedParty.initials.toUpperCase()
-                        );
-                      }).length
-                    }{" "}
-                    Candidato(s)
-                  </span>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[800px] border-collapse text-left">
-                    <thead>
-                      <tr className="bg-[#FAFBFD] border-b border-slate-100">
-                        <th className="py-4 px-6 text-[10px] uppercase font-black tracking-widest text-[#8492A6]">
-                          Candidato
-                        </th>
-                        <th className="py-4 px-6 text-[10px] uppercase font-black tracking-widest text-[#8492A6]">
-                          Cargo
-                        </th>
-                        <th className="py-4 px-6 text-[10px] uppercase font-black tracking-widest text-[#8492A6]">
-                          Estado
-                        </th>
-                        <th className="py-4 px-6 text-[10px] uppercase font-black tracking-widest text-[#8492A6]">
-                          Contatos
-                        </th>
-                        <th className="py-4 px-6 text-[10px] uppercase font-black tracking-widest text-[#8492A6] text-center">
-                          Status
-                        </th>
-                        <th className="py-4 px-6 text-[10px] uppercase font-black tracking-widest text-[#8492A6] text-right">
-                          Ações
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {candidates.filter((c) => {
-                        const badge = getPartidoBadge(c);
-                        const isMatch =
-                          badge.name.toUpperCase() ===
-                          inspectedParty.initials.toUpperCase();
-                        if (!isMatch) return false;
-                        if (!partySearch.trim()) return true;
-                        return (
-                          c.name
-                            .toLowerCase()
-                            .includes(partySearch.toLowerCase()) ||
-                          candidateLocationText(c)
-                            .toLowerCase()
-                            .includes(partySearch.toLowerCase()) ||
-                          (c.office || "")
-                            .toLowerCase()
-                            .includes(partySearch.toLowerCase())
-                        );
-                      }).length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={6}
-                            className="py-16 text-center text-slate-400 font-bold text-xs uppercase tracking-widest"
-                          >
-                            Nenhum candidato encontrado para este partido
-                          </td>
-                        </tr>
-                      ) : (
-                        candidates
-                          .filter((c) => {
-                            const badge = getPartidoBadge(c);
-                            const isMatch =
-                              badge.name.toUpperCase() ===
-                              inspectedParty.initials.toUpperCase();
-                            if (!isMatch) return false;
-                            if (!partySearch.trim()) return true;
-                            return (
-                              c.name
-                                .toLowerCase()
-                                .includes(partySearch.toLowerCase()) ||
-                              candidateLocationText(c)
-                                .toLowerCase()
-                                .includes(partySearch.toLowerCase()) ||
-                              (c.office || "")
-                                .toLowerCase()
-                                .includes(partySearch.toLowerCase())
-                            );
-                          })
-                          .map((cand) => {
-                            return (
-                              <tr
-                                key={cand.id}
-                                className="hover:bg-slate-50/50 transition-all"
-                              >
-                                {/* NAME & AVATAR */}
-                                <td className="py-4 px-6 flex items-center gap-3.5 min-w-[240px]">
-                                  <img
-                                    src={
-                                      cand.image ||
-                                      "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150"
-                                    }
-                                    alt={cand.name}
-                                    className="w-11 h-11 rounded-full object-cover border border-slate-200 bg-slate-50"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                  <div className="flex flex-col min-w-0">
-                                    <span className="font-bold text-[#0D233A] truncate text-[14px]">
-                                      {cand.name}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 font-semibold">
-                                      {cand.email ||
-                                        `${cand.name.toLowerCase().replace(/\s/g, "")}@campanha.com`}
-                                    </span>
-                                  </div>
-                                </td>
-
-                                {/* CARGO */}
-                                <td className="py-4 px-6">
-                                  <span className="inline-flex bg-slate-100 text-slate-700 text-[10px] font-extrabold uppercase tracking-wider px-2 py-1 rounded-lg border border-slate-200">
-                                    {cand.office || "Sem Cargo"}
-                                  </span>
-                                </td>
-
-                                {/* CITY MAP PIN */}
-                                <td className="py-4 px-6">
-                                  <div className="flex flex-col text-slate-600 font-bold text-[13px]">
-                                    <div className="flex items-center gap-1.5 text-slate-700">
-                                      <MapPin className="w-3.5 h-3.5 text-[#8492A6]" />
-                                      <span>{candidateLocationText(cand)}</span>
-                                    </div>
-                                    {cand.neighborhood && (
-                                      <span className="text-[10.5px] text-[#8492A6] font-semibold mt-0.5 ml-5">
-                                        {cand.neighborhood}
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-
-                                {/* CONTACT DIRECT ICONS */}
-                                <td className="py-4 px-6">
-                                  <div className="flex items-center gap-2">
-                                    {/* Instagram */}
-                                    {cand.instagram_handle ? (
-                                      <a
-                                        href={`https://instagram.com/${cand.instagram_handle}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="w-8 h-8 rounded-full border border-slate-200 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center transition-all shadow-xs"
-                                        title={`Instagram: @${cand.instagram_handle}`}
-                                      >
-                                        <Instagram className="w-4 h-4" />
-                                      </a>
-                                    ) : (
-                                      <div className="w-8 h-8 rounded-full border border-slate-100 bg-slate-50 text-slate-300 flex items-center justify-center opacity-40">
-                                        <Instagram className="w-4 h-4" />
-                                      </div>
-                                    )}
-
-                                    {/* WhatsApp */}
-                                    {cand.phone ? (
-                                      <a
-                                        href={`https://wa.me/55${cand.phone.replace(/\D/g, "")}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="w-8 h-8 rounded-full border border-slate-200 bg-white hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 flex items-center justify-center transition-all shadow-xs"
-                                        title={`WhatsApp: ${cand.phone}`}
-                                      >
-                                        <Phone className="w-4 h-4" />
-                                      </a>
-                                    ) : (
-                                      <div className="w-8 h-8 rounded-full border border-slate-100 bg-slate-50 text-slate-300 flex items-center justify-center opacity-40">
-                                        <Phone className="w-4 h-4" />
-                                      </div>
-                                    )}
-                                  </div>
-                                </td>
-
-                                {/* TOGGLE STATUS SWITCH */}
-                                <td className="py-4 px-6">
-                                  <div className="flex items-center justify-center">
-                                    <button
-                                      onClick={() => handleToggleStatus(cand)}
-                                      className={`w-11 h-6 rounded-full p-0.5 transition-all outline-hidden cursor-pointer ${
-                                        cand.status_active !== false
-                                          ? "bg-[#10B981]"
-                                          : "bg-slate-200"
-                                      }`}
-                                    >
-                                      <div
-                                        className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-all ${
-                                          cand.status_active !== false
-                                            ? "translate-x-5"
-                                            : "translate-x-0"
-                                        }`}
-                                      />
-                                    </button>
-                                  </div>
-                                </td>
-
-                                {/* CRUD ACTIONS */}
-                                <td className="py-4 px-6 text-right">
-                                  <div className="flex items-center justify-end gap-2">
-                                    <button
-                                      onClick={() => {
-                                        const shareUrl = `${window.location.origin}/checkin/${slugify(cand.name)}`;
-                                        navigator.clipboard
-                                          .writeText(shareUrl)
-                                          .then(() => {
-                                            triggerNotification(
-                                              `Link de check-in de ${cand.name} copiado!`,
-                                              "success",
-                                            );
-                                          })
-                                          .catch(() => {
-                                            triggerNotification(
-                                              "Erro ao copiar o link.",
-                                              "error",
-                                            );
-                                          });
-                                      }}
-                                      className="p-1.5 h-8 w-8 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 border border-transparent hover:border-emerald-100 rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                      title="Copiar Link de Check-in"
-                                    >
-                                      <Link className="w-4 h-4" />
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setSelectedCandidateFilter(cand.id);
-                                        setAdminTab("map");
-                                        triggerNotification(
-                                          `Exibindo o mapa exclusivo de: ${cand.name}`,
-                                          "success",
-                                        );
-                                      }}
-                                      className="p-1.5 h-8 w-8 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 border border-transparent hover:border-indigo-100 rounded-lg transition-all cursor-pointer flex items-center justify-center font-bold"
-                                      title="Ver Mapa Isolado deste Candidato"
-                                    >
-                                      <Map className="w-4 h-4" />
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setInspectedCandidate(cand);
-                                        triggerNotification(
-                                          `Inspecionando a Equipe de: ${cand.name}`,
-                                          "info",
-                                        );
-                                      }}
-                                      className="p-1.5 h-8 w-8 hover:bg-[#E0F2FE] text-slate-400 hover:text-sky-600 border border-transparent hover:border-[#BAE6FD] rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                      title="Inspecionar Equipe"
-                                    >
-                                      <Eye className="w-4 h-4" />
-                                    </button>
-
-                                    <button
-                                      onClick={() => handleOpenEditModal(cand)}
-                                      className="p-1.5 h-8 w-8 hover:bg-sky-50 text-slate-400 hover:text-[#015FC9] border border-transparent hover:border-sky-100 rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                      title="Editar Candidato"
-                                    >
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-
-                                    <button
-                                      onClick={() =>
-                                        handleDeleteCandidate(
-                                          cand.id,
-                                          cand.name,
-                                        )
-                                      }
-                                      className="p-1.5 h-8 w-8 hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-transparent hover:border-rose-100 rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                      title="Apagar Candidato"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
         ) : (
-          /* PARTIES MASTER CARDS GRID - ALIGNED TO ATTACHED SCREENSHOT STRUCTURE */
+          /* GRADE DE CLIENTES */
           <div className="flex flex-col flex-1 gap-6">
-            {nexusError && (
-              <div className="bg-rose-50 border border-rose-200 rounded-2xl px-5 py-3.5 mb-4">
-                <p className="text-xs font-bold text-rose-700">
-                  Não foi possível carregar os dados do Nexus
+            {nexusError && !isLinkModalOpen && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5">
+                <p className="text-xs font-bold text-amber-800">
+                  A lista para vínculo não pôde ser carregada
                 </p>
-                <p className="text-[11px] text-rose-600 mt-1 leading-snug">
-                  {nexusError}
+                <p className="text-[11px] text-amber-700 mt-1 leading-snug">
+                  {nexusError} Os clientes já cadastrados continuam aqui, e o
+                  cadastro manual segue funcionando normalmente.
                 </p>
               </div>
             )}
 
-            {filteredParties.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-3xl p-16 text-center shadow-sm flex flex-col items-center justify-center min-h-[300px]">
-                <Building2 className="w-12 h-12 text-slate-300 mb-4" />
+            {filteredClients.length === 0 ? (
+              <div className="bg-white border border-slate-200 rounded-3xl p-16 text-center shadow-sm flex flex-col items-center justify-center min-h-[300px] gap-4">
+                <Building2 className="w-12 h-12 text-slate-300" />
                 <span className="text-slate-400 font-bold text-xs uppercase tracking-widest">
-                  {isLoadingNexus
-                    ? "Carregando partidos do Nexus..."
-                    : "Nenhum partido político encontrado"}
+                  {isLoadingClients
+                    ? "Carregando clientes..."
+                    : candidates.length === 0
+                      ? "Nenhum cliente cadastrado ainda"
+                      : "Nenhum cliente encontrado para esta busca"}
                 </span>
+                {!isLoadingClients && candidates.length === 0 && (
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      onClick={() => {
+                        setLinkSearch("");
+                        setIsLinkModalOpen(true);
+                      }}
+                      className="px-5 h-11 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer"
+                    >
+                      <Link2 className="w-4 h-4" />
+                      <span>Vincular Cliente</span>
+                    </button>
+                    <button
+                      onClick={handleOpenCreateModal}
+                      className="px-5 h-11 bg-[#015FC9] hover:bg-blue-600 text-white font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      <span>Novo Cliente</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {filteredParties.map((party) => {
-                  const countFiliados = candidates.filter((c) => {
-                    const badge = getPartidoBadge(c);
-                    return (
-                      badge.name.toUpperCase() === party.initials.toUpperCase()
-                    );
-                  }).length;
-
-                  // Calcula a quantidade de estados associados a este partido em tempo de execução
-                  const partyCandidates = candidates.filter((c) => {
-                    const badge = getPartidoBadge(c);
-                    return (
-                      badge.name.toUpperCase() === party.initials.toUpperCase()
-                    );
-                  });
-                  const partyCitiesCount = new Set(
-                    partyCandidates
-                      .map((c) => candidateLocationText(c).toLowerCase().trim())
-                      .filter(Boolean),
-                  ).size;
+                {filteredClients.map((client) => {
+                  const badge = getPartidoBadge(client);
+                  const teamCount = supporters.filter(
+                    (s: any) => s.candidate_id === client.id,
+                  ).length;
+                  const checkInCount = checkIns.filter(
+                    (c: any) => c.candidateId === client.id,
+                  ).length;
+                  const ativo = client.status_active !== false;
 
                   return (
                     <div
-                      key={party.id}
+                      key={client.id}
                       className="bg-white border border-slate-200 hover:border-emerald-200 rounded-3xl p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between gap-5 relative group"
                     >
                       {/* HEADER DO CARD */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3.5 min-w-0">
-                          {/* Logo ou Escudo Padrão */}
-                          <div className="w-14 h-14 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center p-1 flex-shrink-0 shadow-2xs">
-                            {party.logo_url ? (
-                              <img
-                                src={party.logo_url}
-                                alt={party.initials}
-                                className="w-full h-full rounded-xl object-contain"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <div className="w-full h-full rounded-xl bg-slate-100 flex items-center justify-center">
-                                <span className="text-xs font-black text-slate-500 uppercase">
-                                  {party.initials.substring(0, 3)}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Título e Subtítulos */}
-                          <div className="min-w-0 flex flex-col">
-                            {/* Nome Completo do Partido */}
-                            <h4
-                              className="font-extrabold text-[#0D233A] text-sm tracking-tight leading-snug line-clamp-2"
-                              title={party.name}
-                            >
-                              {party.name}
-                            </h4>
-
-                            {/* Sigla Badge */}
-                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                              <span className="inline-flex bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md">
-                                {party.initials}
-                              </span>
-                              <span className="inline-flex bg-slate-100 text-slate-500 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md">
-                                {countFiliados > 0
-                                  ? "Parceiro Ativo"
-                                  : "Sem Candidatos"}
-                              </span>
-                            </div>
-                          </div>
+                      <div className="flex items-start gap-3.5 min-w-0">
+                        <div className="relative shrink-0">
+                          <img
+                            src={
+                              client.image ||
+                              "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150"
+                            }
+                            alt={client.name}
+                            className="w-14 h-14 rounded-2xl object-cover border border-slate-100 shadow-2xs bg-slate-50"
+                            referrerPolicy="no-referrer"
+                          />
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 border-2 border-white rounded-full ${
+                              ativo ? "bg-emerald-500" : "bg-slate-300"
+                            }`}
+                          ></span>
                         </div>
 
+                        <div className="min-w-0 flex flex-col">
+                          <h4
+                            className="font-extrabold text-[#0D233A] text-sm tracking-tight leading-snug line-clamp-2"
+                            title={client.name}
+                          >
+                            {client.name}
+                          </h4>
+
+                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                            {badge.name && (
+                              <span
+                                className={`inline-flex border text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${badge.color}`}
+                              >
+                                {badge.name}
+                              </span>
+                            )}
+                            <span
+                              className={`inline-flex text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md ${
+                                client.source === "vinculado"
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              {client.source === "vinculado"
+                                ? "Vinculado"
+                                : "Manual"}
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-slate-400 font-bold mt-1 truncate">
+                            {client.office || "Sem cargo"}
+                          </p>
+                          <p className="text-[11px] text-slate-400 font-semibold flex items-center gap-1 truncate">
+                            <MapPin className="w-3 h-3 text-slate-300 shrink-0" />
+                            {candidateLocationText(client) || "Sem localização"}
+                          </p>
+                        </div>
                       </div>
 
-                      {/* MIDDLE QUADRO DE MÉTRICAS (Duplo bloco de status do Printout) */}
+                      {/* MÉTRICAS */}
                       <div className="grid grid-cols-2 gap-3.5">
-                        {/* Quadro de Candidatos */}
                         <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3.5 flex flex-col items-center justify-center text-center shadow-3xs">
                           <div className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-[#8492A6]">
                             <Users className="w-3.5 h-3.5 text-blue-500" />
-                            <span>Candidatos</span>
+                            <span>Equipe</span>
                           </div>
                           <span className="text-2xl font-black text-slate-800 mt-1">
-                            {countFiliados}
+                            {teamCount}
                           </span>
                         </div>
 
-                        {/* Quadro de Estados Ativos */}
                         <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3.5 flex flex-col items-center justify-center text-center shadow-3xs">
                           <div className="flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wide text-[#8492A6]">
                             <MapPin className="w-3.5 h-3.5 text-purple-500" />
-                            <span>Estados</span>
+                            <span>Check-ins</span>
                           </div>
                           <span className="text-2xl font-black text-slate-800 mt-1">
-                            {partyCitiesCount}
+                            {checkInCount}
                           </span>
                         </div>
                       </div>
 
                       {/* FOOTER DO CARD */}
                       <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 mt-1">
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500">
-                          <Building2 className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>Filiados Ativos</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleOpenEditModal(client)}
+                            className="p-1.5 h-8 w-8 hover:bg-blue-50 text-slate-400 hover:text-blue-600 border border-transparent hover:border-blue-100 rounded-lg transition-all cursor-pointer flex items-center justify-center"
+                            title="Editar cliente"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleDeleteCandidate(client.id, client.name)
+                            }
+                            className="p-1.5 h-8 w-8 hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-transparent hover:border-rose-100 rounded-lg transition-all cursor-pointer flex items-center justify-center"
+                            title="Apagar cliente"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
 
                         <button
-                          onClick={() => setInspectedParty(party)}
+                          onClick={() => setInspectedCandidate(client)}
                           className="text-[11px] font-black uppercase tracking-wider text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer transition-all hover:translate-x-0.5 group/btn"
                         >
                           <span>Gerenciar</span>
@@ -7351,10 +7113,180 @@ export default function App() {
             {/* BARRA DE TOTALIZAÇÃO DO FOOTER */}
             <div className="py-4.5 px-6 border border-slate-200 rounded-3xl bg-[#FAFBFD] flex justify-between items-center shadow-3xs mt-2">
               <span className="text-[#8492A6] text-xs font-bold font-sans">
-                Mostrando {filteredParties.length} de {parties.length} partidos
-                políticos
+                Mostrando {filteredClients.length} de {candidates.length}{" "}
+                cliente(s)
               </span>
             </div>
+          </div>
+        )}
+
+        {/* MODAL: VINCULAR CLIENTE */}
+        {isLinkModalOpen && (
+          <div className="fixed inset-0 bg-[#0c1322]/40 backdrop-blur-xs flex items-center justify-center z-[11000] p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white rounded-3xl w-full max-w-2xl shadow-3xl overflow-hidden border border-slate-100 font-sans flex flex-col max-h-[90vh]"
+            >
+              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-800">
+                    Vincular Cliente
+                  </h3>
+                  <p className="text-[10px] uppercase tracking-widest text-[#8492A6] font-bold mt-0.5">
+                    Escolha quem virá para a sua base de clientes
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsLinkModalOpen(false)}
+                  className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-600 transition-all cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="px-6 py-4 border-b border-slate-100">
+                <div className="relative bg-slate-50 border border-slate-200 rounded-2xl flex items-center px-4 h-11 focus-within:ring-2 focus-within:ring-blue-500/20">
+                  <Search className="w-4 h-4 text-slate-400 mr-2.5" />
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="Buscar por nome, cargo ou cidade..."
+                    value={linkSearch}
+                    onChange={(e) => setLinkSearch(e.target.value)}
+                    className="bg-transparent border-none w-full text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-hidden"
+                  />
+                  {linkSearch && (
+                    <X
+                      className="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 cursor-pointer ml-1"
+                      onClick={() => setLinkSearch("")}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-2.5">
+                {isLoadingNexus ? (
+                  <div className="py-16 text-center text-slate-400 font-bold text-xs uppercase tracking-widest">
+                    Carregando lista...
+                  </div>
+                ) : nexusError ? (
+                  <div className="py-10 px-5 text-center bg-amber-50 border border-amber-200 rounded-2xl">
+                    <p className="text-xs font-bold text-amber-800">
+                      Não foi possível carregar a lista
+                    </p>
+                    <p className="text-[11px] text-amber-700 mt-1 leading-snug">
+                      {nexusError}
+                    </p>
+                  </div>
+                ) : (
+                  (() => {
+                    const lq = linkSearch.trim().toLowerCase();
+                    const disponiveis = externalCandidates.filter((ficha) => {
+                      if (!lq) return true;
+                      return (
+                        (ficha.name || "").toLowerCase().includes(lq) ||
+                        (ficha.office || "").toLowerCase().includes(lq) ||
+                        candidateLocationText(ficha)
+                          .toLowerCase()
+                          .includes(lq) ||
+                        (ficha.partyInitials || "").toLowerCase().includes(lq)
+                      );
+                    });
+
+                    if (disponiveis.length === 0) {
+                      return (
+                        <div className="py-16 text-center text-slate-400 font-bold text-xs uppercase tracking-widest">
+                          Nada encontrado para esta busca
+                        </div>
+                      );
+                    }
+
+                    return disponiveis.map((ficha) => {
+                      const jaCliente = candidates.some(
+                        (c) =>
+                          c.id === ficha.id ||
+                          (c.externalId && c.externalId === ficha.id),
+                      );
+
+                      return (
+                        <div
+                          key={ficha.id}
+                          className="border border-slate-200 rounded-2xl p-3.5 flex items-center gap-3.5 hover:border-emerald-200 hover:bg-emerald-50/30 transition-all"
+                        >
+                          <img
+                            src={
+                              ficha.image ||
+                              "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150"
+                            }
+                            alt={ficha.name}
+                            className="w-11 h-11 rounded-xl object-cover border border-slate-100 bg-slate-50 shrink-0"
+                            referrerPolicy="no-referrer"
+                          />
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-extrabold text-slate-800 text-sm truncate">
+                                {ficha.name}
+                              </h4>
+                              {ficha.partyInitials && (
+                                <span className="inline-flex bg-slate-100 text-slate-600 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md">
+                                  {ficha.partyInitials}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-bold truncate">
+                              {ficha.office || "Sem cargo"}
+                              {candidateLocationText(ficha)
+                                ? ` · ${candidateLocationText(ficha)}`
+                                : ""}
+                            </p>
+                          </div>
+
+                          <button
+                            disabled={jaCliente || linkingId === ficha.id}
+                            onClick={() => handleLinkClient(ficha)}
+                            className={`px-4 h-9 text-[11px] font-black uppercase tracking-wider rounded-xl flex items-center gap-1.5 transition-all shrink-0 ${
+                              jaCliente
+                                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                                : linkingId === ficha.id
+                                  ? "bg-emerald-100 text-emerald-700 cursor-wait"
+                                  : "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer hover:scale-[1.02] active:scale-95"
+                            }`}
+                          >
+                            {jaCliente ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Já é cliente</span>
+                              </>
+                            ) : linkingId === ficha.id ? (
+                              <span>Salvando...</span>
+                            ) : (
+                              <>
+                                <Link2 className="w-3.5 h-3.5" />
+                                <span>Vincular</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    });
+                  })()
+                )}
+              </div>
+
+              <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-slate-400 font-bold">
+                  A ficha completa é copiada para o seu banco de dados.
+                </span>
+                <button
+                  onClick={() => setIsLinkModalOpen(false)}
+                  className="px-5 h-10 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
 
@@ -7370,13 +7302,13 @@ export default function App() {
                 <div>
                   <h3 className="text-lg font-black text-slate-800">
                     {candidateEditing
-                      ? "Editar Candidato"
-                      : "Cadastrar Novo Candidato"}
+                      ? "Editar Cliente"
+                      : "Cadastrar Novo Cliente"}
                   </h3>
                   <p className="text-[10px] uppercase tracking-widest text-[#8492A6] font-bold mt-0.5">
                     {candidateEditing
-                      ? "Atualize as informações do perfil"
-                      : "Insira um candidato na lista territorial"}
+                      ? "Atualize as informações do cliente"
+                      : "Cadastre um cliente manualmente"}
                   </p>
                 </div>
                 <button

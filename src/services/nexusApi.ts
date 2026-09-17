@@ -63,7 +63,7 @@ const fetchPage = async <T>(
     } catch {
       /* corpo sem json: fica só o status */
     }
-    throw new Error(detail || `Nexus respondeu ${response.status}.`);
+    throw new Error(detail || `A base de vínculo respondeu ${response.status}.`);
   }
 
   let payload: any;
@@ -73,7 +73,7 @@ const fetchPage = async <T>(
     // Em desenvolvimento o Vite não executa funções da Vercel e devolve o
     // próprio arquivo da ponte, que não é JSON.
     throw new Error(
-      "A ponte /api/nexus não respondeu em JSON. Em ambiente local ela só funciona com `vercel dev`.",
+      "A lista para vínculo não respondeu como esperado. Em ambiente local ela só funciona com `vercel dev`.",
     );
   }
 
@@ -96,6 +96,22 @@ const toCandidate = (raw: NexusCandidate): Candidate | null => {
     image: raw.foto_url || undefined,
     status_active: raw.status ? raw.status === "active" : true,
     partyId: raw.partido?.id ? String(raw.partido.id) : undefined,
+
+    // A ficha vem inteira: o que o administrador vincular e salvar no nosso
+    // banco tem que ser tudo o que existe sobre a pessoa, não um resumo.
+    source: "vinculado",
+    externalId: String(raw.id),
+    email: raw.email || undefined,
+    campanha: raw.campanha || undefined,
+    numeroCampanha: raw.numero_campanha || undefined,
+    linkGrupoWhatsapp: raw.link_grupo_whatsapp || undefined,
+    favorito: typeof raw.favorito === "boolean" ? raw.favorito : undefined,
+    partyName: raw.partido?.nome || undefined,
+    partyInitials: raw.partido?.sigla || undefined,
+    partyLogoUrl: raw.partido?.logo_url || undefined,
+    partyColor: raw.partido?.cor_primaria || undefined,
+    externalCreatedAt: raw.cadastrado_em || undefined,
+    raw,
   };
 };
 
