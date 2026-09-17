@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Check, Camera, MapPin, Clock, Loader2, RefreshCw } from 'lucide-react';
+import { ChevronLeft, Check, Camera, MapPin, Clock, Loader2 } from 'lucide-react';
 import { reverseGeocode } from '../services/streetSources';
 import { DatabaseService } from '../databaseClient';
 import { OperationType, CheckIn } from '../types';
 import OperationIcon from './OperationIcon';
 import BrandMark from './BrandMark';
 import MiniMapa from './MiniMapa';
+import MapaAjuste from './MapaAjuste';
 
 interface CheckInChatProps {
   member: any;
@@ -58,12 +59,19 @@ export default function CheckInChat({
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [etapa, setEtapa] = useState(1);
 
+  /** Onde o aparelho está, segundo o GPS. Só muda com leitura nova. */
+  const [gps, setGps] = useState<{ lat: number; lng: number; accuracy: number | null } | null>(
+    null
+  );
+  /** Ponto que será salvo: o centro do mapa depois do ajuste da pessoa. */
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [precisao, setPrecisao] = useState<number | null>(null);
   const [endereco, setEndereco] = useState<{ rua: string; resto: string } | null>(null);
   const [mapaPronto, setMapaPronto] = useState(false);
   const [buscandoGps, setBuscandoGps] = useState(true);
   const [erroGps, setErroGps] = useState<string | null>(null);
+  const [ajustando, setAjustando] = useState(false);
+  const [seguirGps, setSeguirGps] = useState(true);
   const [localConfirmado, setLocalConfirmado] = useState(false);
   const [horaLocal, setHoraLocal] = useState('');
 
@@ -75,6 +83,17 @@ export default function CheckInChat({
   const fimRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const abriuFio = useRef(false);
+  const watchRef = useRef<number | null>(null);
+  const geocodeRef = useRef(0);
+  /** Último ponto já consultado, para não repetir a busca do mesmo endereço. */
+  const ultimoGeocodeRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** Espelho de `seguirGps` para ser lido dentro dos avisos do GPS e do mapa. */
+  const seguirGpsRef = useRef(true);
+
+  const definirSeguirGps = (valor: boolean) => {
+    seguirGpsRef.current = valor;
+    setSeguirGps(valor);
+  };
 
   const nomeMembro: string =
     member?.full_name || member?.name || member?.nome || 'Integrante';
@@ -102,6 +121,48 @@ export default function CheckInChat({
   }, [mensagens, etapa, mapaPronto, coords, foto, operacao]);
 
   // ------------------------------------------------------------ localização
+  /**
+   * Endereço do ponto escolhido.
+   *
+   * Cada chamada leva um número de ordem: resposta atrasada de um ponto antigo
+   * é descartada, senão o endereço de um arrasto anterior sobrescreveria o atual.
+   */
+  const atualizarEndereco = async (lat: number, lng: number) => {
+    // Recentralizar no GPS repete o mesmo ponto: o Nominatim não precisa saber.
+    const anterior = ultimoGeocodeRef.current;
+    if (
+      anterior &&
+      Math.abs(anterior.lat - lat) < 1e-5 &&
+      Math.abs(anterior.lng - lng) < 1e-5
+    ) {
+      setAjustando(false);
+      return;
+    }
+    ultimoGeocodeRef.current = { lat, lng };
+
+    const vez = ++geocodeRef.current;
+    setAjustando(true);
+    let rua = 'Local capturado por GPS';
+    let resto = '';
+    try {
+      const addr = await reverseGeocode(lat, lng);
+      rua = addr?.road || addr?.displayName || rua;
+      resto = [addr?.suburb, addr?.city, addr?.uf].filter(Boolean).join(', ');
+    } catch {
+      /* sem endereço, fica o ponto do mapa */
+    }
+    if (vez !== geocodeRef.current) return;
+    setEndereco({ rua, resto });
+    setAjustando(false);
+  };
+
+  /**
+   * Captura do GPS em alta precisão.
+   *
+   * A primeira leitura do aparelho costuma vir da rede, com dezenas de metros
+   * de erro. Por isso o sinal fica sendo acompanhado por alguns segundos e o
+   * mapa se centraliza na melhor coordenada obtida — a de menor raio de erro.
+   */
   const capturarLocal = () => {
     if (!navigator.geolocation) {
       setErroGps('Este aparelho não oferece localização.');
@@ -111,27 +172,43 @@ export default function CheckInChat({
     setBuscandoGps(true);
     setErroGps(null);
     setMapaPronto(false);
+    definirSeguirGps(true);
 
-    navigator.geolocation.getCurrentPosition(
-      async pos => {
-        const { latitude, longitude, accuracy } = pos.coords;
+    let melhor: GeolocationPosition | null = null;
+    const encerrarBusca = () => {
+      if (watchRef.current !== null) {
+        navigator.geolocation.clearWatch(watchRef.current);
+        watchRef.current = null;
+      }
+    };
+
+    const receber = (pos: GeolocationPosition) => {
+      const anterior = melhor?.coords.accuracy ?? Infinity;
+      if (melhor && pos.coords.accuracy > anterior) return;
+      melhor = pos;
+
+      const { latitude, longitude, accuracy } = pos.coords;
+      setGps({ lat: latitude, lng: longitude, accuracy: accuracy ?? null });
+      setBuscandoGps(false);
+
+      // Enquanto a pessoa não arrastou, o ponto do check-in acompanha o GPS.
+      // Depois do arrasto o mapa manda: quem atualiza o ponto é o `moveend`.
+      if (seguirGpsRef.current) {
         setCoords({ lat: latitude, lng: longitude });
         setPrecisao(accuracy ? Math.round(accuracy) : null);
+        atualizarEndereco(latitude, longitude);
+      }
 
-        let rua = 'Local capturado por GPS';
-        let resto = '';
-        try {
-          const addr = await reverseGeocode(latitude, longitude);
-          rua = addr?.road || addr?.displayName || rua;
-          resto = [addr?.suburb, addr?.city, addr?.uf].filter(Boolean).join(', ');
-        } catch {
-          /* sem endereço, fica o ponto do GPS */
-        }
-        setEndereco({ rua, resto });
-        setBuscandoGps(false);
-      },
+      // Boa o bastante: não adianta gastar bateria atrás de mais precisão.
+      if (accuracy && accuracy <= 20) encerrarBusca();
+    };
+
+    watchRef.current = navigator.geolocation.watchPosition(
+      receber,
       err => {
+        encerrarBusca();
         setBuscandoGps(false);
+        if (melhor) return; // já havia uma leitura boa; o erro seguinte não apaga
         setErroGps(
           err?.code === 1
             ? 'Permita o acesso à localização para continuar.'
@@ -140,14 +217,41 @@ export default function CheckInChat({
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
+
+    setTimeout(encerrarBusca, 12000);
   };
 
   useEffect(() => {
     capturarLocal();
+    return () => {
+      if (watchRef.current !== null) navigator.geolocation.clearWatch(watchRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Fim do arrasto: o centro do mapa vira a coordenada do check-in.
+   *
+   * A precisão passa a somar o erro do GPS com o quanto o ponto foi afastado
+   * dele — é essa a distância real entre o que foi marcado e onde o aparelho
+   * está.
+   */
+  const aoAjustar = (lat: number, lng: number, distanciaDoGps: number) => {
+    setCoords({ lat, lng });
+    const erroGpsMetros = gps?.accuracy ?? 0;
+    setPrecisao(Math.round(erroGpsMetros + distanciaDoGps));
+    atualizarEndereco(lat, lng);
+  };
+
   const confirmarLocal = () => {
+    // O ponto salvo é o centro do mapa neste instante, já ajustado pela pessoa.
+    if (!coords || ajustando) return;
+    // A partir daqui o ponto está fechado: o GPS para de acompanhar.
+    if (watchRef.current !== null) {
+      navigator.geolocation.clearWatch(watchRef.current);
+      watchRef.current = null;
+    }
+    definirSeguirGps(false);
     setLocalConfirmado(true);
     setHoraLocal(horaAgora());
     setEtapa(2);
@@ -376,7 +480,7 @@ export default function CheckInChat({
           );
         })}
 
-        {/* ETAPA 1: mapa do ponto capturado + confirmação */}
+        {/* ETAPA 1: mapa arrastável + confirmação do ponto ajustado */}
         {!localConfirmado && (
           <div className="flex items-end gap-2">
             <AvatarSistema />
@@ -386,7 +490,7 @@ export default function CheckInChat({
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   Capturando sua localização...
                 </div>
-              ) : erroGps ? (
+              ) : erroGps && !coords ? (
                 <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm px-3.5 py-3">
                   <p className="text-[12px] font-bold text-rose-600">{erroGps}</p>
                   <button
@@ -399,47 +503,57 @@ export default function CheckInChat({
                 </div>
               ) : coords ? (
                 <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm overflow-hidden">
-                  <MiniMapa
-                    lat={coords.lat}
-                    lng={coords.lng}
-                    height={150}
+                  <MapaAjuste
+                    gps={gps}
+                    centroInicial={coords}
+                    seguirGps={seguirGps}
+                    height={260}
                     onReady={() => setMapaPronto(true)}
+                    onMoverInicio={() => setAjustando(true)}
+                    onArrastarInicio={() => definirSeguirGps(false)}
+                    onAjustado={aoAjustar}
+                    onVoltarAoGps={() => definirSeguirGps(true)}
                   />
+
                   <div className="p-3">
-                    <p className="text-[13px] font-bold text-slate-800 leading-tight">
-                      {endereco?.rua || 'Localizando endereço...'}
+                    <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: AZUL }} />
+                      Arraste o mapa para ajustar o ponto.
                     </p>
-                    <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
-                      {endereco?.resto}
-                      {precisao !== null && (
-                        <span className="whitespace-nowrap">
-                          {endereco?.resto ? ' • ' : ''}Precisão {precisao} m
-                        </span>
-                      )}
-                    </p>
+
+                    {ajustando ? (
+                      <p className="mt-2 text-[13px] font-bold text-slate-400 flex items-center gap-1.5">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                        Atualizando endereço...
+                      </p>
+                    ) : (
+                      <>
+                        <p className="mt-2 text-[13px] font-bold text-slate-800 leading-tight">
+                          {endereco?.rua || 'Localizando endereço...'}
+                        </p>
+                        <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+                          {endereco?.resto}
+                          {precisao !== null && (
+                            <span className="whitespace-nowrap">
+                              {endereco?.resto ? ' • ' : ''}Precisão {precisao} m
+                            </span>
+                          )}
+                        </p>
+                      </>
+                    )}
 
                     <p className="text-[13px] font-bold text-slate-800 mt-3">
                       Este é o seu local atual?
                     </p>
 
-                    <div className="mt-2 flex flex-col gap-2">
-                      <button
-                        onClick={confirmarLocal}
-                        disabled={!mapaPronto || buscandoGps}
-                        className="w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
-                        style={{ backgroundColor: AZUL }}
-                      >
-                        {mapaPronto ? 'Confirmar local' : 'Carregando mapa...'}
-                      </button>
-                      <button
-                        onClick={capturarLocal}
-                        disabled={buscandoGps}
-                        className="w-full py-2.5 bg-white border border-slate-200 text-slate-600 text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all active:scale-[0.99] disabled:opacity-50"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${buscandoGps ? 'animate-spin' : ''}`} />
-                        Atualizar localização
-                      </button>
-                    </div>
+                    <button
+                      onClick={confirmarLocal}
+                      disabled={!mapaPronto || ajustando}
+                      className="mt-2 w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                      style={{ backgroundColor: AZUL }}
+                    >
+                      {mapaPronto ? 'Confirmar local' : 'Carregando mapa...'}
+                    </button>
                   </div>
                 </div>
               ) : null}
