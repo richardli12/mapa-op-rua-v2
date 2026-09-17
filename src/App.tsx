@@ -7763,28 +7763,19 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Botão de Voltar para Candidatos (Top Right) */}
+      {/* Botão de Voltar (canto superior esquerdo) */}
       {adminUser && adminTab === "map" && (
-        <div
-          className={`absolute top-4 z-[1000] font-sans transition-all duration-300 ${
-            isMindMapOpen && !isMindMapFullscreen
-              ? "right-[calc(50%+1rem)]"
-              : "right-4"
-          }`}
-        >
+        <div className="absolute top-4 left-4 z-[1001] font-sans">
           <button
             onClick={() => {
               setAdminTab("candidates");
-              triggerNotification(
-                "Retornando para o Painel de Candidatos!",
-                "info",
-              );
+              triggerNotification("Retornando para os clientes!", "info");
             }}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 font-extrabold text-[11px] uppercase tracking-wider rounded-2xl shadow-xl border border-slate-200/80 transition-all cursor-pointer flex items-center gap-2 hover:scale-105 active:scale-95"
-            title="Voltar para a Gestão de Candidatos"
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] uppercase tracking-wider rounded-2xl shadow-xl border border-rose-700/40 transition-all cursor-pointer flex items-center gap-2 hover:scale-105 active:scale-95"
+            title="Voltar"
           >
-            <ChevronLeft className="w-4 h-4 text-slate-600 stroke-[3]" />
-            <span>Voltar para Candidatos</span>
+            <ChevronLeft className="w-4 h-4 text-white stroke-[3]" />
+            <span>Voltar</span>
           </button>
         </div>
       )}

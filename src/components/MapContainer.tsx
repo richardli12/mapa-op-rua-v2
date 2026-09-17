@@ -1537,7 +1537,8 @@ export default function MapContainer({
       <div id="campaign-primary-map" ref={containerRef} className="w-full h-full bg-slate-100" />
 
       {/* PAINEL DE NAVEGAÇÃO CASCATA (TOP SQUIRCLE) */}
-      <div className="absolute top-4 left-4 z-[1000] w-76 sm:w-80 font-sans">
+      {/* Abaixo do botão Voltar, que ocupa o topo do canto esquerdo. */}
+      <div className="absolute top-[4.75rem] left-4 z-[1000] w-76 sm:w-80 font-sans">
         {!isPanelOpen ? (
           <button
             type="button"
