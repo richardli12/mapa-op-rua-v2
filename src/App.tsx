@@ -1469,6 +1469,8 @@ export default function App() {
   );
 
   const [clickToPickCoords, setClickToPickCoords] = useState(false);
+  /** Centro marcado, agora é a vez de arrastar o raio direto no mapa. */
+  const [definindoRaio, setDefinindoRaio] = useState(false);
   const [coordsPickingMode, setCoordsPickingMode] = useState<"area" | "pin">(
     "area",
   );
@@ -1535,10 +1537,11 @@ export default function App() {
   // Forms state variables (Area)
   const [areaTitle, setAreaTitle] = useState("");
   const [areaDescription, setAreaDescription] = useState("");
-  const [areaBairro, setAreaBairro] = useState("Ponta Verde");
-  const [areaRadius, setAreaRadius] = useState(500); // 500 meters default
+  const [areaBairro, setAreaBairro] = useState("");
+  // Raio e equipe nascem em branco: quem define o raio e o arrasto no mapa.
+  const [areaRadius, setAreaRadius] = useState<number | "">("");
   const [areaColor, setAreaColor] = useState("#2563eb");
-  const [areaTeamSize, setAreaTeamSize] = useState<number>(10);
+  const [areaTeamSize, setAreaTeamSize] = useState<number | "">("");
   const [areaContact, setAreaContact] = useState("");
   const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
   const [areaCandidateId, setAreaCandidateId] = useState<string>("");
@@ -2761,6 +2764,9 @@ export default function App() {
         );
       }
       setClickToPickCoords(false);
+      // Área: o centro está marcado, e o raio é desenhado arrastando a alça.
+      // O formulário só volta quando a pessoa disser que terminou.
+      if (coordsPickingMode === "area") setDefinindoRaio(true);
     }
   }, [pickedCoords]);
 
@@ -2805,20 +2811,8 @@ export default function App() {
           .join(", ") || address.displayName,
       );
 
-      // Mesmo preenchimento automático de título e descrição da via de busca,
-      // para os dois caminhos chegarem no mesmo lugar.
-      const local = rua || bairro;
-      if (!local) return;
-      if (coordsPickingMode === "area") {
-        setAreaTitle((current) => current || `Equipe - ${local}`);
-        setAreaDescription(
-          (current) =>
-            current ||
-            `Ações de panfletagem da equipe focadas na ${local}${bairro ? `, bairro ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${uf ? ` - ${uf}` : ""}.`,
-        );
-      }
-      // O ponto não ganha título nem anotação automáticos: esses dois campos
-      // são escritos por quem cria o ponto.
+      // Nenhum campo de texto é preenchido sozinho: título e legenda são
+      // escritos por quem está criando, aqui e no ponto estratégico.
     })();
 
     return () => {
@@ -2833,11 +2827,6 @@ export default function App() {
     const selected = MACEIO_BAIRROS.find((b) => b.name === bairroName);
     if (selected) {
       setPickedCoords({ lat: selected.lat, lng: selected.lng });
-      if (selected.description && !areaDescription) {
-        setAreaDescription(
-          `Ações focadas no bairro ${selected.name}. ${selected.description}`,
-        );
-      }
     }
   };
 
@@ -2924,17 +2913,11 @@ export default function App() {
         }
       }
 
-      // Preenchimento automático dinâmico e profissional do título e descrição
-      const finalCity = creationCityName || "Maceió";
-      const finalState = creationStateShortName || "AL";
+      // O bairro vem do endereço porque é usado nas listagens e nos relatórios.
+      // Título e legenda ficam em branco: quem escreve é quem está criando.
       if (coordsPickingMode === "area") {
-        setAreaTitle(`Equipe - ${ruaName}`);
-        setAreaDescription(
-          `Ações de panfletagem da equipe focadas na ${ruaName}, bairro ${creationBairroName}, ${finalCity} - ${finalState}.`,
-        );
         setAreaBairro(creationBairroName);
       }
-      // Ponto estratégico não tem título nem anotação preenchidos sozinhos.
     }
   };
 
@@ -2957,6 +2940,14 @@ export default function App() {
       return;
     }
 
+    if (!Number(areaRadius)) {
+      triggerNotification(
+        "Defina o raio arrastando o círculo no mapa.",
+        "error",
+      );
+      return;
+    }
+
     const targetCoords = pickedCoords || { lat: -9.6548, lng: -35.715 }; // Default Maceió Centro
 
     if (editingAreaId) {
@@ -2968,7 +2959,7 @@ export default function App() {
         description: areaDescription,
         bairro: areaBairro,
         center: { ...targetCoords, assignedDeltas: selectedDeltas },
-        radius: areaRadius,
+        radius: Number(areaRadius),
         color: areaColor,
         active: existingArea ? existingArea.active : true,
         teamSize: Number(areaTeamSize) || 0,
@@ -3001,10 +2992,10 @@ export default function App() {
         description: areaDescription || "Sem detalhes fornecidos.",
         bairro: areaBairro,
         center: { ...targetCoords, assignedDeltas: selectedDeltas },
-        radius: areaRadius,
+        radius: Number(areaRadius),
         color: areaColor,
         active: true,
-        teamSize: Number(areaTeamSize) || 5,
+        teamSize: Number(areaTeamSize) || 0,
         contactName: areaContact || "Coordenador Local",
         createdAt: new Date().toISOString(),
         candidateId: areaCandidateId || undefined,
@@ -3028,11 +3019,12 @@ export default function App() {
   };
 
   const resetAreaForm = () => {
+    setDefinindoRaio(false);
     setAreaTitle("");
     setAreaDescription("");
-    setAreaRadius(500);
+    setAreaRadius("");
     setAreaColor("#2563eb");
-    setAreaTeamSize(10);
+    setAreaTeamSize("");
     setAreaContact("");
     setAreaBairro("");
     setPickedCoords(null);
@@ -3438,7 +3430,7 @@ export default function App() {
     setAreaBairro(area.bairro);
     setAreaRadius(area.radius);
     setAreaColor(area.color);
-    setAreaTeamSize(area.teamSize || 10);
+    setAreaTeamSize(area.teamSize || "");
     setAreaContact(area.contactName || "");
     setPickedCoords(area.center);
     setAreaCandidateId(area.candidateId || "");
@@ -9527,9 +9519,7 @@ export default function App() {
             {coordsPickingMode === "area" ? (
               <>
                 <Circle className="w-4 h-4 text-indigo-400" />
-                <span>
-                  Clique no mapa para criar o Raio (Mínimo: 500 metros)
-                </span>
+                <span>Clique no mapa para marcar o centro do raio</span>
               </>
             ) : (
               <>
@@ -9541,6 +9531,7 @@ export default function App() {
           <button
             onClick={() => {
               setClickToPickCoords(false);
+              setDefinindoRaio(false);
               // Com o formulário aberto, cancelar devolve à pergunta inicial em
               // vez de deixar a pessoa num passo sem saída.
               if (creationModalType) setCreationLocationMode("ask");
@@ -9549,6 +9540,45 @@ export default function App() {
             className="px-3 py-1 bg-red-650 hover:bg-red-700 bg-red-600 text-[10px] text-white rounded-full font-bold transition-all border border-red-500 cursor-pointer"
           >
             Cancelar
+          </button>
+        </div>
+      )}
+
+      {/* CENTRO MARCADO: agora o raio cresce arrastando a alça no mapa */}
+      {definindoRaio && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2001] bg-[#0c1322]/95 backdrop-blur-md border border-indigo-500/50 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 pointer-events-auto">
+          <Circle className="w-4 h-4 text-indigo-400" />
+          <span className="text-xs font-bold uppercase tracking-wider">
+            Arraste a alça para abrir o raio
+          </span>
+          <span className="text-xs font-black bg-white/10 border border-white/20 px-3 py-1 rounded-full">
+            {areaRadius === "" ? "sem raio" : `${areaRadius} m`}
+          </span>
+          <button
+            onClick={() => {
+              setDefinindoRaio(false);
+              setClickToPickCoords(true);
+              setPickedCoords(null);
+              setAreaRadius("");
+            }}
+            className="px-3 py-1 bg-white/10 hover:bg-white/20 text-[10px] text-white rounded-full font-bold border border-white/20 cursor-pointer transition-all"
+          >
+            Refazer
+          </button>
+          <button
+            onClick={() => {
+              if (!Number(areaRadius)) {
+                triggerNotification(
+                  "Arraste a alça para abrir o raio antes de concluir.",
+                  "error",
+                );
+                return;
+              }
+              setDefinindoRaio(false);
+            }}
+            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-[10px] text-white rounded-full font-bold border border-indigo-500 cursor-pointer transition-all"
+          >
+            Concluir
           </button>
         </div>
       )}
@@ -9950,9 +9980,12 @@ export default function App() {
                           type="number"
                           min="1"
                           max="500"
+                          placeholder="—"
                           value={areaTeamSize}
                           onChange={(e) =>
-                            setAreaTeamSize(Number(e.target.value))
+                            setAreaTeamSize(
+                              e.target.value === "" ? "" : Number(e.target.value),
+                            )
                           }
                           className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
                         />
@@ -9967,9 +10000,12 @@ export default function App() {
                           min="1"
                           max="100000"
                           step="1"
+                          placeholder="Arraste no mapa"
                           value={areaRadius}
                           onChange={(e) =>
-                            setAreaRadius(Number(e.target.value))
+                            setAreaRadius(
+                              e.target.value === "" ? "" : Number(e.target.value),
+                            )
                           }
                           className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
                         />
@@ -10715,7 +10751,8 @@ export default function App() {
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor
           }
-          tempPlacementRadius={areaRadius}
+          tempPlacementRadius={Number(areaRadius) || 0}
+          onTempRadiusChange={(metros) => setAreaRadius(metros)}
           tempPlacementType={coordsPickingMode}
           externalBairroName={creationBairroName}
           externalRuaName={creationRuaName}
@@ -10992,7 +11029,7 @@ export default function App() {
 
       {/* CENTER RE-DESIGNED CREATION MODAL */}
       <AnimatePresence>
-        {creationModalType && !clickToPickCoords && (
+        {creationModalType && !clickToPickCoords && !definindoRaio && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -11611,9 +11648,14 @@ export default function App() {
                               type="number"
                               min="1"
                               max="500"
+                              placeholder="—"
                               value={areaTeamSize}
                               onChange={(e) =>
-                                setAreaTeamSize(Number(e.target.value))
+                                setAreaTeamSize(
+                                  e.target.value === ""
+                                    ? ""
+                                    : Number(e.target.value),
+                                )
                               }
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
                             />
@@ -11656,7 +11698,9 @@ export default function App() {
                               Raio da Área de Trabalho
                             </label>
                             <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">
-                              {areaRadius} metros
+                              {areaRadius === ""
+                                ? "arraste no mapa"
+                                : `${areaRadius} metros`}
                             </span>
                           </div>
                           <div className="flex items-center gap-3">
@@ -11665,7 +11709,7 @@ export default function App() {
                               min="1"
                               max="15000"
                               step="5"
-                              value={areaRadius}
+                              value={areaRadius || 0}
                               onChange={(e) =>
                                 setAreaRadius(Number(e.target.value))
                               }
@@ -11675,9 +11719,14 @@ export default function App() {
                               type="number"
                               min="1"
                               max="100000"
+                              placeholder="—"
                               value={areaRadius}
                               onChange={(e) =>
-                                setAreaRadius(Number(e.target.value))
+                                setAreaRadius(
+                                  e.target.value === ""
+                                    ? ""
+                                    : Number(e.target.value),
+                                )
                               }
                               className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs text-center"
                             />

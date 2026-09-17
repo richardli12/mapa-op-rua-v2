@@ -271,6 +271,8 @@ interface MapContainerProps {
   tempPlacementColor: string;
   tempPlacementRadius?: number;
   tempPlacementType?: 'area' | 'pin';
+  /** Avisa o raio novo enquanto o circulo e arrastado no mapa. */
+  onTempRadiusChange?: (metros: number) => void;
   externalBairroName?: string | null;
   externalRuaName?: string | null;
   onExternalBairroChange?: (name: string | null) => void;
@@ -377,8 +379,9 @@ export default function MapContainer({
   onCoordsPicked,
   tempPlacementCoords,
   tempPlacementColor,
-  tempPlacementRadius = 500,
+  tempPlacementRadius = 0,
   tempPlacementType = 'area',
+  onTempRadiusChange,
   externalBairroName,
   externalRuaName,
   onExternalBairroChange,
@@ -415,6 +418,13 @@ export default function MapContainer({
   const circlesGroupRef = useRef<L.LayerGroup | null>(null);
   const pinsGroupRef = useRef<L.LayerGroup | null>(null);
   const tempGroupRef = useRef<L.LayerGroup | null>(null);
+  // O circulo temporario e o puxador da borda vivem fora do ciclo de render:
+  // enquanto o raio esta sendo arrastado, refazer as camadas cortaria o gesto.
+  const tempCircleRef = useRef<any>(null);
+  const tempHandleRef = useRef<any>(null);
+  const arrastandoRaioRef = useRef(false);
+  const raioRef = useRef(tempPlacementRadius);
+  raioRef.current = tempPlacementRadius;
   const checkInsGroupRef = useRef<L.LayerGroup | null>(null);
   const delimitationGroupRef = useRef<L.LayerGroup | null>(null);
 
@@ -1567,17 +1577,34 @@ export default function MapContainer({
 
     tempGroup.clearLayers();
 
-    // Se houver pesquisa de endereço ativa (bairro ou rua), omitimos o círculo temporário
-    // para exibir de maneira limpa apenas as delimitações geográficas de ruas e bairros.
-    if (selectedBairroName || selectedRuaName) {
-      return;
-    }
+    // O ponto que está sendo criado sempre aparece. Antes ele era escondido
+    // quando havia bairro ou rua em foco, mas clicar no mapa descobre o
+    // endereço do ponto e acende esse foco sozinho: o círculo do raio sumia
+    // logo no momento em que precisava ser visto e arrastado.
+
+    tempCircleRef.current = null;
+    tempHandleRef.current = null;
 
     if (tempPlacementCoords) {
       if (tempPlacementType === 'area') {
-        // Draw temp circle + center
-        const tempCircle = L.circle([tempPlacementCoords.lat, tempPlacementCoords.lng], {
-          radius: tempPlacementRadius,
+        const centro = L.latLng(tempPlacementCoords.lat, tempPlacementCoords.lng);
+
+        // Raio ainda em branco: o circulo nasce sem tamanho e quem define e o
+        // arrasto. O puxador, porem, precisa aparecer em algum lugar visivel,
+        // entao fica a uns 60 pixels do centro ate o primeiro arrasto.
+        const metrosDe = (pixels: number) => {
+          const p = map.latLngToContainerPoint(centro);
+          return map.distance(centro, map.containerPointToLatLng(L.point(p.x + pixels, p.y)));
+        };
+        const naBorda = (metros: number) => {
+          const graus = metros / (111320 * Math.cos((centro.lat * Math.PI) / 180));
+          return L.latLng(centro.lat, centro.lng + graus);
+        };
+
+        const raioInicial = raioRef.current > 0 ? raioRef.current : 0;
+
+        const tempCircle = L.circle(centro, {
+          radius: raioInicial,
           color: tempPlacementColor,
           weight: 2,
           opacity: 0.8,
@@ -1586,7 +1613,7 @@ export default function MapContainer({
           fillOpacity: 0.15
         });
 
-        const tempCenter = L.circleMarker([tempPlacementCoords.lat, tempPlacementCoords.lng], {
+        const tempCenter = L.circleMarker(centro, {
           radius: 6,
           color: '#ffffff',
           weight: 2,
@@ -1595,8 +1622,72 @@ export default function MapContainer({
           fillOpacity: 1
         });
 
+        const puxador = L.marker(
+          naBorda(raioInicial > 0 ? raioInicial : metrosDe(60)),
+          {
+            draggable: true,
+            keyboard: false,
+            icon: L.divIcon({
+              className: '',
+              html:
+                '<span style="display:flex;align-items:center;justify-content:center;' +
+                'width:26px;height:26px;border-radius:50%;background:#fff;cursor:ew-resize;' +
+                `border:3px solid ${tempPlacementColor};box-shadow:0 2px 6px rgba(0,0,0,.35)">` +
+                `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${tempPlacementColor}" ` +
+                'stroke-width="3" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">' +
+                '<path d="m9 6-6 6 6 6"/><path d="m15 6 6 6-6 6"/></svg>' +
+                '</span>',
+              iconSize: [26, 26],
+              iconAnchor: [13, 13]
+            })
+          }
+        );
+        puxador.bindTooltip(
+          raioInicial > 0 ? `${Math.round(raioInicial)} m` : 'Arraste para abrir o raio',
+          { direction: 'top', offset: [0, -16], permanent: true, className: 'medida-raio' }
+        );
+
+        /** Aplica o raio que o gesto acabou de desenhar. */
+        const aplicarRaio = (ponto: any) => {
+          const metros = Math.max(1, Math.round(map.distance(centro, ponto)));
+          tempCircle.setRadius(metros);
+          puxador.setTooltipContent(`${metros} m`);
+          onTempRadiusChange?.(metros);
+        };
+
+        puxador.on('dragstart', () => {
+          arrastandoRaioRef.current = true;
+        });
+        puxador.on('drag', () => aplicarRaio(puxador.getLatLng()));
+        puxador.on('dragend', () => {
+          arrastandoRaioRef.current = false;
+          aplicarRaio(puxador.getLatLng());
+        });
+
+        // Pegar a borda do proprio circulo tambem cresce o raio.
+        tempCircle.on('mousedown', (evento: any) => {
+          L.DomEvent.stop(evento);
+          arrastandoRaioRef.current = true;
+          map.dragging.disable();
+          const seguir = (mov: any) => {
+            puxador.setLatLng(mov.latlng);
+            aplicarRaio(mov.latlng);
+          };
+          const soltar = () => {
+            map.off('mousemove', seguir);
+            map.off('mouseup', soltar);
+            map.dragging.enable();
+            arrastandoRaioRef.current = false;
+          };
+          map.on('mousemove', seguir);
+          map.on('mouseup', soltar);
+        });
+
         tempGroup.addLayer(tempCircle);
         tempGroup.addLayer(tempCenter);
+        tempGroup.addLayer(puxador);
+        tempCircleRef.current = tempCircle;
+        tempHandleRef.current = puxador;
       } else {
         // Draw temp pin marker
         const tempIcon = getCustomPinIcon(tempPlacementColor, 'flag', true);
@@ -1610,7 +1701,35 @@ export default function MapContainer({
       // Smooth pan to placement
       map.panTo([tempPlacementCoords.lat, tempPlacementCoords.lng]);
     }
-  }, [tempPlacementCoords, tempPlacementColor, tempPlacementRadius, tempPlacementType, selectedBairroName, selectedRuaName]);
+    // O raio fica de fora das dependencias de proposito: quem o atualiza
+    // durante o arrasto e o efeito seguinte, sem refazer as camadas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tempPlacementCoords, tempPlacementColor, tempPlacementType]);
+
+  // Raio mudado por fora (campo do formulario): acompanha o circulo e o puxador.
+  useEffect(() => {
+    if (arrastandoRaioRef.current) return;
+    const circulo = tempCircleRef.current;
+    const puxador = tempHandleRef.current;
+    const map = mapRef.current;
+    if (!circulo || !map) return;
+    const metros = tempPlacementRadius > 0 ? tempPlacementRadius : 0;
+    circulo.setRadius(metros);
+    if (puxador) {
+      const centro = circulo.getLatLng();
+      const visivel = metros > 0
+        ? metros
+        : map.distance(
+            centro,
+            map.containerPointToLatLng(
+              L.point(map.latLngToContainerPoint(centro).x + 60, map.latLngToContainerPoint(centro).y)
+            )
+          );
+      const graus = visivel / (111320 * Math.cos((centro.lat * Math.PI) / 180));
+      puxador.setLatLng(L.latLng(centro.lat, centro.lng + graus));
+      puxador.setTooltipContent(metros > 0 ? `${Math.round(metros)} m` : 'Arraste para abrir o raio');
+    }
+  }, [tempPlacementRadius]);
 
   return (
     <div className="relative w-full h-full font-sans">
