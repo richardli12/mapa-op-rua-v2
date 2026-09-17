@@ -358,15 +358,57 @@ const REDIRECIONAMENTO_PADRAO =
  * encontraria a barra já vazia e jogaria a pessoa para a tela errada.
  */
 const ROTA_INICIAL = (() => {
-  if (typeof window === "undefined") return { convite: "", equipe: "" };
+  if (typeof window === "undefined")
+    return { convite: "", equipe: "", semLink: false };
+
+  /**
+   * Onde a pessoa está, guardado para o recarregar não a expulsar.
+   *
+   * O endereço é limpo assim que lido, então uma atualização da página não
+   * encontraria mais nada na barra e jogaria quem está no painel da equipe, ou
+   * no cadastro, para outro lugar — no domínio de acesso, para fora do sistema.
+   * A memória é da aba: fechou a aba, acabou.
+   */
+  const lembrar = (chave: string, valor: string) => {
+    try {
+      if (valor) sessionStorage.setItem(chave, valor);
+    } catch {
+      /* navegador sem sessionStorage: segue sem lembrar */
+    }
+  };
+  const esquecer = (chave: string) => {
+    try {
+      sessionStorage.removeItem(chave);
+    } catch {
+      /* navegador sem sessionStorage: nada a esquecer */
+    }
+  };
+  const lembrado = (chave: string) => {
+    try {
+      return sessionStorage.getItem(chave) || "";
+    } catch {
+      return "";
+    }
+  };
 
   const fragmento = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const busca = new URLSearchParams(window.location.search);
-  // Formato novo (depois do `#`) e os formatos antigos, que continuam valendo.
-  const convite = fragmento.get("c") || busca.get("convite") || "";
-  const equipe = fragmento.get("e") || "";
 
-  if (convite || equipe) {
+  // Formato novo (depois do `#`), os formatos antigos, e por fim o que ficou
+  // guardado da primeira vez que esta aba abriu.
+  const doEndereco = {
+    convite: fragmento.get("c") || busca.get("convite") || "",
+    equipe: fragmento.get("e") || "",
+  };
+  const convite = doEndereco.convite || lembrado("rota_convite");
+  const equipe = doEndereco.equipe || lembrado("rota_equipe");
+
+  if (doEndereco.convite || doEndereco.equipe) {
+    // Link novo manda: o contexto anterior desta aba é trocado, não somado.
+    esquecer("rota_convite");
+    esquecer("rota_equipe");
+    lembrar("rota_convite", doEndereco.convite);
+    lembrar("rota_equipe", doEndereco.equipe);
     try {
       window.history.replaceState(null, "", window.location.pathname);
     } catch {
@@ -3529,6 +3571,12 @@ export default function App() {
     });
   };
 
+  // O cadastro pelo QR Code vem antes de qualquer outra tela: quem chegou com
+  // um convite na mão está ali para se cadastrar, não para entrar no painel.
+  if (inviteToken) {
+    return <TeamSignupPage token={inviteToken} />;
+  }
+
   if (currentUrlView === "checkin") {
     if (isCheckInPageInitializing) {
       return (
@@ -4400,10 +4448,7 @@ export default function App() {
               <Users className="w-4 h-4 text-indigo-600" />
             </div>
             <div className="text-left">
-              <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-450 block leading-none">
-                Apoiador Conectado
-              </span>
-              <strong className="text-slate-800 text-xs font-bold leading-tight block mt-1">
+              <strong className="text-slate-800 text-xs font-bold leading-tight block">
                 {authenticatedSupporter?.name || checkInName || "Apoiador"}
               </strong>
             </div>
@@ -4454,11 +4499,6 @@ export default function App() {
                   <h2 className="font-extrabold text-slate-900 text-2xl">
                     Check-in Realizado!
                   </h2>
-                  <p className="text-sm text-slate-500 leading-relaxed max-w-xs mx-auto">
-                    {isFreeCheckIn
-                      ? "A ocorrência foi marcada no ponto exato do mapa consolidado do comitê. Obrigado!"
-                      : "Sua presença e foto foram marcadas com sucesso no mapa consolidado do comitê. Obrigado!"}
-                  </p>
                 </div>
 
                 <div className="bg-slate-50 border border-slate-150 rounded-2xl p-5 text-left space-y-3.5 divide-y divide-slate-200/50">
@@ -5724,9 +5764,6 @@ export default function App() {
     );
   }
 
-  if (inviteToken) {
-    return <TeamSignupPage token={inviteToken} />;
-  }
 
   if (currentUrlView !== "checkin" && !adminUser) {
     const handleAdminLoginSubmit = async (e: React.FormEvent) => {
