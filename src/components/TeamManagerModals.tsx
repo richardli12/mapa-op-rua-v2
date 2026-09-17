@@ -14,6 +14,18 @@ import QRCode from 'qrcode';
 import { DatabaseService } from '../databaseClient';
 import { Candidate } from '../types';
 
+/**
+ * Endereço do cadastro pelo QR Code.
+ *
+ * O cadastro mora num domínio separado do painel: quem lê o QR Code nunca vê o
+ * endereço da área administrativa. Sem a variável configurada, o link volta a
+ * apontar para o próprio endereço aberto, que é o que serve em desenvolvimento.
+ */
+const BASE_CADASTRO = (
+  (import.meta as any).env?.VITE_SIGNUP_BASE_URL ||
+  'https://cadastro.657169.74696d656f7065726163696f6e616c63636f.online'
+).replace(/\/$/, '');
+
 type Aviso = (texto: string, tipo?: 'success' | 'error' | 'info') => void;
 
 /** Prazos que o ADM pode escolher para o QR Code. */
@@ -242,8 +254,7 @@ export function QrConviteModal({ client, onClose, notify }: BaseProps) {
     return () => clearInterval(t);
   }, []);
 
-  const linkDe = (token: string) =>
-    `${window.location.origin}/?convite=${token}`;
+  const linkDe = (token: string) => `${BASE_CADASTRO}/?convite=${token}`;
 
   useEffect(() => {
     if (!ativo) return setImagemQr('');
