@@ -123,6 +123,8 @@ export default function CheckInChat({
 
   const [salvando, setSalvando] = useState(false);
   const [horas, setHoras] = useState<{ [k: string]: string }>({});
+  /** Enviar da galeria: desligado até o administrador liberar. */
+  const [permitirGaleria, setPermitirGaleria] = useState(false);
 
   const fimRef = useRef<HTMLDivElement>(null);
   const watchRef = useRef<number | null>(null);
@@ -167,6 +169,13 @@ export default function CheckInChat({
     );
     return () => clearTimeout(t);
   }, [etapa, coords, midias, observacoes, operacoes, mapaPronto]);
+
+  useEffect(() => {
+    (async () => {
+      const res = await DatabaseService.lerConfiguracao('midia_galeria');
+      setPermitirGaleria(res.value === 'sim');
+    })();
+  }, []);
 
   useEffect(() => {
     marcarHora('abertura');
@@ -807,6 +816,7 @@ export default function CheckInChat({
         {etapa >= 2 && (midias.length > 0 || etapa === 2) && (
           <CheckInMidias
             itens={midias}
+            permitirGaleria={permitirGaleria}
             editavel={etapa === 2}
             avatar={AvatarMembro}
             hora={horas.midias || horas.local}

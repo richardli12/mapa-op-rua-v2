@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink, Loader2, Save, ShieldCheck } from 'lucide-react';
+import { Camera, ExternalLink, Loader2, Save, ShieldCheck } from 'lucide-react';
 import { DatabaseService } from '../databaseClient';
 
 interface Props {
@@ -12,6 +12,8 @@ interface Props {
 
 /** Chave do ajuste no banco. Mesma lida pelo App na entrada sem link. */
 export const CHAVE_REDIRECIONAMENTO = 'redirect_sem_link';
+/** Liberar o envio de foto e vídeo da galeria no check-in. */
+export const CHAVE_GALERIA = 'midia_galeria';
 
 /**
  * Configurações do sistema — tela do administrador.
@@ -26,16 +28,34 @@ export default function ConfiguracoesAdmin({
   notify
 }: Props) {
   const [redirecionamento, setRedirecionamento] = useState('');
+  const [galeria, setGaleria] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const res = await DatabaseService.lerConfiguracao(CHAVE_REDIRECIONAMENTO);
-      setRedirecionamento(res.value || '');
+      const [saida, midia] = await Promise.all([
+        DatabaseService.lerConfiguracao(CHAVE_REDIRECIONAMENTO),
+        DatabaseService.lerConfiguracao(CHAVE_GALERIA)
+      ]);
+      setRedirecionamento(saida.value || '');
+      setGaleria(midia.value === 'sim');
       setCarregando(false);
     })();
   }, []);
+
+  /** A chave é gravada na hora em que o botão muda: nada de "esqueci de salvar". */
+  const alternarGaleria = async () => {
+    const novo = !galeria;
+    setGaleria(novo);
+    const res = await DatabaseService.gravarConfiguracao(CHAVE_GALERIA, novo ? 'sim' : 'nao');
+    if (!res.success) {
+      setGaleria(!novo);
+      notify('Não foi possível salvar a configuração.', 'error');
+      return;
+    }
+    notify(novo ? 'Galeria liberada no check-in.' : 'Galeria bloqueada no check-in.', 'success');
+  };
 
   const salvar = async () => {
     const destino = redirecionamento.trim();
@@ -120,6 +140,51 @@ export default function ConfiguracoesAdmin({
               ))}
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-6 max-w-2xl">
+        <div className="flex items-start gap-3 pb-4 border-b border-slate-100">
+          <div className="w-10 h-10 rounded-2xl bg-slate-100 text-[#0C3556] flex items-center justify-center shrink-0">
+            <Camera className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider leading-tight">
+              Mídias do check-in
+            </h3>
+            <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+              De onde pode vir a evidência de campo.
+            </p>
+          </div>
+        </div>
+
+        <div className="pt-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[12.5px] font-bold text-slate-700">
+              Permitir enviar da galeria
+            </p>
+            <p className="text-[11px] text-slate-400 font-semibold leading-relaxed mt-0.5">
+              Desligado, o integrante só anexa o que ele fotografar ou filmar na
+              hora, pela câmera — é o que garante que a evidência é daquele
+              momento, e não uma imagem antiga do rolo do celular.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={galeria}
+            disabled={carregando}
+            onClick={alternarGaleria}
+            className={`w-14 h-8 rounded-full shrink-0 transition-colors cursor-pointer disabled:opacity-50 ${
+              galeria ? 'bg-emerald-500' : 'bg-slate-300'
+            }`}
+          >
+            <span
+              className={`block w-6 h-6 bg-white rounded-full shadow transition-transform ${
+                galeria ? 'translate-x-7' : 'translate-x-1'
+              }`}
+            />
+          </button>
         </div>
       </div>
     </div>
