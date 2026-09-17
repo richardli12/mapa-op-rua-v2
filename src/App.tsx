@@ -2296,6 +2296,8 @@ export default function App() {
   /** Fichas disponíveis para vínculo. Só o modal de vincular usa esta lista. */
   const [externalCandidates, setExternalCandidates] = useState<Candidate[]>([]);
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+  /** Pergunta que abre antes: vincular um cliente que já existe ou criar um. */
+  const [escolhaNovoCliente, setEscolhaNovoCliente] = useState(false);
   const [linkSearch, setLinkSearch] = useState("");
   /** Escolha do administrador no momento do vínculo: trazer a equipe ou não. */
   const [linkWithTeam, setLinkWithTeam] = useState(false);
@@ -6352,17 +6354,7 @@ export default function App() {
             ) : (
               <>
                 <button
-                  onClick={() => {
-                    setLinkSearch("");
-                    setIsLinkModalOpen(true);
-                  }}
-                  className="px-5 h-11 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
-                >
-                  <Link2 className="w-4 h-4" />
-                  <span>Vincular Cliente</span>
-                </button>
-                <button
-                  onClick={handleOpenCreateModal}
+                  onClick={() => setEscolhaNovoCliente(true)}
                   className="px-5 h-11 bg-[#015FC9] hover:bg-blue-600 text-white font-bold text-xs rounded-2xl shadow-lg border border-blue-700/30 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
                 >
                   <PlusCircle className="w-4 h-4" />
@@ -6402,10 +6394,15 @@ export default function App() {
                     },
                   });
                 }}
-                className="p-3 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-slate-200 rounded-2xl shadow-sm transition-all cursor-pointer"
+                className="h-11 pl-1.5 pr-5 bg-white hover:bg-rose-50 border border-slate-200 rounded-full shadow-sm flex items-center gap-2.5 transition-all cursor-pointer active:scale-95 group"
                 title="Sair do painel"
               >
-                <LogOut className="w-4 h-4" />
+                <span className="w-8 h-8 rounded-full bg-white border border-slate-200 group-hover:border-rose-200 flex items-center justify-center text-rose-500 shrink-0">
+                  <ChevronRight className="w-4 h-4 stroke-[3]" />
+                </span>
+                <span className="text-rose-500 font-black text-xs uppercase tracking-wider">
+                  Sair
+                </span>
               </button>
             )}
           </div>
@@ -6907,9 +6904,6 @@ export default function App() {
                         ).length
                       }
                     </h3>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                      Multiplicadores do cliente
-                    </p>
                   </div>
 
                   <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
@@ -7257,17 +7251,7 @@ export default function App() {
                 {!isLoadingClients && candidates.length === 0 && (
                   <div className="flex flex-wrap items-center justify-center gap-3">
                     <button
-                      onClick={() => {
-                        setLinkSearch("");
-                        setIsLinkModalOpen(true);
-                      }}
-                      className="px-5 h-11 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer"
-                    >
-                      <Link2 className="w-4 h-4" />
-                      <span>Vincular Cliente</span>
-                    </button>
-                    <button
-                      onClick={handleOpenCreateModal}
+                      onClick={() => setEscolhaNovoCliente(true)}
                       className="px-5 h-11 bg-[#015FC9] hover:bg-blue-600 text-white font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer"
                     >
                       <PlusCircle className="w-4 h-4" />
@@ -7469,6 +7453,79 @@ export default function App() {
               />
             )}
           </>
+        )}
+
+        {/* ESCOLHA: CLIENTE QUE JÁ EXISTE OU CLIENTE NOVO */}
+        {escolhaNovoCliente && (
+          <div className="fixed inset-0 bg-[#0c1322]/40 backdrop-blur-xs flex items-center justify-center z-[11000] p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white rounded-3xl w-full max-w-md shadow-3xl overflow-hidden border border-slate-100 font-sans"
+            >
+              <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black text-slate-800">
+                    Adicionar cliente
+                  </h3>
+                  <p className="text-[10px] uppercase tracking-widest text-[#8492A6] font-bold mt-0.5">
+                    De onde vem este cliente?
+                  </p>
+                </div>
+                <button
+                  onClick={() => setEscolhaNovoCliente(false)}
+                  aria-label="Fechar"
+                  className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-3">
+                <button
+                  onClick={() => {
+                    setEscolhaNovoCliente(false);
+                    setLinkSearch("");
+                    setIsLinkModalOpen(true);
+                  }}
+                  className="w-full p-4 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-2xl flex items-center gap-3 text-left transition-all cursor-pointer active:scale-[0.99]"
+                >
+                  <span className="w-10 h-10 rounded-2xl bg-white text-emerald-700 border border-emerald-200 flex items-center justify-center shrink-0">
+                    <Link2 className="w-4 h-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <strong className="block text-sm font-black text-emerald-800">
+                      Vincular um que já existe
+                    </strong>
+                    <span className="block text-[11px] text-emerald-700/70 font-semibold leading-snug mt-0.5">
+                      Traz para a sua base um cliente já cadastrado na base
+                      externa, com os dados que ele já tem.
+                    </span>
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setEscolhaNovoCliente(false);
+                    handleOpenCreateModal();
+                  }}
+                  className="w-full p-4 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-2xl flex items-center gap-3 text-left transition-all cursor-pointer active:scale-[0.99]"
+                >
+                  <span className="w-10 h-10 rounded-2xl bg-white text-[#015FC9] border border-blue-200 flex items-center justify-center shrink-0">
+                    <PlusCircle className="w-4 h-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <strong className="block text-sm font-black text-blue-900">
+                      Criar um cliente novo
+                    </strong>
+                    <span className="block text-[11px] text-blue-800/70 font-semibold leading-snug mt-0.5">
+                      Cadastra do zero, preenchendo os dados à mão.
+                    </span>
+                  </span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
 
         {/* MODAL: VINCULAR CLIENTE */}
