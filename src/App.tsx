@@ -11180,15 +11180,16 @@ export default function App() {
                   {escolaAberta.telefone}
                 </a>
               )}
+              {/* As coordenadas não interessam a quem usa: o que interessa é
+                  chegar lá. O número vira o caminho. */}
               <a
                 href={`https://www.google.com/maps/search/?api=1&query=${escolaAberta.latitude},${escolaAberta.longitude}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 text-[11.5px] font-bold text-slate-500 hover:text-slate-700"
+                className="mt-1 h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
               >
-                <Compass className="w-4 h-4 shrink-0" />
-                {escolaAberta.latitude.toFixed(5)},{" "}
-                {escolaAberta.longitude.toFixed(5)}
+                <Map className="w-4 h-4 text-[#015FC9]" />
+                Abrir no Google Maps
               </a>
               {escolaAberta.restricao && (
                 <p className="text-[11px] font-semibold text-slate-400 leading-snug">
