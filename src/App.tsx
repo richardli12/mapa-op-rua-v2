@@ -6853,10 +6853,26 @@ export default function App() {
                                     className="hover:bg-slate-50/50 transition-all"
                                   >
                                     <td className="py-3 px-6 flex items-center gap-3">
-                                      <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 text-[#015FC9] font-black flex items-center justify-center text-xs shadow-xs uppercase">
-                                        {sup.full_name
-                                          ? sup.full_name.substring(0, 2)
-                                          : "DT"}
+                                      <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 text-[#015FC9] font-black flex items-center justify-center text-xs shadow-xs uppercase overflow-hidden shrink-0">
+                                        {sup.image ? (
+                                          <img
+                                            src={sup.image}
+                                            alt={sup.full_name || "Integrante"}
+                                            className="w-full h-full object-cover"
+                                            referrerPolicy="no-referrer"
+                                            onError={(e) => {
+                                              // Foto fora do ar não pode apagar
+                                              // a linha: volta para as iniciais.
+                                              (
+                                                e.currentTarget as HTMLImageElement
+                                              ).style.display = "none";
+                                            }}
+                                          />
+                                        ) : sup.full_name ? (
+                                          sup.full_name.substring(0, 2)
+                                        ) : (
+                                          "DT"
+                                        )}
                                       </div>
                                       <span className="font-bold text-slate-800 text-[13.5px]">
                                         {sup.full_name}
