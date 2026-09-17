@@ -1,6 +1,37 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, Check, Loader2, ShieldAlert, UserPlus } from 'lucide-react';
+import {
+  ArrowRight,
+  Camera,
+  Check,
+  ChevronLeft,
+  Loader2,
+  Phone,
+  Plus,
+  ShieldAlert,
+  User,
+} from 'lucide-react';
 import { DatabaseService, db } from '../databaseClient';
+import BrandMark from './BrandMark';
+
+/** Cores da marca, as mesmas do resto do sistema. */
+const AZUL = '#0C3556';
+const LARANJA = '#F58220';
+
+const TOTAL_ETAPAS = 2;
+
+const classeEntrada =
+  'w-full py-3 bg-transparent border-none text-[14px] font-semibold text-[#0C3556] placeholder-[#B9C6D2] focus:outline-hidden';
+
+/** (00) 00000-0000 — o mesmo formato do login do integrante. */
+const mascararTelefone = (valor: string) => {
+  const d = valor.replace(/\D/g, '').slice(0, 11);
+  if (!d) return '';
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10)
+    return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+};
 
 interface TeamSignupPageProps {
   token: string;
@@ -22,7 +53,7 @@ const MOTIVOS: Record<string, string> = {
   convite_invalido: 'Este QR Code não é mais válido.',
   nome_obrigatorio: 'Informe o nome completo.',
   telefone_invalido: 'Informe um telefone válido com DDD.',
-  foto_obrigatoria: 'A foto é obrigatória.'
+  foto_obrigatoria: 'A foto é obrigatória.',
 };
 
 /**
@@ -32,6 +63,106 @@ const MOTIVOS: Record<string, string> = {
  * convite carrega o cliente e a lista de campos que aquele cliente pede, então
  * esta tela não decide nada sozinha — ela mostra o que o convite mandar.
  */
+/** Moldura comum das telas: fundo claro, marca no topo e o cartão branco. */
+function Moldura({
+  titulo,
+  children,
+  progresso,
+  etapa,
+  relogio,
+  restante,
+}: {
+  titulo: string;
+  children: React.ReactNode;
+  progresso?: number;
+  etapa: number;
+  relogio: string;
+  restante: number | null;
+}) {
+  return (
+    <div className="min-h-[100dvh] w-full font-sans flex flex-col bg-linear-to-b from-[#E8EEF4] to-[#D6DFE8]">
+      <div className="px-6 pt-7 pb-5 select-none">
+        <div className="flex items-center gap-3">
+          <span className="w-11 h-11 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0">
+            <BrandMark size={40} rounded={13} variant="clara" />
+          </span>
+          <span
+            className="text-[16px] font-extrabold tracking-tight"
+            style={{ color: AZUL }}
+          >
+            Mapa Operacional
+          </span>
+          {relogio && (
+            <span
+              title="Tempo restante deste convite"
+              className={`ml-auto text-[11px] font-black font-mono px-2 py-1 rounded-lg shrink-0 ${
+                restante !== null && restante <= 30
+                  ? 'bg-rose-100 text-rose-600'
+                  : 'bg-white/70 text-[#5A6E85]'
+              }`}
+            >
+              {relogio}
+            </span>
+          )}
+        </div>
+
+        <h1
+          className="mt-5 font-extrabold tracking-tight leading-tight"
+          style={{ color: AZUL, fontSize: 'clamp(20px, 6.2vw, 28px)' }}
+        >
+          {titulo}
+        </h1>
+
+        {progresso !== undefined && (
+          <>
+            <div className="mt-4 flex items-center justify-between text-[11px] font-extrabold text-[#7A8A9B]">
+              <span>
+                Etapa {etapa} de {TOTAL_ETAPAS}
+              </span>
+              <span>{progresso}%</span>
+            </div>
+            <div className="mt-1.5 h-[5px] rounded-full bg-[#C6D2DE] overflow-hidden">
+              <div
+                className="h-full rounded-full transition-[width] duration-300"
+                style={{ width: `${progresso}%`, backgroundColor: AZUL }}
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="flex-1 min-h-0 px-4 pb-6">
+        <div className="max-w-[440px] mx-auto w-full bg-white rounded-3xl shadow-[0_8px_30px_rgba(12,53,86,.10)] p-6">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Campo de texto no estilo do login: rótulo em cima, ícone dentro. */
+function Campo({
+  rotulo,
+  icone,
+  children,
+}: {
+  rotulo: string;
+  icone?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-4">
+      <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#5A6E85]">
+        {rotulo}
+      </label>
+      <div className="mt-2 rounded-xl bg-[#F4F7FA] border border-[#E4EBF1] flex items-center px-3.5 overflow-hidden transition-all focus-within:border-[#F58220] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#F58220]/12">
+        {icone && <span className="shrink-0 mr-2.5">{icone}</span>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function TeamSignupPage({ token }: TeamSignupPageProps) {
   const [carregando, setCarregando] = useState(true);
   const [convite, setConvite] = useState<any>(null);
@@ -44,6 +175,7 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
   const [extras, setExtras] = useState<Record<string, string>>({});
   const [salvando, setSalvando] = useState(false);
   const [concluido, setConcluido] = useState(false);
+  const [etapa, setEtapa] = useState(1);
   /** Quanto falta para o convite expirar, em segundos. */
   const [restante, setRestante] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -80,7 +212,10 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
       setErro(MOTIVOS.expirado);
       return;
     }
-    const t = setTimeout(() => setRestante(r => (r === null ? r : r - 1)), 1000);
+    const t = setTimeout(
+      () => setRestante((r) => (r === null ? r : r - 1)),
+      1000,
+    );
     return () => clearTimeout(t);
   }, [restante, concluido]);
 
@@ -95,17 +230,15 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
           event: 'UPDATE',
           schema: 'public',
           table: 'team_invites',
-          filter: `token=eq.${token}`
+          filter: `token=eq.${token}`,
         },
         (payload: any) => {
           const linha = payload?.new || {};
           if (linha.used_at || linha.revoked_at) {
             setConvite(null);
-            setErro(
-              linha.used_at ? MOTIVOS.ja_utilizado : MOTIVOS.cancelado
-            );
+            setErro(linha.used_at ? MOTIVOS.ja_utilizado : MOTIVOS.cancelado);
           }
-        }
+        },
       )
       .subscribe();
     return () => {
@@ -132,6 +265,16 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
     }
   };
 
+  /** Fecha a primeira etapa: sem foto, nome e telefone não há segunda. */
+  const continuar = () => {
+    if (!foto) return setErro('Adicione sua foto para continuar.');
+    if (!nome.trim()) return setErro('Informe o nome completo.');
+    if (telefone.replace(/\D/g, '').length < 10)
+      return setErro('Informe o telefone com DDD.');
+    setErro(null);
+    setEtapa(2);
+  };
+
   const enviar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!foto) return setErro('Tire ou escolha uma foto para continuar.');
@@ -140,10 +283,10 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
       return setErro('Informe o telefone com DDD.');
 
     const faltando = campos.filter(
-      c => c.required && !((extras[c.label] || '').trim())
+      (c) => c.required && !(extras[c.label] || '').trim(),
     );
     if (faltando.length > 0) {
-      return setErro(`Preencha: ${faltando.map(c => c.label).join(', ')}.`);
+      return setErro(`Preencha: ${faltando.map((c) => c.label).join(', ')}.`);
     }
 
     setSalvando(true);
@@ -153,21 +296,24 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
       name: nome.trim(),
       whatsapp: telefone,
       image: foto,
-      extra: extras
+      extra: extras,
     });
     setSalvando(false);
 
-    if (!res.success) return setErro(res.error || 'Falha ao concluir o cadastro.');
+    if (!res.success)
+      return setErro(res.error || 'Falha ao concluir o cadastro.');
     if (!res.data?.ok) {
-      return setErro(MOTIVOS[res.data?.reason] || 'Este QR Code não é mais válido.');
+      return setErro(
+        MOTIVOS[res.data?.reason] || 'Este QR Code não é mais válido.',
+      );
     }
     setConcluido(true);
   };
 
   if (carregando) {
     return (
-      <div className="min-h-screen bg-[#EEF2F7] flex items-center justify-center font-sans">
-        <div className="flex items-center gap-2 text-slate-400 font-bold text-xs uppercase tracking-widest">
+      <div className="min-h-[100dvh] flex items-center justify-center font-sans bg-linear-to-b from-[#E8EEF4] to-[#D6DFE8]">
+        <div className="flex items-center gap-2 text-[#7A8A9B] font-bold text-xs uppercase tracking-widest">
           <Loader2 className="w-4 h-4 animate-spin" />
           Validando convite...
         </div>
@@ -177,213 +323,249 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
 
   if (concluido) {
     return (
-      <div className="min-h-screen bg-[#EEF2F7] flex items-center justify-center p-5 font-sans">
-        <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-8 max-w-sm w-full text-center flex flex-col items-center gap-3">
+      <Moldura
+        titulo="Cadastro concluído"
+        etapa={etapa}
+        relogio={relogio}
+        restante={restante}
+      >
+        <div className="flex flex-col items-center text-center gap-3 py-2">
           <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
             <Check className="w-7 h-7 stroke-[3]" />
           </div>
-          <h1 className="text-lg font-black text-[#0D233A]">Cadastro concluído!</h1>
-          <p className="text-xs text-slate-500 font-semibold leading-relaxed">
+          <p className="text-[13px] text-[#5A6E85] font-semibold leading-relaxed">
             Você agora faz parte da equipe
             {convite?.candidateName ? ` de ${convite.candidateName}` : ''}. Este
             QR Code foi encerrado e não serve para mais ninguém.
           </p>
         </div>
-      </div>
+      </Moldura>
     );
   }
 
   if (!convite) {
     return (
-      <div className="min-h-screen bg-[#EEF2F7] flex items-center justify-center p-5 font-sans">
-        <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-8 max-w-sm w-full text-center flex flex-col items-center gap-3">
+      <Moldura
+        titulo="Convite indisponível"
+        etapa={etapa}
+        relogio={relogio}
+        restante={restante}
+      >
+        <div className="flex flex-col items-center text-center gap-3 py-2">
           <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
             <ShieldAlert className="w-7 h-7" />
           </div>
-          <h1 className="text-lg font-black text-[#0D233A]">Convite indisponível</h1>
-          <p className="text-xs text-slate-500 font-semibold leading-relaxed">
+          <p className="text-[13px] text-[#5A6E85] font-semibold leading-relaxed">
             {erro || 'Este QR Code não é mais válido.'}
           </p>
-          <p className="text-[11px] text-slate-400 font-semibold">
+          <p className="text-[12px] text-[#9AA9B8] font-semibold">
             Peça um novo QR Code a quem coordena a equipe.
           </p>
         </div>
-      </div>
+      </Moldura>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#EEF2F7] p-5 font-sans flex justify-center">
-      <form
-        onSubmit={enviar}
-        className="bg-white border border-slate-200 rounded-3xl shadow-sm w-full max-w-md h-fit overflow-hidden"
-      >
-        <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
-          {convite.candidateImage ? (
-            <img
-              src={convite.candidateImage}
-              alt={convite.candidateName}
-              className="w-11 h-11 rounded-2xl object-cover border border-slate-100"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <UserPlus className="w-5 h-5" />
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            <h1 className="text-base font-black text-[#0D233A] leading-tight">
-              Cadastro na Equipe
-            </h1>
-            <p className="text-[11px] text-slate-400 font-bold truncate">
-              {convite.candidateName}
-            </p>
-          </div>
-          {relogio && (
-            <span
-              title="Tempo restante deste convite"
-              className={`text-[11px] font-black font-mono px-2 py-1 rounded-lg shrink-0 ${
-                restante !== null && restante <= 30
-                  ? 'bg-rose-50 text-rose-600'
-                  : 'bg-amber-50 text-amber-700'
-              }`}
+    <Moldura
+      titulo="Complete seu cadastro"
+      progresso={etapa === 1 ? 50 : 100}
+      etapa={etapa}
+      relogio={relogio}
+      restante={restante}
+    >
+      <form onSubmit={enviar}>
+        <div className="flex items-center gap-3">
+          {etapa === 2 && (
+            <button
+              type="button"
+              onClick={() => setEtapa(1)}
+              aria-label="Voltar"
+              className="w-7 h-7 -ml-1 rounded-lg text-[#9AA9B8] hover:bg-slate-50 flex items-center justify-center cursor-pointer"
             >
-              {relogio}
-            </span>
+              <ChevronLeft className="w-4 h-4" />
+            </button>
           )}
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[#9AA9B8]">
+            {etapa === 1
+              ? 'Seus dados'
+              : convite.candidateName || 'Informações da equipe'}
+          </p>
         </div>
+        <span className="block w-9 h-[3px] rounded-full bg-[#E3E9EF] mt-2.5" />
 
-        <div className="p-6 space-y-4">
-          {/* FOTO */}
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">
-              Foto *
-            </label>
-            <div className="flex items-center gap-3">
-              <div className="w-16 h-16 rounded-2xl border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center shrink-0">
-                {foto ? (
-                  <img src={foto} alt="Sua foto" className="w-full h-full object-cover" />
-                ) : (
-                  <Camera className="w-5 h-5 text-slate-300" />
-                )}
-              </div>
-              <div className="flex-1">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/*"
-                  capture="user"
-                  className="hidden"
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) enviarFoto(file);
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={enviandoFoto}
-                  onClick={() => fileRef.current?.click()}
-                  className="px-4 h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-2"
-                >
-                  {enviandoFoto ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Enviando...
-                    </>
+        {etapa === 1 ? (
+          <>
+            {/* FOTO */}
+            <div className="mt-5 flex flex-col items-center">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                capture="user"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) enviarFoto(file);
+                }}
+              />
+              <button
+                type="button"
+                disabled={enviandoFoto}
+                onClick={() => fileRef.current?.click()}
+                className="relative w-[84px] h-[84px] cursor-pointer active:scale-95 transition-transform disabled:opacity-60"
+                aria-label={foto ? 'Trocar foto' : 'Adicionar foto'}
+              >
+                {/* O corte fica só na foto: assim o + laranja passa da borda. */}
+                <span className="w-full h-full rounded-full bg-[#DCE5EE] overflow-hidden flex items-center justify-center">
+                  {foto ? (
+                    <img
+                      src={foto}
+                      alt="Sua foto"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : enviandoFoto ? (
+                    <Loader2 className="w-6 h-6 animate-spin text-[#7A8A9B]" />
                   ) : (
-                    <>
-                      <Camera className="w-3.5 h-3.5" />
-                      {foto ? 'Trocar foto' : 'Tirar foto'}
-                    </>
+                    <Camera className="w-7 h-7 text-[#7A8A9B]" />
                   )}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-              Nome completo *
-            </label>
-            <input
-              type="text"
-              value={nome}
-              onChange={e => setNome(e.target.value)}
-              placeholder="Como você é chamado"
-              className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-              Telefone (WhatsApp) *
-            </label>
-            <input
-              type="tel"
-              inputMode="numeric"
-              value={telefone}
-              onChange={e => setTelefone(e.target.value)}
-              placeholder="DDD + número"
-              className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          {/* CAMPOS QUE O ADM CONFIGUROU PARA ESTE CLIENTE */}
-          {campos.map(campo => (
-            <div key={campo.id}>
-              <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                {campo.label} {campo.required ? '*' : ''}
-              </label>
-              {campo.type === 'select' ? (
-                <select
-                  value={extras[campo.label] || ''}
-                  onChange={e =>
-                    setExtras(p => ({ ...p, [campo.label]: e.target.value }))
-                  }
-                  className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                </span>
+                <span
+                  className="absolute bottom-0.5 right-0.5 w-6 h-6 rounded-full text-white flex items-center justify-center shadow-md ring-2 ring-white"
+                  style={{ backgroundColor: LARANJA }}
                 >
-                  <option value="">Selecione...</option>
-                  {(campo.options || []).map(op => (
-                    <option key={op} value={op}>
-                      {op}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type={campo.type === 'number' ? 'number' : campo.type === 'date' ? 'date' : campo.type === 'email' ? 'email' : 'text'}
-                  value={extras[campo.label] || ''}
-                  onChange={e =>
-                    setExtras(p => ({ ...p, [campo.label]: e.target.value }))
-                  }
-                  className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-                />
-              )}
+                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                </span>
+              </button>
+              <p
+                className="mt-2 text-[12.5px] font-extrabold"
+                style={{ color: AZUL }}
+              >
+                {foto ? 'Trocar foto' : 'Adicionar foto'}
+              </p>
+              <p className="text-[11px] font-semibold text-[#9AA9B8]">
+                Obrigatória
+              </p>
             </div>
-          ))}
 
-          {erro && (
-            <p className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
-              {erro}
-            </p>
-          )}
+            <Campo
+              rotulo="Nome completo"
+              icone={<User className="w-4.5 h-4.5 text-[#A5B4C2]" />}
+            >
+              <input
+                type="text"
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                placeholder="Digite seu nome"
+                className={classeEntrada}
+              />
+            </Campo>
 
-          <button
-            type="submit"
-            disabled={salvando || enviandoFoto}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
-          >
-            {salvando ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Salvando...
-              </>
+            <Campo
+              rotulo="Telefone (WhatsApp)"
+              icone={
+                <Phone className="w-4.5 h-4.5" style={{ color: LARANJA }} />
+              }
+            >
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={telefone}
+                onChange={(e) => setTelefone(mascararTelefone(e.target.value))}
+                placeholder="(00) 00000-0000"
+                className={classeEntrada}
+              />
+            </Campo>
+          </>
+        ) : (
+          <>
+            {/* CAMPOS QUE O ADM CONFIGUROU PARA ESTE CLIENTE */}
+            {campos.length === 0 ? (
+              <div className="mt-5 rounded-2xl bg-[#F4F7FA] border border-[#E4EBF1] p-4">
+                <p className="text-[12.5px] font-semibold text-[#5A6E85] leading-relaxed">
+                  Tudo certo,{' '}
+                  <strong style={{ color: AZUL }}>{nome.trim()}</strong>.
+                  Confira seu telefone{' '}
+                  <strong style={{ color: AZUL }}>{telefone}</strong> e conclua
+                  o cadastro.
+                </p>
+              </div>
             ) : (
-              'Concluir cadastro'
+              campos.map((campo) => (
+                <React.Fragment key={campo.id}>
+                  <Campo rotulo={`${campo.label}${campo.required ? ' *' : ''}`}>
+                    {campo.type === 'select' ? (
+                      <select
+                        value={extras[campo.label] || ''}
+                        onChange={(e) =>
+                          setExtras((p) => ({
+                            ...p,
+                            [campo.label]: e.target.value,
+                          }))
+                        }
+                        className={`${classeEntrada} cursor-pointer`}
+                      >
+                        <option value="">Selecione...</option>
+                        {(campo.options || []).map((op) => (
+                          <option key={op} value={op}>
+                            {op}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={
+                          campo.type === 'number'
+                            ? 'number'
+                            : campo.type === 'date'
+                              ? 'date'
+                              : campo.type === 'email'
+                                ? 'email'
+                                : 'text'
+                        }
+                        value={extras[campo.label] || ''}
+                        onChange={(e) =>
+                          setExtras((p) => ({
+                            ...p,
+                            [campo.label]: e.target.value,
+                          }))
+                        }
+                        className={classeEntrada}
+                      />
+                    )}
+                  </Campo>
+                </React.Fragment>
+              ))
             )}
-          </button>
-        </div>
+          </>
+        )}
+
+        {erro && (
+          <p className="mt-4 text-[11.5px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
+            {erro}
+          </p>
+        )}
+
+        <button
+          type={etapa === 1 ? 'button' : 'submit'}
+          onClick={etapa === 1 ? continuar : undefined}
+          disabled={salvando || enviandoFoto}
+          className="mt-5 w-full py-4 text-white font-extrabold text-[12.5px] uppercase tracking-wider rounded-xl transition-all active:scale-[0.99] disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+          style={{ backgroundColor: AZUL }}
+        >
+          {salvando ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Salvando...
+            </>
+          ) : (
+            <>
+              {etapa === 1 ? 'Continuar cadastro' : 'Concluir cadastro'}
+              <ArrowRight className="w-4 h-4" />
+            </>
+          )}
+        </button>
       </form>
-    </div>
+    </Moldura>
   );
 }
