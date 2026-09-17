@@ -105,7 +105,6 @@ import {
   CHECKIN_PRIORITIES,
   getCheckInPriority,
   PriorityLevel,
-  MapMeasurement,
   CheckInMedia,
   CheckInMediaType,
   CHECKIN_MAX_MEDIA,
@@ -780,8 +779,8 @@ export default function App() {
   // UI state variables
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "areas" | "pins" | "statistics" | "checkins" | "regua"
-  >("areas");
+    "areas" | "pins" | "statistics" | "checkins"
+  >("pins");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -818,12 +817,6 @@ export default function App() {
   const [reguaLigada, setReguaLigada] = useState(false);
   const [pontosRegua, setPontosRegua] = useState<{ lat: number; lng: number }[]>([]);
   const [corRegua, setCorRegua] = useState("#F58220");
-  const [nomeRegua, setNomeRegua] = useState("");
-  const [medicoes, setMedicoes] = useState<MapMeasurement[]>([]);
-  const [medicaoEditando, setMedicaoEditando] = useState<string | null>(null);
-  const [medicoesOcultas, setMedicoesOcultas] = useState<string[]>([]);
-  const [medicaoEmFoco, setMedicaoEmFoco] = useState<string | null>(null);
-  const [salvandoMedicao, setSalvandoMedicao] = useState(false);
 
   /** Tela aberta na área do administrador. */
   const [telaAdm, setTelaAdm] = useState<'clientes' | 'configuracoes'>('clientes');
@@ -1151,6 +1144,9 @@ export default function App() {
 
   const totalRegua = somaDoCaminho(pontosRegua);
 
+  /** Zera a medição em andamento. A régua é uma ferramenta de agora. */
+  const limparReguaEmAndamento = () => setPontosRegua([]);
+
   /** Frase de apoio da régua, conforme o que já foi marcado. */
   const contarPontosRegua = () =>
     pontosRegua.length === 0
@@ -1158,99 +1154,6 @@ export default function App() {
       : pontosRegua.length === 1
         ? "Marque o próximo ponto para ver a distância."
         : `${pontosRegua.length} pontos marcados.`;
-
-  /** Medições do cliente em foco. Medição pertence sempre a um cliente. */
-  const medicoesDoCliente = medicoes.filter(
-    (m) =>
-      selectedCandidateFilter === "all" || m.candidateId === selectedCandidateFilter,
-  );
-
-  const medicoesVisiveis = medicoesDoCliente.filter(
-    (m) => !medicoesOcultas.includes(m.id),
-  );
-
-  const carregarMedicoes = async () => {
-    const res = await DatabaseService.fetchMeasurements();
-    setMedicoes(res.data);
-  };
-
-  useEffect(() => {
-    if (ROTA_INICIAL.semLink) return;
-    carregarMedicoes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const limparReguaEmAndamento = () => {
-    setPontosRegua([]);
-    setNomeRegua("");
-    setMedicaoEditando(null);
-  };
-
-  /** Guarda a medição: nova, ou a que estava sendo editada. */
-  const salvarMedicao = async () => {
-    if (pontosRegua.length < 2) {
-      triggerNotification("Marque pelo menos dois pontos para medir.", "error");
-      return;
-    }
-    if (selectedCandidateFilter === "all") {
-      triggerNotification(
-        "Escolha um cliente no filtro do mapa: a medição pertence a ele.",
-        "error",
-      );
-      return;
-    }
-
-    const medicao: MapMeasurement = {
-      id: medicaoEditando || "med_" + Math.random().toString(36).substr(2, 9),
-      candidateId: selectedCandidateFilter,
-      name: nomeRegua.trim() || `Medição ${medicoesDoCliente.length + 1}`,
-      color: corRegua,
-      points: pontosRegua,
-      totalMeters: Math.round(totalRegua),
-    };
-
-    setSalvandoMedicao(true);
-    const res = await DatabaseService.upsertMeasurement(medicao);
-    setSalvandoMedicao(false);
-
-    if (!res.success) {
-      triggerNotification("Não foi possível salvar a medição.", "error");
-      return;
-    }
-    limparReguaEmAndamento();
-    carregarMedicoes();
-    triggerNotification(
-      medicaoEditando ? "Medição atualizada!" : "Medição salva!",
-      "success",
-    );
-  };
-
-  /** Traz a medição de volta para a régua, para mexer nos pontos ou na cor. */
-  const editarMedicao = (medicao: MapMeasurement) => {
-    setMedicaoEditando(medicao.id);
-    setPontosRegua(medicao.points);
-    setCorRegua(medicao.color);
-    setNomeRegua(medicao.name);
-    setReguaLigada(true);
-    setMedicaoEmFoco(medicao.id);
-  };
-
-  const removerMedicao = (medicao: MapMeasurement) =>
-    askConfirmation({
-      title: "Remover medição",
-      message: `A medição "${medicao.name}" sai do mapa para todo mundo.`,
-      confirmLabel: "Remover",
-      onConfirm: async () => {
-        const res = await DatabaseService.deleteMeasurement(medicao.id);
-        if (!res.success) {
-          triggerNotification("Não foi possível remover a medição.", "error");
-          return;
-        }
-        if (medicaoEditando === medicao.id) limparReguaEmAndamento();
-        carregarMedicoes();
-        triggerNotification("Medição removida.", "info");
-      },
-    });
 
   // Níveis de prioridade: a lista é do administrador, não do código.
   useEffect(() => {
@@ -8306,6 +8209,60 @@ export default function App() {
         </div>
       )}
 
+      {/* RÉGUA: controle pequeno no canto, só o necessário para medir */}
+      {reguaLigada && (
+        <div className="absolute top-4 right-4 z-[1002] font-sans w-[190px] bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200/70 p-3 animate-in slide-in-from-top duration-200">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">
+              Régua
+            </span>
+            <label
+              className="w-7 h-7 rounded-lg border border-slate-200 shadow-2xs cursor-pointer shrink-0 relative overflow-hidden"
+              style={{ backgroundColor: corRegua }}
+              title="Cor da medição"
+            >
+              <input
+                type="color"
+                value={corRegua}
+                onChange={(e) => setCorRegua(e.target.value)}
+                aria-label="Cor da medição"
+                className="absolute inset-0 opacity-0 cursor-pointer"
+              />
+            </label>
+          </div>
+
+          <p className="text-xl font-black text-[#0D233A] leading-none mt-1.5">
+            {pontosRegua.length < 2 ? "—" : formatarMedida(totalRegua)}
+          </p>
+          <p className="text-[10px] text-slate-400 font-semibold leading-snug mt-1">
+            {contarPontosRegua()}
+          </p>
+
+          <div className="flex gap-1.5 mt-2.5">
+            <button
+              type="button"
+              onClick={() => setPontosRegua((p) => p.slice(0, -1))}
+              disabled={pontosRegua.length === 0}
+              title="Desfazer o último ponto"
+              className="flex-1 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-600 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <Undo2 className="w-3 h-3" />
+              Voltar
+            </button>
+            <button
+              type="button"
+              onClick={limparReguaEmAndamento}
+              disabled={pontosRegua.length === 0}
+              title="Limpar a medição"
+              className="flex-1 h-8 rounded-lg bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-600 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <Trash2 className="w-3 h-3" />
+              Limpar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Sleek Floating Dock (Inspirado no print do usuário) */}
       <div className="absolute top-1/2 left-4 -translate-y-1/2 z-[1000] bg-[#0c1322]/95 border border-slate-800/80 rounded-[28px] p-2.5 shadow-2xl flex flex-col items-center gap-3 w-[56px] pointer-events-auto transition-all">
         {/* Button 1: MapPin (Pin) - Blue */}
@@ -8341,15 +8298,10 @@ export default function App() {
           onClick={() => {
             const ligando = !reguaLigada;
             setReguaLigada(ligando);
-            if (!ligando) {
-              limparReguaEmAndamento();
-              return;
-            }
-            // Abre o painel na régua: é lá que ficam cor, nome e as medições
-            // salvas. Ligar a ferramenta sem mostrar os controles seria deixar
-            // a pessoa medindo às cegas.
-            setActiveTab("regua");
-            setIsSidebarOpen(true);
+            // Nada de painel lateral: a régua é para marcar no mapa, e o
+            // pouco que ela precisa (cor, distância, desfazer) fica num
+            // controle pequeno no canto, sem tapar o mapa.
+            if (!ligando) limparReguaEmAndamento();
           }}
           className={`group w-10 h-10 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
             reguaLigada
@@ -8603,21 +8555,13 @@ export default function App() {
         </div>
 
         {/* STATS STRIP Summary Dashboard */}
-        <div className="grid grid-cols-3 border-b border-slate-100 bg-slate-50 text-center select-none text-slate-700">
+        <div className="grid grid-cols-2 border-b border-slate-100 bg-slate-50 text-center select-none text-slate-700">
           <div className="p-3 border-r border-slate-100">
             <div className="text-xs text-slate-400 flex justify-center items-center gap-1 uppercase tracking-wider font-semibold">
               <Users className="w-3.5 h-3.5 text-blue-500" /> Equipes
             </div>
             <p className="text-lg font-extrabold text-slate-900 mt-0.5">
               {areas.filter((a) => a.active).length}
-            </p>
-          </div>
-          <div className="p-3 border-r border-slate-100">
-            <div className="text-xs text-slate-400 flex justify-center items-center gap-1 uppercase tracking-wider font-semibold">
-              <Users className="w-3.5 h-3.5 text-emerald-500" /> Voluntários
-            </div>
-            <p className="text-lg font-extrabold text-slate-900 mt-0.5">
-              {totalVolunteers}
             </p>
           </div>
           <div className="p-3">
@@ -8633,18 +8577,6 @@ export default function App() {
 
         {/* Tab Selector Buttons */}
         <div className="flex border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider bg-slate-50/50">
-          <button
-            className={`flex-1 py-3 flex flex-col md:flex-row justify-center items-center gap-1 border-b-2 hover:bg-white hover:text-indigo-600 transition-all ${
-              activeTab === "areas"
-                ? "border-indigo-600 text-indigo-600 font-extrabold bg-white shadow-3xs"
-                : "border-transparent text-slate-500"
-            }`}
-            onClick={() => setActiveTab("areas")}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Panfletagem</span>
-          </button>
-
           <button
             className={`flex-1 py-3 flex flex-col md:flex-row justify-center items-center gap-1 border-b-2 hover:bg-white hover:text-indigo-600 transition-all ${
               activeTab === "pins"
@@ -8674,211 +8606,10 @@ export default function App() {
             <span className="hidden sm:inline">Check-ins</span>
           </button>
 
-          <button
-            className={`flex-1 py-3 flex flex-col md:flex-row justify-center items-center gap-1 border-b-2 hover:bg-white hover:text-[#F58220] transition-all ${
-              activeTab === "regua"
-                ? "border-[#F58220] text-[#F58220] font-extrabold bg-white shadow-3xs"
-                : "border-transparent text-slate-500"
-            }`}
-            onClick={() => setActiveTab("regua")}
-          >
-            <Ruler className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Régua</span>
-          </button>
         </div>
 
         {/* Scrollable control workspace */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-white">
-          {/* TAB 5: RÉGUA — medir distância no mapa */}
-          {activeTab === "regua" && (
-            <div className="space-y-4 animate-in fade-in duration-250">
-              <div className="bg-orange-50 border border-orange-100/70 p-4 rounded-2xl select-none">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h4 className="text-xs font-black text-[#0D233A] uppercase tracking-widest">
-                      Régua
-                    </h4>
-                    <p className="text-[10px] text-slate-500 font-semibold leading-snug mt-0.5">
-                      {reguaLigada
-                        ? "Toque no mapa para marcar cada ponto."
-                        : "Ligue para medir distâncias no mapa."}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const ligando = !reguaLigada;
-                      setReguaLigada(ligando);
-                      if (!ligando) limparReguaEmAndamento();
-                    }}
-                    role="switch"
-                    aria-checked={reguaLigada}
-                    className={`w-14 h-8 rounded-full shrink-0 transition-colors cursor-pointer ${
-                      reguaLigada ? "bg-[#F58220]" : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`block w-6 h-6 bg-white rounded-full shadow transition-transform ${
-                        reguaLigada ? "translate-x-7" : "translate-x-1"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {reguaLigada && (
-                  <div className="mt-3 space-y-2.5">
-                    <div className="bg-white border border-orange-100 rounded-xl px-3 py-2.5">
-                      <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">
-                        Distância medida
-                      </p>
-                      <p className="text-2xl font-black text-[#0D233A] leading-none mt-1">
-                        {pontosRegua.length < 2 ? "—" : formatarMedida(totalRegua)}
-                      </p>
-                      <p className="text-[10px] text-slate-400 font-semibold mt-1">
-                        {contarPontosRegua()}
-                      </p>
-                    </div>
-
-                    {/* Nome e cor da medição */}
-                    <div className="flex gap-2">
-                      <input
-                        type="color"
-                        value={corRegua}
-                        onChange={(e) => setCorRegua(e.target.value)}
-                        title="Cor da medição"
-                        aria-label="Cor da medição"
-                        className="w-10 h-10 rounded-xl border border-slate-200 bg-white cursor-pointer shrink-0"
-                      />
-                      <input
-                        type="text"
-                        value={nomeRegua}
-                        onChange={(e) => setNomeRegua(e.target.value)}
-                        placeholder="Nome da medição"
-                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-orange-300/40"
-                      />
-                    </div>
-
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setPontosRegua((p) => p.slice(0, -1))}
-                        disabled={pontosRegua.length === 0}
-                        className="flex-1 h-9 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 text-slate-600 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <Undo2 className="w-3 h-3" />
-                        Voltar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={limparReguaEmAndamento}
-                        disabled={pontosRegua.length === 0}
-                        className="flex-1 h-9 rounded-xl bg-white border border-slate-200 hover:bg-rose-50 disabled:opacity-40 text-rose-600 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        Limpar
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={salvarMedicao}
-                      disabled={pontosRegua.length < 2 || salvandoMedicao}
-                      className="w-full h-10 rounded-xl bg-[#F58220] hover:bg-[#E06E10] disabled:opacity-50 text-white text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
-                    >
-                      {salvandoMedicao ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Save className="w-4 h-4" />
-                      )}
-                      {medicaoEditando ? "Salvar alterações" : "Salvar medição"}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Medições salvas */}
-              <div>
-                <p className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-2">
-                  Medições salvas ({medicoesDoCliente.length})
-                </p>
-                {medicoesDoCliente.length === 0 ? (
-                  <div className="py-8 text-center text-slate-400 font-bold text-[10px] uppercase tracking-widest bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
-                    Nenhuma medição guardada
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {medicoesDoCliente.map((medicao) => {
-                      const oculta = medicoesOcultas.includes(medicao.id);
-                      return (
-                        <div
-                          key={medicao.id}
-                          className={`border rounded-2xl px-3 py-2.5 flex items-center gap-2.5 transition-all ${
-                            medicaoEditando === medicao.id
-                              ? "border-[#F58220] bg-orange-50/60"
-                              : "border-slate-200 bg-white"
-                          }`}
-                        >
-                          <span
-                            className="w-2.5 h-8 rounded-full shrink-0"
-                            style={{ backgroundColor: medicao.color, opacity: oculta ? 0.3 : 1 }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setMedicaoEmFoco(medicao.id)}
-                            title="Ver no mapa"
-                            className="min-w-0 flex-1 text-left cursor-pointer"
-                          >
-                            <p className="text-[12px] font-black text-slate-800 truncate leading-tight">
-                              {medicao.name}
-                            </p>
-                            <p className="text-[10px] font-bold text-slate-400">
-                              {formatarMedida(medicao.totalMeters)} •{" "}
-                              {medicao.points.length} pontos
-                            </p>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setMedicoesOcultas((lista) =>
-                                oculta
-                                  ? lista.filter((id) => id !== medicao.id)
-                                  : [...lista, medicao.id],
-                              )
-                            }
-                            title={oculta ? "Mostrar no mapa" : "Ocultar do mapa"}
-                            className="p-1.5 h-8 w-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 flex items-center justify-center cursor-pointer shrink-0"
-                          >
-                            {oculta ? (
-                              <EyeOff className="w-3.5 h-3.5" />
-                            ) : (
-                              <Eye className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => editarMedicao(medicao)}
-                            title="Editar medição"
-                            className="p-1.5 h-8 w-8 rounded-lg text-slate-400 hover:text-[#F58220] hover:bg-orange-50 flex items-center justify-center cursor-pointer shrink-0"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removerMedicao(medicao)}
-                            title="Remover medição"
-                            className="p-1.5 h-8 w-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer shrink-0"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* TAB 4: CHECK-INS REALIZADOS */}
           {activeTab === "checkins" && (
             <div className="space-y-4 animate-in fade-in duration-250">
@@ -9941,8 +9672,6 @@ export default function App() {
             rulerPoints={pontosRegua}
             rulerColor={corRegua}
             onRulerPoint={(coords) => setPontosRegua((p) => [...p, coords])}
-            measurements={medicoesVisiveis}
-            focusMeasurementId={medicaoEmFoco}
           tempPlacementCoords={pickedCoords}
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor

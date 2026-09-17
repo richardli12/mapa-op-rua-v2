@@ -13,7 +13,7 @@ import {
   StreetOption,
 } from '../services/streetSources';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2 } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, MapMeasurement, getCheckInPriority } from '../types';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, getCheckInPriority } from '../types';
 import { buildOperationIconSvg } from '../operationIcons';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
@@ -308,10 +308,6 @@ interface MapContainerProps {
   rulerPoints?: { lat: number; lng: number }[];
   rulerColor?: string;
   onRulerPoint?: (coords: { lat: number; lng: number }) => void;
-  /** Medições já salvas que devem aparecer no mapa. */
-  measurements?: MapMeasurement[];
-  /** Medição que o mapa deve enquadrar, quando o menu pede. */
-  focusMeasurementId?: string | null;
 }
 
 /**
@@ -405,9 +401,7 @@ export default function MapContainer({
   rulerActive = false,
   rulerPoints = [],
   rulerColor = '#F58220',
-  onRulerPoint,
-  measurements = [],
-  focusMeasurementId = null
+  onRulerPoint
 }: MapContainerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -1122,11 +1116,10 @@ export default function MapContainer({
     metros < 1000 ? `${Math.round(metros)} m` : `${(metros / 1000).toFixed(2)} km`;
 
   /**
-   * Desenha as medições salvas e a que está em andamento.
+   * Desenha a medição em andamento.
    *
-   * Cada uma na sua cor, com a distância acumulada em cada trecho. A linha
-   * branca por baixo é o que mantém a medição legível tanto sobre telhado
-   * claro quanto sobre mata escura.
+   * A linha branca por baixo é o que mantém a medição legível tanto sobre
+   * telhado claro quanto sobre mata escura.
    */
   useEffect(() => {
     const map = mapRef.current;
@@ -1139,22 +1132,13 @@ export default function MapContainer({
     if (!map.hasLayer(camada)) camada.addTo(map);
     camada.clearLayers();
 
-    const desenhar = (
-      pontos: { lat: number; lng: number }[],
-      cor: string,
-      rotulo?: string,
-      tracejada?: boolean
-    ) => {
+    const desenhar = (pontos: { lat: number; lng: number }[], cor: string) => {
       if (pontos.length === 0) return;
       const caminho = pontos.map(p => L.latLng(p.lat, p.lng));
 
       if (caminho.length > 1) {
         L.polyline(caminho, { color: '#ffffff', weight: 6, opacity: 0.9 }).addTo(camada);
-        L.polyline(caminho, {
-          color: cor,
-          weight: 3,
-          dashArray: tracejada ? '6 5' : undefined
-        }).addTo(camada);
+        L.polyline(caminho, { color: cor, weight: 3 }).addTo(camada);
       }
 
       let acumulado = 0;
@@ -1174,10 +1158,7 @@ export default function MapContainer({
         }).addTo(camada);
 
         if (i > 0) {
-          const texto =
-            i === caminho.length - 1 && rotulo
-              ? `${rotulo} • ${medida(acumulado)}`
-              : medida(acumulado);
+          const texto = medida(acumulado);
           L.marker(ponto, {
             interactive: false,
             keyboard: false,
@@ -1197,23 +1178,8 @@ export default function MapContainer({
       });
     };
 
-    measurements.forEach(m => desenhar(m.points, m.color, m.name));
-    // A medição em andamento sai tracejada, para não se confundir com as salvas.
-    if (rulerPoints.length > 0) desenhar(rulerPoints, rulerColor, undefined, true);
-  }, [measurements, rulerPoints, rulerColor]);
-
-  // O menu pediu para enquadrar uma medição salva.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !focusMeasurementId) return;
-    const alvo = measurements.find(m => m.id === focusMeasurementId);
-    if (!alvo || alvo.points.length === 0) return;
-    map.fitBounds(L.latLngBounds(alvo.points.map(p => L.latLng(p.lat, p.lng))), {
-      padding: [60, 60],
-      maxZoom: 17
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusMeasurementId]);
+    if (rulerPoints.length > 0) desenhar(rulerPoints, rulerColor);
+  }, [rulerPoints, rulerColor]);
 
   // Se mudar o candidato, ativa o loader imediatamente para não piscar no mapa antigo
   useEffect(() => {
