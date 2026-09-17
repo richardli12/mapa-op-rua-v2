@@ -410,17 +410,23 @@ const getInitials = (name?: string) => {
 
 export default function App() {
   // Primary state loaded from LocalStorage
+  // Com banco configurado, a tela nasce vazia e espera a resposta dele. O
+  // exemplo embutido e a cópia do navegador só existem para a demonstração
+  // offline — se aparecessem aqui, viveriam disputando com o banco quem manda.
   const [areas, setAreas] = useState<PanfletagemArea[]>(() => {
+    if (isDatabaseConfigured) return [];
     const saved = localStorage.getItem("campaign_map_areas");
     return saved ? JSON.parse(saved) : INITIAL_AREAS;
   });
 
   const [pins, setPins] = useState<CampaignPin[]>(() => {
+    if (isDatabaseConfigured) return [];
     const saved = localStorage.getItem("campaign_map_pins");
     return saved ? JSON.parse(saved) : INITIAL_PINS;
   });
 
   const [checkIns, setCheckIns] = useState<CheckIn[]>(() => {
+    if (isDatabaseConfigured) return [];
     const saved = localStorage.getItem("campaign_map_checkins");
     return saved ? JSON.parse(saved) : INITIAL_CHECK_INS;
   });
@@ -667,6 +673,7 @@ export default function App() {
   /** Integrante cuja ficha de aparelhos o administrador está olhando. */
   const [membroDosAparelhos, setMembroDosAparelhos] = useState<any>(null);
   const [supporters, setSupporters] = useState<any[]>(() => {
+    if (isDatabaseConfigured) return [];
     const saved = localStorage.getItem("campaign_supporters");
     return saved
       ? JSON.parse(saved)
@@ -1128,37 +1135,17 @@ export default function App() {
           checkins: fetchedCheckins,
         } = res.data;
 
-        // If banco de dados tables are completely empty, let's pre-populate them with our current local storage or initial data
-        if (
-          fetchedAreas.length === 0 &&
-          fetchedPins.length === 0 &&
-          fetchedCheckins.length === 0
-        ) {
-          console.log(
-            "Banco de dados vazio. Enviando os dados locais...",
-          );
-          // Upsert current areas
-          for (const a of areas) {
-            await DatabaseService.upsertArea(a);
-          }
-          // Upsert current pins
-          for (const p of pins) {
-            await DatabaseService.upsertPin(p);
-          }
-          // Upsert current checkins
-          for (const c of checkIns) {
-            await DatabaseService.upsertCheckIn(c);
-          }
-          triggerNotification(
-            "Dados locais enviados para o banco!",
-            "success",
-          );
-        } else {
-          // Update React states with banco de dados data
-          if (fetchedAreas.length > 0) setAreas(fetchedAreas);
-          if (fetchedPins.length > 0) setPins(fetchedPins);
-          if (fetchedCheckins.length > 0) setCheckIns(fetchedCheckins);
-        }
+        // O banco manda, inclusive quando a resposta vem vazia.
+        //
+        // Antes o app fazia duas coisas que se somavam num estrago: quando as
+        // três tabelas voltavam vazias, ele reenviava a cópia local para o
+        // banco, e quando uma delas voltava vazia, ele mantinha a cópia local
+        // na tela. Resultado: apagar o último registro não adiantava nada --
+        // na carga seguinte ele era gravado de novo, do navegador para o
+        // banco. Apagado é apagado.
+        setAreas(fetchedAreas);
+        setPins(fetchedPins);
+        setCheckIns(fetchedCheckins);
 
         // Clientes e partidos não vêm mais do banco de dados: a fonte é a base externa,
         // carregado no efeito logo abaixo.
@@ -11119,11 +11106,12 @@ export default function App() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <strong className="text-xs text-indigo-950 font-bold block">
-                        Sincronização Forçada das Tabelas
+                        Reenviar o que está na tela
                       </strong>
                       <p className="text-[10px] text-slate-550 leading-relaxed mt-0.5">
-                        Pressione para enviar e mesclar todos os seus pins,
-                        áreas e check-ins locais diretamente no banco de dados.
+                        Regrava no banco as áreas, pins e check-ins que estão
+                        carregados agora. Serve para recuperar uma gravação que
+                        falhou — não traz de volta nada que já foi apagado.
                       </p>
                     </div>
                     <button
