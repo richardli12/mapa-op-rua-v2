@@ -1669,8 +1669,8 @@ export default function MapContainer({
       <div id="campaign-primary-map" ref={containerRef} className="w-full h-full bg-slate-100" />
 
       {/* PAINEL DE NAVEGAÇÃO CASCATA (TOP SQUIRCLE) */}
-      {/* Abaixo do botão Voltar, que ocupa o topo do canto esquerdo. */}
-      <div className="absolute top-[4.75rem] left-4 z-[1000] w-76 sm:w-80 font-sans">
+      {/* Ao lado do botão Voltar, que ocupa o canto esquerdo do topo. */}
+      <div className="absolute top-4 left-[10.5rem] z-[1000] w-76 sm:w-80 font-sans">
         {!isPanelOpen ? (
           <button
             type="button"
@@ -1678,7 +1678,7 @@ export default function MapContainer({
             className="flex items-center gap-2.5 px-4 py-3 bg-white hover:bg-slate-50 active:scale-95 text-slate-800 rounded-2xl shadow-xl border border-slate-200/80 transition-all font-sans text-xs font-bold leading-none cursor-pointer group"
           >
             <Compass className="w-4 h-4 text-indigo-600 group-hover:rotate-45 transition-transform duration-300" />
-            <span>Localizar Endereço</span>
+            <span>Pesquisar no mapa</span>
             {(selectedStateShortName || selectedCityIbgeId || selectedBairroName || selectedRuaName) && (
               <span className="flex h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse ml-0.5" />
             )}
@@ -1690,7 +1690,7 @@ export default function MapContainer({
                 <div className="p-1 bg-indigo-50 rounded-lg text-indigo-600">
                   <Compass className="w-4 h-4 shrink-0" />
                 </div>
-                <h4 className="font-extrabold text-[11px] text-slate-800 uppercase tracking-widest">Localizar Endereço</h4>
+                <h4 className="font-extrabold text-[11px] text-slate-800 uppercase tracking-widest">Pesquisar no mapa</h4>
               </div>
               <div className="flex items-center gap-2">
                 {(selectedStateShortName || selectedCityIbgeId || selectedBairroName || selectedRuaName) && (
