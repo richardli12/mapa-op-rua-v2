@@ -364,55 +364,79 @@ const ROTA_INICIAL = (() => {
   /**
    * Onde a pessoa está, guardado para o recarregar não a expulsar.
    *
-   * O endereço é limpo assim que lido, então uma atualização da página não
-   * encontraria mais nada na barra e jogaria quem está no painel da equipe, ou
-   * no cadastro, para outro lugar — no domínio de acesso, para fora do sistema.
-   * A memória é da aba: fechou a aba, acabou.
+   * O endereço é limpo assim que o link é lido, então uma atualização da
+   * página não encontraria mais nada na barra: quem está no painel da equipe,
+   * ou no cadastro, cairia em outra tela — e, no domínio de acesso, seria
+   * mandado para fora do sistema.
+   *
+   * A memória fica nos dois lugares de propósito. A da aba basta para o
+   * recarregar comum; a do navegador cobre o que a da aba não cobre — o
+   * celular que descarta a aba parada e a recria do zero, o link aberto de
+   * novo a partir da tela inicial, o navegador que restaura a sessão. Perder
+   * essa memória é justamente o que jogava a pessoa para outro lugar.
    */
-  const lembrar = (chave: string, valor: string) => {
-    try {
-      if (valor) sessionStorage.setItem(chave, valor);
-    } catch {
-      /* navegador sem sessionStorage: segue sem lembrar */
+  // A memória é por domínio: o painel administrativo não pode herdar a rota
+  // que a equipe deixou neste mesmo navegador.
+  const dominio = window.location.hostname.toLowerCase();
+  const chaveDo = (nome: string) => `${nome}:${dominio}`;
+
+  const guardar = (nome: string, valor: string) => {
+    const chave = chaveDo(nome);
+    for (const cofre of [sessionStorage, localStorage]) {
+      try {
+        if (valor) cofre.setItem(chave, valor);
+        else cofre.removeItem(chave);
+      } catch {
+        /* navegador sem armazenamento: segue sem lembrar */
+      }
     }
   };
-  const esquecer = (chave: string) => {
-    try {
-      sessionStorage.removeItem(chave);
-    } catch {
-      /* navegador sem sessionStorage: nada a esquecer */
+  const guardado = (nome: string) => {
+    const chave = chaveDo(nome);
+    for (const cofre of [sessionStorage, localStorage]) {
+      try {
+        const valor = cofre.getItem(chave);
+        if (valor) return valor;
+      } catch {
+        /* navegador sem armazenamento: tenta o próximo */
+      }
     }
-  };
-  const lembrado = (chave: string) => {
-    try {
-      return sessionStorage.getItem(chave) || "";
-    } catch {
-      return "";
-    }
+    return "";
   };
 
   const fragmento = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const busca = new URLSearchParams(window.location.search);
 
   // Formato novo (depois do `#`), os formatos antigos, e por fim o que ficou
-  // guardado da primeira vez que esta aba abriu.
+  // guardado da última vez que um link foi aberto neste navegador.
   const doEndereco = {
     convite: fragmento.get("c") || busca.get("convite") || "",
     equipe: fragmento.get("e") || "",
   };
-  const convite = doEndereco.convite || lembrado("rota_convite");
-  const equipe = doEndereco.equipe || lembrado("rota_equipe");
 
   if (doEndereco.convite || doEndereco.equipe) {
-    // Link novo manda: o contexto anterior desta aba é trocado, não somado.
-    esquecer("rota_convite");
-    esquecer("rota_equipe");
-    lembrar("rota_convite", doEndereco.convite);
-    lembrar("rota_equipe", doEndereco.equipe);
+    // Link novo manda: o contexto anterior é trocado, não somado.
+    guardar("rota_convite", doEndereco.convite);
+    guardar("rota_equipe", doEndereco.equipe);
     try {
       window.history.replaceState(null, "", window.location.pathname);
     } catch {
       /* navegador sem history: o endereço fica como está */
+    }
+  }
+
+  const convite = doEndereco.convite || guardado("rota_convite");
+  let equipe = doEndereco.equipe || guardado("rota_equipe");
+
+  // Última rede: quem já entrou no painel deixou o integrante guardado, e ali
+  // está de qual cliente ele é. Com isso a pessoa volta para o painel dela
+  // mesmo que toda a memória de rota tenha se perdido.
+  if (!equipe && !convite && DOMINIOS_DE_ACESSO.includes(dominio)) {
+    try {
+      const integrante = JSON.parse(localStorage.getItem("checkin_supporter") || "null");
+      equipe = integrante?.candidate_id || integrante?.candidateId || "";
+    } catch {
+      /* dado estragado no navegador: segue sem ele */
     }
   }
 
