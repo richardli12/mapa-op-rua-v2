@@ -3980,10 +3980,7 @@ export default function App() {
           const conhecido = porCookie || porImpressao;
 
           if (!conhecido) {
-            triggerNotification(
-              "Este não é o aparelho usado no seu cadastro. Por segurança, entre pelo aparelho de sempre ou peça a quem coordena a equipe para liberar este.",
-              "error",
-            );
+            triggerNotification("Acesso negado", "error");
             return false;
           }
 
