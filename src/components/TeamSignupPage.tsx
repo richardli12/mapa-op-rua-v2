@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, Check, Loader2, ShieldAlert, UserPlus } from 'lucide-react';
-import { DatabaseService } from '../databaseClient';
+import { DatabaseService, db } from '../databaseClient';
 
 interface TeamSignupPageProps {
   token: string;
@@ -15,10 +15,10 @@ interface CampoColeta {
 }
 
 const MOTIVOS: Record<string, string> = {
-  nao_encontrado: 'Este convite não existe.',
+  nao_encontrado: 'Este link não existe mais.',
   ja_utilizado: 'Este QR Code já foi usado por outra pessoa.',
   cancelado: 'Este convite foi cancelado.',
-  expirado: 'Este convite expirou.',
+  expirado: 'Este link expirou e não existe mais.',
   convite_invalido: 'Este QR Code não é mais válido.',
   nome_obrigatorio: 'Informe o nome completo.',
   telefone_invalido: 'Informe um telefone válido com DDD.',
@@ -44,6 +44,8 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
   const [extras, setExtras] = useState<Record<string, string>>({});
   const [salvando, setSalvando] = useState(false);
   const [concluido, setConcluido] = useState(false);
+  /** Quanto falta para o convite expirar, em segundos. */
+  const [restante, setRestante] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -55,12 +57,68 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
         setErro(MOTIVOS[res.data?.reason] || 'Este QR Code não é mais válido.');
       } else {
         setConvite(res.data);
+        if (res.data.expiresAt) {
+          // O relógio do aparelho pode estar adiantado ou atrasado, então a
+          // conta é feita sobre a diferença medida no servidor.
+          const fim = new Date(res.data.expiresAt).getTime();
+          const agoraServidor = res.data.serverNow
+            ? new Date(res.data.serverNow).getTime()
+            : Date.now();
+          setRestante(Math.max(0, Math.round((fim - agoraServidor) / 1000)));
+        }
       }
       setCarregando(false);
     })();
   }, [token]);
 
+  // Contagem regressiva: ao zerar, a tela se encerra sozinha, mesmo que a
+  // pessoa esteja com ela aberta desde antes.
+  useEffect(() => {
+    if (restante === null || concluido) return;
+    if (restante <= 0) {
+      setConvite(null);
+      setErro(MOTIVOS.expirado);
+      return;
+    }
+    const t = setTimeout(() => setRestante(r => (r === null ? r : r - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [restante, concluido]);
+
+  // Cancelamento ou uso feito em outro lugar derruba esta tela na hora.
+  useEffect(() => {
+    if (!db || !convite || concluido) return;
+    const canal = db
+      .channel(`convite-${token}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'team_invites',
+          filter: `token=eq.${token}`
+        },
+        (payload: any) => {
+          const linha = payload?.new || {};
+          if (linha.used_at || linha.revoked_at) {
+            setConvite(null);
+            setErro(
+              linha.used_at ? MOTIVOS.ja_utilizado : MOTIVOS.cancelado
+            );
+          }
+        }
+      )
+      .subscribe();
+    return () => {
+      db.removeChannel(canal);
+    };
+  }, [token, convite, concluido]);
+
   const campos: CampoColeta[] = convite?.fields || [];
+
+  const relogio =
+    restante !== null && restante > 0
+      ? `${Math.floor(restante / 60)}:${String(restante % 60).padStart(2, '0')}`
+      : '';
 
   const enviarFoto = async (file: File) => {
     setEnviandoFoto(true);
@@ -173,7 +231,7 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
               <UserPlus className="w-5 h-5" />
             </div>
           )}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="text-base font-black text-[#0D233A] leading-tight">
               Cadastro na Equipe
             </h1>
@@ -181,6 +239,18 @@ export default function TeamSignupPage({ token }: TeamSignupPageProps) {
               {convite.candidateName}
             </p>
           </div>
+          {relogio && (
+            <span
+              title="Tempo restante deste convite"
+              className={`text-[11px] font-black font-mono px-2 py-1 rounded-lg shrink-0 ${
+                restante !== null && restante <= 30
+                  ? 'bg-rose-50 text-rose-600'
+                  : 'bg-amber-50 text-amber-700'
+              }`}
+            >
+              {relogio}
+            </span>
+          )}
         </div>
 
         <div className="p-6 space-y-4">
