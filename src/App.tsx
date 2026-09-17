@@ -15,6 +15,7 @@ import { fetchExternalData, fetchExternalTeam } from "./services/externalApi";
 import { PARTY_LOGOS, BRAND_LOGO, CHECKIN_COVER } from "./mediaUrls";
 import OperationTypeSelect from "./components/OperationTypeSelect";
 import TeamSignupPage from "./components/TeamSignupPage";
+import CheckInChat from "./components/CheckInChat";
 import {
   VincularMembroModal,
   QrConviteModal,
@@ -4230,6 +4231,32 @@ export default function App() {
             )}
           </motion.div>
         </div>
+      );
+    }
+
+    // Check-in em forma de conversa: uma etapa por vez, com os dados reais do
+    // integrante, do cliente e do aparelho.
+    if (!checkInSuccess) {
+      const clienteDoLink = candidates.find((c) => c.id === checkInCandidateId);
+      return (
+        <CheckInChat
+          member={authenticatedSupporter}
+          clientId={checkInCandidateId}
+          clientName={clienteDoLink?.name || ""}
+          brandLogo={BRAND_LOGO}
+          operationTypes={operationTypes.filter(
+            (t) => t.candidateId === checkInCandidateId,
+          )}
+          notify={triggerNotification}
+          onBack={() => {
+            setAuthenticatedSupporter(null);
+            localStorage.removeItem("checkin_supporter");
+          }}
+          onSaved={(registro) => {
+            setCheckIns((prev) => [registro, ...prev]);
+            setCheckInSuccess(true);
+          }}
+        />
       );
     }
 

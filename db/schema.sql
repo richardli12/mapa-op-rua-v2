@@ -202,7 +202,14 @@ create table if not exists public.check_ins (
   mode            text,
   priority        text,
   "missionId"     text,
-  "missionTitle"  text
+  "missionTitle"  text,
+
+  -- Check-in em formato de conversa
+  "operationTypeId"    text,
+  "operationTypeLabel" text,
+  accuracy             numeric,   -- precisao do GPS, em metros
+  "memberId"           text,
+  "memberPhoto"        text
 );
 
 
@@ -254,6 +261,11 @@ alter table public.check_ins         add column if not exists mode text;
 alter table public.check_ins         add column if not exists priority text;
 alter table public.check_ins         add column if not exists "missionId" text;
 alter table public.check_ins         add column if not exists "missionTitle" text;
+alter table public.check_ins         add column if not exists "operationTypeId" text;
+alter table public.check_ins         add column if not exists "operationTypeLabel" text;
+alter table public.check_ins         add column if not exists accuracy numeric;
+alter table public.check_ins         add column if not exists "memberId" text;
+alter table public.check_ins         add column if not exists "memberPhoto" text;
 
 
 -- ----------------------------------------------------------------------------
