@@ -556,6 +556,27 @@ export default function App() {
   /** Tipo sendo arrastado para trocar de ordem. */
   const [tipoArrastado, setTipoArrastado] = useState<string | null>(null);
 
+  /** Estado da aba Check-ins: filtros, página e o registro aberto ao lado. */
+  const [buscaCheckIns, setBuscaCheckIns] = useState("");
+  const [periodoCheckIns, setPeriodoCheckIns] = useState<
+    "7" | "30" | "90" | "tudo"
+  >("30");
+  const [operacaoCheckIns, setOperacaoCheckIns] = useState("todas");
+  const [statusCheckIns, setStatusCheckIns] = useState<
+    "todos" | "concluido" | "andamento"
+  >("todos");
+  const [paginaCheckIns, setPaginaCheckIns] = useState(1);
+  const [checkInAberto, setCheckInAberto] = useState<string | null>(null);
+  const [fichaDoCheckIn, setFichaDoCheckIn] = useState<any>(null);
+  const [carregandoFicha, setCarregandoFicha] = useState(false);
+  /** Operações e contagem de arquivos de cada linha da lista. */
+  const [resumoCheckIns, setResumoCheckIns] = useState<{
+    operacoes: Record<string, string[]>;
+    midias: Record<string, { imagens: number; videos: number }>;
+  }>({ operacoes: {}, midias: {} });
+  /** Check-in aberto em tela cheia, com tudo que o integrante enviou. */
+  const [checkInCompleto, setCheckInCompleto] = useState<any>(null);
+
   /**
    * Pedido de confirmação em aberto.
    *
@@ -2936,6 +2957,74 @@ export default function App() {
       }
     }
   };
+
+  // Operações e arquivos de todos os check-ins do cliente aberto: a lista
+  // precisa disso em todas as linhas, e uma ida ao banco por linha seria cara.
+  useEffect(() => {
+    if (abaCliente !== "checkins" || !inspectedCandidate?.id) return;
+    const ids = checkIns
+      .filter(
+        (c: any) =>
+          c.candidateId === inspectedCandidate.id ||
+          c.candidate_id === inspectedCandidate.id,
+      )
+      .map((c: any) => c.id);
+    if (ids.length === 0) {
+      setResumoCheckIns({ operacoes: {}, midias: {} });
+      return;
+    }
+    let vivo = true;
+    (async () => {
+      const res = await DatabaseService.lerResumoCheckIns(ids);
+      if (!vivo) return;
+      setResumoCheckIns({ operacoes: res.operacoes, midias: res.midias });
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [abaCliente, inspectedCandidate?.id, checkIns.length]);
+
+  // Sem escolha da pessoa, a aba abre já com o registro mais recente aberto.
+  useEffect(() => {
+    if (abaCliente !== "checkins" || !inspectedCandidate?.id) return;
+    const doCliente = checkIns
+      .filter(
+        (c: any) =>
+          c.candidateId === inspectedCandidate.id ||
+          c.candidate_id === inspectedCandidate.id,
+      )
+      .sort(
+        (a: any, b: any) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+    if (doCliente.length === 0) return;
+    // Registro aberto que não é mais deste cliente não pode ficar preso aqui.
+    if (checkInAberto && doCliente.some((c: any) => c.id === checkInAberto)) return;
+    setCheckInAberto(doCliente[0].id);
+  }, [abaCliente, inspectedCandidate?.id, checkIns.length, checkInAberto]);
+
+  // Ficha do check-in escolhido na lista, mostrada no painel da direita.
+  useEffect(() => {
+    if (!checkInAberto) {
+      setFichaDoCheckIn(null);
+      return;
+    }
+    let vivo = true;
+    setCarregandoFicha(true);
+    (async () => {
+      const res = await DatabaseService.lerDetalhesCheckIn(checkInAberto);
+      if (!vivo) return;
+      setFichaDoCheckIn({
+        notas: res.notas,
+        operacoes: res.operacoes,
+        midias: res.midias,
+      });
+      setCarregandoFicha(false);
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [checkInAberto]);
 
   // Handle Pick Marker Mode trigger
   const startCoordinatesPicking = (type: "area" | "pin") => {
@@ -6450,7 +6539,192 @@ export default function App() {
           askConfirmation={askConfirmation}
         />
 
-          {/* FORMULÁRIO DE TIPO DE OPERAÇÃO — usado por "Novo tipo" e "Editar" */}
+          {/* CHECK-IN COMPLETO — tudo que o integrante enviou, em tela cheia */}
+        {checkInCompleto && (
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[3000]"
+            onClick={() => setCheckInCompleto(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-2xl w-full p-6 flex flex-col gap-5 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-lg font-black text-[#0D233A] leading-tight">
+                    Check-in #{checkInCompleto.numero}
+                  </h3>
+                  <p className="text-[12px] font-semibold text-slate-400">
+                    {checkInCompleto.registro.name} •{" "}
+                    {new Date(
+                      checkInCompleto.registro.createdAt,
+                    ).toLocaleString("pt-BR")}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCheckInCompleto(null)}
+                  className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-400 flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  {
+                    rotulo: "Local",
+                    valor:
+                      [
+                        checkInCompleto.registro.rua,
+                        checkInCompleto.registro.bairro,
+                      ]
+                        .filter(Boolean)
+                        .join(", ") || "Sem endereço",
+                  },
+                  {
+                    rotulo: "Município",
+                    valor:
+                      [
+                        checkInCompleto.registro.municipio,
+                        checkInCompleto.registro.estado,
+                      ]
+                        .filter(Boolean)
+                        .join(" - ") || "Não informado",
+                  },
+                  {
+                    rotulo: "Arquivos",
+                    valor: `${checkInCompleto.midias.length}`,
+                  },
+                  {
+                    rotulo: "Status",
+                    valor: checkInCompleto.registro.concluido
+                      ? "Concluído"
+                      : "Em andamento",
+                  },
+                ].map((campo) => (
+                  <div
+                    key={campo.rotulo}
+                    className="bg-slate-50 border border-slate-100 rounded-2xl px-3.5 py-2.5"
+                  >
+                    <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">
+                      {campo.rotulo}
+                    </p>
+                    <p className="text-[12.5px] font-bold text-slate-700 truncate">
+                      {campo.valor}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {checkInCompleto.registro.coordinates?.lat && (
+                <div className="rounded-2xl overflow-hidden border border-slate-100">
+                  <MiniMapa
+                    lat={checkInCompleto.registro.coordinates.lat}
+                    lng={checkInCompleto.registro.coordinates.lng}
+                    height={200}
+                  />
+                </div>
+              )}
+
+              {checkInCompleto.operacoes.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-black text-slate-500 mb-1.5">
+                    Operações
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {checkInCompleto.operacoes.map((rotulo: string, i: number) => (
+                      <span
+                        key={`${rotulo}-${i}`}
+                        className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-[11px] font-black"
+                      >
+                        {rotulo}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {checkInCompleto.midias.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-black text-slate-500 mb-1.5">
+                    Evidências ({checkInCompleto.midias.length})
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {checkInCompleto.midias.map((midia: any) => (
+                      <a
+                        key={midia.id || midia.url}
+                        href={midia.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 block"
+                      >
+                        {midia.kind === "video" ? (
+                          <>
+                            <video
+                              src={midia.url}
+                              className="w-full h-full object-cover"
+                              muted
+                            />
+                            <span className="absolute inset-0 flex items-center justify-center bg-slate-900/40 text-white">
+                              <Video className="w-5 h-5" />
+                            </span>
+                          </>
+                        ) : (
+                          <img
+                            src={midia.url}
+                            alt="Evidência"
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {checkInCompleto.notas.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-[11px] font-black text-slate-500">
+                    Observações
+                  </p>
+                  {checkInCompleto.notas.map((nota: any) =>
+                    nota.kind === "audio" ? (
+                      <audio
+                        key={nota.id}
+                        src={nota.url}
+                        controls
+                        className="w-full h-9"
+                      />
+                    ) : (
+                      <p
+                        key={nota.id}
+                        className="text-[12.5px] font-semibold text-slate-600 bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5"
+                      >
+                        {nota.content}
+                      </p>
+                    ),
+                  )}
+                </div>
+              )}
+
+              <button
+                onClick={() => {
+                  setSelectedCandidateFilter(inspectedCandidate!.id);
+                  setSelectedId(checkInCompleto.registro.id);
+                  setCheckInCompleto(null);
+                  setAdminTab("map");
+                }}
+                className="h-11 w-full border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Map className="w-4 h-4 text-[#015FC9]" />
+                Abrir no mapa
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* FORMULÁRIO DE TIPO DE OPERAÇÃO — usado por "Novo tipo" e "Editar" */}
         {modalTipoAberto && (
           <div
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[3000]"
@@ -8920,79 +9194,675 @@ export default function App() {
             })()}
 
             {/* CHECK-INS */}
-            {abaCliente === "checkins" && (
-              <div className="grid grid-cols-1 gap-6">
-                  {/* RIGHT COLUMN: ACTION HISTORY & ACTIVITIES */}
-                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5 flex flex-col space-y-4">
-                    <div>
-                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                        <span>📍 Atividades Recentes</span>
-                      </h4>
-                      <p className="text-[10px] text-slate-400 font-bold mt-0.5">
-                        Atividades registradas no território do cliente
-                      </p>
+            {abaCliente === "checkins" && (() => {
+              const agora = new Date();
+              const inicioDeHoje = new Date(
+                agora.getFullYear(),
+                agora.getMonth(),
+                agora.getDate(),
+              ).getTime();
+              const inicioDeOntem = inicioDeHoje - 86400000;
+              const inicioDoPeriodo =
+                periodoCheckIns === "tudo"
+                  ? 0
+                  : inicioDeHoje - (Number(periodoCheckIns) - 1) * 86400000;
+
+              const quandoFoi = (iso?: string) => {
+                const t = iso ? new Date(iso).getTime() : NaN;
+                if (Number.isNaN(t)) return "Sem data";
+                const hora = new Date(t).toLocaleTimeString("pt-BR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                if (t >= inicioDeHoje) return `Hoje, ${hora}`;
+                if (t >= inicioDeOntem) return `Ontem, ${hora}`;
+                return `${new Date(t).toLocaleDateString("pt-BR")}, ${hora}`;
+              };
+
+              const tiposDoCliente = operationTypes.filter(
+                (t) => t.candidateId === inspectedCandidate.id,
+              );
+              const corDaOperacao = (rotulo?: string) =>
+                tiposDoCliente.find((t) => t.label === rotulo)?.color || "#94A3B8";
+
+              /** Cada registro com o que a lista precisa mostrar. */
+              const registros = checkInsDoCliente
+                .map((c: any) => {
+                  const operacoes =
+                    resumoCheckIns.operacoes[c.id] ||
+                    (c.operationTypeLabel ? [c.operationTypeLabel] : []);
+                  const arquivos = resumoCheckIns.midias[c.id] || {
+                    imagens: (c.media || []).filter(
+                      (m: any) => m.type !== "video",
+                    ).length || (c.photo ? 1 : 0),
+                    videos: (c.media || []).filter((m: any) => m.type === "video")
+                      .length,
+                  };
+                  const integrante = equipeDoCliente.find(
+                    (m: any) => m.id === c.memberId || m.full_name === c.name,
+                  );
+                  return {
+                    ...c,
+                    operacoes,
+                    arquivos,
+                    total: arquivos.imagens + arquivos.videos,
+                    foto: integrante?.image || c.memberPhoto,
+                    concluido: c.status !== "rascunho",
+                    quando: new Date(c.createdAt).getTime(),
+                  };
+                })
+                .sort((a: any, b: any) => b.quando - a.quando);
+
+              const busca = buscaCheckIns.trim().toLowerCase();
+              const filtrados = registros.filter((r: any) => {
+                const local = [r.rua, r.bairro].filter(Boolean).join(", ");
+                const casaBusca =
+                  !busca ||
+                  (r.name || "").toLowerCase().includes(busca) ||
+                  local.toLowerCase().includes(busca) ||
+                  r.operacoes.some((o: string) =>
+                    o.toLowerCase().includes(busca),
+                  );
+                const casaPeriodo =
+                  inicioDoPeriodo === 0 ||
+                  (!Number.isNaN(r.quando) && r.quando >= inicioDoPeriodo);
+                const casaOperacao =
+                  operacaoCheckIns === "todas" ||
+                  r.operacoes.includes(operacaoCheckIns);
+                const casaStatus =
+                  statusCheckIns === "todos" ||
+                  (statusCheckIns === "concluido" ? r.concluido : !r.concluido);
+                return casaBusca && casaPeriodo && casaOperacao && casaStatus;
+              });
+
+              const porPagina = 8;
+              const totalPaginas = Math.max(
+                1,
+                Math.ceil(filtrados.length / porPagina),
+              );
+              const pagina = Math.min(paginaCheckIns, totalPaginas);
+              const daPagina = filtrados.slice(
+                (pagina - 1) * porPagina,
+                pagina * porPagina,
+              );
+
+              // Sem escolha da pessoa, o painel abre no registro mais recente.
+              const escolhido =
+                filtrados.find((r: any) => r.id === checkInAberto) || daPagina[0];
+
+              /** Número curto do check-in, na ordem em que foram registrados. */
+              const numeroDoRegistro = (id: string) => {
+                const posicao = registros.length - registros.findIndex((r: any) => r.id === id);
+                return String(posicao).padStart(4, "0");
+              };
+
+              const midiasDoPainel = fichaDoCheckIn?.midias?.length
+                ? fichaDoCheckIn.midias
+                : (escolhido?.media || []).map((m: any) => ({
+                    id: m.url,
+                    url: m.url,
+                    kind: m.type === "video" ? "video" : "image",
+                  }));
+              const operacoesDoPainel = fichaDoCheckIn?.operacoes?.length
+                ? fichaDoCheckIn.operacoes.map((o: any) => o.operation_type_label)
+                : escolhido?.operacoes || [];
+              const notasDoPainel = fichaDoCheckIn?.notas || [];
+
+              /** Baixa a lista filtrada como planilha, para uso fora do sistema. */
+              const exportarDados = () => {
+                if (filtrados.length === 0) {
+                  triggerNotification("Não há check-ins para exportar.", "info");
+                  return;
+                }
+                const campo = (valor: any) =>
+                  `"${String(valor ?? "").replace(/"/g, '""')}"`;
+                const linhas = [
+                  [
+                    "Numero",
+                    "Membro",
+                    "Operacoes",
+                    "Local",
+                    "Bairro",
+                    "Municipio",
+                    "Latitude",
+                    "Longitude",
+                    "Arquivos",
+                    "Data e hora",
+                    "Status",
+                  ].join(";"),
+                  ...filtrados.map((r: any) =>
+                    [
+                      numeroDoRegistro(r.id),
+                      r.name,
+                      r.operacoes.join(" | "),
+                      r.rua,
+                      r.bairro,
+                      r.municipio,
+                      r.coordinates?.lat,
+                      r.coordinates?.lng,
+                      r.total,
+                      new Date(r.createdAt).toLocaleString("pt-BR"),
+                      r.concluido ? "Concluido" : "Em andamento",
+                    ]
+                      .map(campo)
+                      .join(";"),
+                  ),
+                ].join("\n");
+
+                // O BOM na frente faz o Excel abrir os acentos corretamente.
+                const arquivo = new Blob(["﻿" + linhas], {
+                  type: "text/csv;charset=utf-8;",
+                });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(arquivo);
+                link.download = `check-ins-${inspectedCandidate.name
+                  .normalize("NFD")
+                  .replace(/[̀-ͯ]/g, "")
+                  .replace(/[^a-zA-Z0-9]+/g, "-")
+                  .toLowerCase()}.csv`;
+                link.click();
+                URL.revokeObjectURL(link.href);
+                triggerNotification(
+                  `${filtrados.length} check-in(s) exportado(s).`,
+                  "success",
+                );
+              };
+
+              return (
+                <div className="flex flex-col gap-5">
+                  {/* CABEÇALHO DOS CHECK-INS */}
+                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm px-6 py-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-10 h-10 rounded-2xl bg-[#F1F5FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                        <Check className="w-5 h-5 stroke-[3]" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-[17px] font-black text-[#0D233A] leading-tight flex items-center gap-2 flex-wrap">
+                          Check-ins
+                          <span className="px-2.5 py-1 rounded-full bg-[#EFF4FB] text-[#015FC9] text-[11px] font-black">
+                            {registros.length}{" "}
+                            {registros.length === 1 ? "registro" : "registros"}
+                          </span>
+                        </h3>
+                        <p className="text-[12px] text-slate-400 font-semibold">
+                          Acompanhe todos os registros realizados pela equipe
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto space-y-3 pr-1">
-                      {checkIns.filter(
-                        (c) =>
-                          c.candidateId === inspectedCandidate.id ||
-                          c.candidate_id === inspectedCandidate.id,
-                      ).length === 0 ? (
-                        <div className="py-12 text-center text-slate-400 font-bold text-[11px] uppercase tracking-widest bg-slate-50/20 rounded-2xl border border-dashed border-slate-100">
-                          Nenhuma atividade registrada ainda
+                    <button
+                      onClick={exportarDados}
+                      className="h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
+                    >
+                      <Download className="w-4 h-4 text-[#015FC9]" />
+                      Exportar dados
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+                    {/* LISTA DE CHECK-INS */}
+                    <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+                      <div className="px-6 pt-5 pb-4">
+                        <h4 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                          Todos os check-ins
+                        </h4>
+                        <p className="text-[11px] text-slate-400 font-semibold">
+                          Registros enviados pela equipe de campo
+                        </p>
+
+                        <div className="mt-3.5 flex items-center gap-2.5 flex-wrap">
+                          <div className="relative flex items-center bg-white border border-slate-200 rounded-2xl h-10 px-3 flex-1 min-w-[190px] focus-within:ring-2 focus-within:ring-blue-500/20">
+                            <Search className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
+                            <input
+                              type="text"
+                              value={buscaCheckIns}
+                              onChange={(e) => {
+                                setBuscaCheckIns(e.target.value);
+                                setPaginaCheckIns(1);
+                              }}
+                              placeholder="Buscar membro, local ou operação..."
+                              className="bg-transparent border-none w-full text-[11.5px] font-semibold text-slate-700 placeholder-slate-400 focus:outline-hidden"
+                            />
+                          </div>
+
+                          <div className="relative">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <select
+                              value={periodoCheckIns}
+                              onChange={(e) => {
+                                setPeriodoCheckIns(e.target.value as any);
+                                setPaginaCheckIns(1);
+                              }}
+                              className="appearance-none h-10 pl-8 pr-8 bg-white border border-slate-200 rounded-2xl text-[11.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden"
+                            >
+                              <option value="7">Últimos 7 dias</option>
+                              <option value="30">Últimos 30 dias</option>
+                              <option value="90">Últimos 90 dias</option>
+                              <option value="tudo">Todo o período</option>
+                            </select>
+                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          </div>
+
+                          <div className="relative">
+                            <Layers className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <select
+                              value={operacaoCheckIns}
+                              onChange={(e) => {
+                                setOperacaoCheckIns(e.target.value);
+                                setPaginaCheckIns(1);
+                              }}
+                              className="appearance-none h-10 pl-8 pr-8 bg-white border border-slate-200 rounded-2xl text-[11.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden max-w-[190px]"
+                            >
+                              <option value="todas">Todas as operações</option>
+                              {tiposDoCliente.map((tipo) => (
+                                <option key={tipo.id} value={tipo.label}>
+                                  {tipo.label}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          </div>
+
+                          <div className="relative">
+                            <Compass className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <select
+                              value={statusCheckIns}
+                              onChange={(e) => {
+                                setStatusCheckIns(e.target.value as any);
+                                setPaginaCheckIns(1);
+                              }}
+                              className="appearance-none h-10 pl-8 pr-8 bg-white border border-slate-200 rounded-2xl text-[11.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden"
+                            >
+                              <option value="todos">Todos os status</option>
+                              <option value="concluido">Concluído</option>
+                              <option value="andamento">Em andamento</option>
+                            </select>
+                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[560px] border-collapse text-left">
+                          <thead>
+                            <tr className="bg-[#FAFBFD] border-y border-slate-100">
+                              {[
+                                "Membro",
+                                "Operação",
+                                "Local",
+                                "Evidências",
+                                "Data e hora",
+                                "Status",
+                              ].map((coluna) => (
+                                <th
+                                  key={coluna}
+                                  className="py-3 px-2.5 text-[9.5px] uppercase font-black text-[#8492A6] whitespace-nowrap"
+                                >
+                                  {coluna}
+                                </th>
+                              ))}
+                              <th className="py-3 px-2.5 text-[9.5px] uppercase font-black text-[#8492A6] text-right">
+                                Ações
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {daPagina.length === 0 ? (
+                              <tr>
+                                <td
+                                  colSpan={7}
+                                  className="py-14 text-center text-slate-400 font-bold text-[11px] uppercase tracking-widest"
+                                >
+                                  {registros.length === 0
+                                    ? "Nenhum check-in registrado para este cliente"
+                                    : "Nenhum check-in encontrado"}
+                                </td>
+                              </tr>
+                            ) : (
+                              daPagina.map((registro: any) => (
+                                <tr
+                                  key={registro.id}
+                                  onClick={() => setCheckInAberto(registro.id)}
+                                  className={`cursor-pointer transition-all ${
+                                    escolhido?.id === registro.id
+                                      ? "bg-[#EFF4FB]"
+                                      : "hover:bg-slate-50/60"
+                                  }`}
+                                >
+                                  <td className="py-3.5 px-2.5">
+                                    <div className="flex items-center gap-2.5">
+                                      <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 text-[10px] font-black text-[#015FC9] uppercase">
+                                        {registro.foto ? (
+                                          <img
+                                            src={registro.foto}
+                                            alt={registro.name}
+                                            referrerPolicy="no-referrer"
+                                            className="w-full h-full object-cover"
+                                          />
+                                        ) : (
+                                          (registro.name || "DT").substring(0, 2)
+                                        )}
+                                      </span>
+                                      <span className="font-black text-slate-800 text-[12.5px] truncate max-w-[85px]">
+                                        {registro.name}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3.5 px-2.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span
+                                        className="px-2.5 py-1 rounded-lg text-[10.5px] font-black truncate max-w-[130px]"
+                                        style={{
+                                          backgroundColor: `${corDaOperacao(registro.operacoes[0])}1A`,
+                                          color: corDaOperacao(registro.operacoes[0]),
+                                        }}
+                                      >
+                                        {registro.operacoes[0] || "Sem tipo"}
+                                      </span>
+                                      {registro.operacoes.length > 1 && (
+                                        <span className="px-1.5 py-1 rounded-lg bg-slate-100 text-slate-500 text-[10.5px] font-black">
+                                          +{registro.operacoes.length - 1}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3.5 px-2.5 text-[12px] font-semibold text-slate-500">
+                                    <span className="block max-w-[110px] truncate">
+                                      {[registro.rua, registro.bairro]
+                                        .filter(Boolean)
+                                        .join(", ") || "Sem endereço"}
+                                    </span>
+                                  </td>
+                                  <td className="py-3.5 px-2.5">
+                                    <div className="flex items-center gap-1.5 text-slate-400">
+                                      {registro.arquivos.imagens > 0 && (
+                                        <Camera className="w-3.5 h-3.5" />
+                                      )}
+                                      {registro.arquivos.videos > 0 && (
+                                        <Video className="w-3.5 h-3.5" />
+                                      )}
+                                      <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">
+                                        {registro.total}{" "}
+                                        {registro.total === 1
+                                          ? "arquivo"
+                                          : "arquivos"}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3.5 px-2.5 text-[12px] font-semibold text-slate-500 whitespace-nowrap">
+                                    {quandoFoi(registro.createdAt)}
+                                  </td>
+                                  <td className="py-3.5 px-2.5">
+                                    <span className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-slate-600 whitespace-nowrap">
+                                      <span
+                                        className={`w-2 h-2 rounded-full ${
+                                          registro.concluido
+                                            ? "bg-emerald-500"
+                                            : "bg-[#015FC9]"
+                                        }`}
+                                      />
+                                      {registro.concluido
+                                        ? "Concluído"
+                                        : "Em andamento"}
+                                    </span>
+                                  </td>
+                                  <td className="py-3.5 px-2.5 text-right">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setCheckInAberto(registro.id);
+                                      }}
+                                      className="h-8 px-4 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all"
+                                    >
+                                      Ver
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="px-6 py-4 flex items-center justify-between gap-3 border-t border-slate-100">
+                        <p className="text-[11px] font-bold text-slate-400">
+                          Mostrando {daPagina.length} de {filtrados.length}{" "}
+                          check-ins
+                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            disabled={pagina <= 1}
+                            onClick={() => setPaginaCheckIns(pagina - 1)}
+                            className="w-8 h-8 rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+                            .slice(
+                              Math.max(0, pagina - 3),
+                              Math.max(0, pagina - 3) + 5,
+                            )
+                            .map((numero) => (
+                              <button
+                                key={numero}
+                                onClick={() => setPaginaCheckIns(numero)}
+                                className={`w-8 h-8 rounded-xl text-[11px] font-black cursor-pointer transition-all ${
+                                  numero === pagina
+                                    ? "bg-[#015FC9] text-white"
+                                    : "border border-slate-200 text-slate-500 hover:bg-slate-50"
+                                }`}
+                              >
+                                {numero}
+                              </button>
+                            ))}
+                          <button
+                            disabled={pagina >= totalPaginas}
+                            onClick={() => setPaginaCheckIns(pagina + 1)}
+                            className="w-8 h-8 rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* FICHA DO CHECK-IN ESCOLHIDO */}
+                    <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5 flex flex-col gap-4">
+                      {!escolhido ? (
+                        <div className="py-16 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                          Escolha um check-in na lista
                         </div>
                       ) : (
-                        checkIns
-                          .filter(
-                            (c) =>
-                              c.candidateId === inspectedCandidate.id ||
-                              c.candidate_id === inspectedCandidate.id,
-                          )
-                          .map((ci) => {
-                            return (
-                              <div
-                                key={ci.id}
-                                className="pt-3 first:pt-0 flex flex-col gap-1.5 font-sans"
+                        <>
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-[15px] font-black text-[#0D233A] leading-none">
+                                Check-in #{numeroDoRegistro(escolhido.id)}
+                              </h4>
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-black ${
+                                  escolhido.concluido
+                                    ? "bg-emerald-50 text-emerald-700"
+                                    : "bg-[#EFF4FB] text-[#015FC9]"
+                                }`}
                               >
-                                <div className="flex justify-between items-start">
-                                  <span className="font-bold text-slate-800 text-[12px]">
-                                    {ci.name}
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    escolhido.concluido
+                                      ? "bg-emerald-500"
+                                      : "bg-[#015FC9]"
+                                  }`}
+                                />
+                                {escolhido.concluido
+                                  ? "Concluído"
+                                  : "Em andamento"}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-semibold text-slate-400">
+                              {quandoFoi(escolhido.createdAt).replace(", ", " às ")}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 text-[10px] font-black text-[#015FC9] uppercase">
+                              {escolhido.foto ? (
+                                <img
+                                  src={escolhido.foto}
+                                  alt={escolhido.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                (escolhido.name || "DT").substring(0, 2)
+                              )}
+                            </span>
+                            <span className="text-[13px] font-black text-slate-800 truncate">
+                              {escolhido.name}
+                            </span>
+                          </div>
+
+                          {escolhido.coordinates?.lat && (
+                            <div className="rounded-2xl overflow-hidden border border-slate-100">
+                              <MiniMapa
+                                lat={escolhido.coordinates.lat}
+                                lng={escolhido.coordinates.lng}
+                                height={140}
+                              />
+                            </div>
+                          )}
+
+                          <div className="flex items-start gap-2">
+                            <MapPin className="w-4 h-4 text-[#015FC9] shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <p className="text-[12.5px] font-black text-slate-800 leading-tight">
+                                {[escolhido.rua, escolhido.bairro]
+                                  .filter(Boolean)
+                                  .join(", ") || "Sem endereço"}
+                              </p>
+                              <p className="text-[11px] font-semibold text-slate-400">
+                                {[escolhido.municipio, escolhido.estado]
+                                  .filter(Boolean)
+                                  .join(" - ")}
+                                {escolhido.accuracy
+                                  ? ` • Precisão ${Math.round(escolhido.accuracy)} m`
+                                  : ""}
+                              </p>
+                            </div>
+                          </div>
+
+                          {operacoesDoPainel.length > 0 && (
+                            <div>
+                              <p className="text-[11px] font-black text-slate-500 mb-1.5">
+                                Operações
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {operacoesDoPainel.map((rotulo: string, i: number) => (
+                                  <span
+                                    key={`${rotulo}-${i}`}
+                                    className="px-2.5 py-1 rounded-lg text-[10.5px] font-black"
+                                    style={{
+                                      backgroundColor: `${corDaOperacao(rotulo)}1A`,
+                                      color: corDaOperacao(rotulo),
+                                    }}
+                                  >
+                                    {rotulo}
                                   </span>
-                                  <span className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                    {ci.createdAt
-                                      ? new Date(
-                                          ci.createdAt,
-                                        ).toLocaleDateString("pt-BR")
-                                      : "Sem data"}
-                                  </span>
-                                </div>
-                                <p className="text-slate-500 font-semibold text-[11px] flex items-center gap-1">
-                                  <MapPin className="w-3 h-3 text-slate-400" />
-                                  <span>
-                                    {ci.bairro} {ci.rua ? ` - ${ci.rua}` : ""}
-                                  </span>
-                                </p>
-                                {/* LATITUDE LONGITUDE ACTION ICON */}
-                                {ci.coordinates && (
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {midiasDoPainel.length > 0 && (
+                            <div>
+                              <p className="text-[11px] font-black text-slate-500 mb-1.5">
+                                Evidências
+                              </p>
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {midiasDoPainel.slice(0, 4).map((midia: any) => (
                                   <a
-                                    href={`https://www.google.com/maps/search/?api=1&query=${ci.coordinates.lat},${ci.coordinates.lng}`}
+                                    key={midia.id || midia.url}
+                                    href={midia.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="self-start text-[10px] text-indigo-600 bg-indigo-50 hover:bg-indigo-100 font-bold px-2 py-0.5 rounded-md flex items-center gap-1 transition-all mt-0.5"
+                                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 block"
                                   >
-                                    <Map className="w-2.5 h-2.5" />
-                                    <span>Abrir Localização</span>
+                                    {midia.kind === "video" ? (
+                                      <>
+                                        <video
+                                          src={midia.url}
+                                          className="w-full h-full object-cover"
+                                          muted
+                                        />
+                                        <span className="absolute inset-0 flex items-center justify-center bg-slate-900/40 text-white">
+                                          <Video className="w-4 h-4" />
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <img
+                                        src={midia.url}
+                                        alt="Evidência"
+                                        referrerPolicy="no-referrer"
+                                        className="w-full h-full object-cover"
+                                      />
+                                    )}
                                   </a>
-                                )}
+                                ))}
                               </div>
-                            );
-                          })
+                            </div>
+                          )}
+
+                          {notasDoPainel.length > 0 && (
+                            <div className="flex flex-col gap-2">
+                              <p className="text-[11px] font-black text-slate-500">
+                                Observações
+                              </p>
+                              {notasDoPainel.map((nota: any) =>
+                                nota.kind === "audio" ? (
+                                  <audio
+                                    key={nota.id}
+                                    src={nota.url}
+                                    controls
+                                    className="w-full h-9"
+                                  />
+                                ) : (
+                                  <p
+                                    key={nota.id}
+                                    className="text-[12px] font-semibold text-slate-600 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2"
+                                  >
+                                    {nota.content}
+                                  </p>
+                                ),
+                              )}
+                            </div>
+                          )}
+
+                          {carregandoFicha && (
+                            <p className="text-[11px] font-bold text-slate-300 uppercase tracking-widest text-center">
+                              Carregando a ficha...
+                            </p>
+                          )}
+
+                          <button
+                            onClick={() =>
+                              setCheckInCompleto({
+                                registro: escolhido,
+                                numero: numeroDoRegistro(escolhido.id),
+                                operacoes: operacoesDoPainel,
+                                midias: midiasDoPainel,
+                                notas: notasDoPainel,
+                              })
+                            }
+                            className="h-11 w-full bg-[#015FC9] hover:bg-blue-600 text-white text-xs font-bold rounded-2xl cursor-pointer active:scale-95"
+                          >
+                            Ver check-in completo
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
                 </div>
-            )}
+              );
+            })()}
           </div>
             );
           })()
