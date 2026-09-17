@@ -781,7 +781,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
     "areas" | "pins" | "statistics" | "checkins" | "regua"
-  >("areas");
+  >("pins");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -8603,21 +8603,13 @@ export default function App() {
         </div>
 
         {/* STATS STRIP Summary Dashboard */}
-        <div className="grid grid-cols-3 border-b border-slate-100 bg-slate-50 text-center select-none text-slate-700">
+        <div className="grid grid-cols-2 border-b border-slate-100 bg-slate-50 text-center select-none text-slate-700">
           <div className="p-3 border-r border-slate-100">
             <div className="text-xs text-slate-400 flex justify-center items-center gap-1 uppercase tracking-wider font-semibold">
               <Users className="w-3.5 h-3.5 text-blue-500" /> Equipes
             </div>
             <p className="text-lg font-extrabold text-slate-900 mt-0.5">
               {areas.filter((a) => a.active).length}
-            </p>
-          </div>
-          <div className="p-3 border-r border-slate-100">
-            <div className="text-xs text-slate-400 flex justify-center items-center gap-1 uppercase tracking-wider font-semibold">
-              <Users className="w-3.5 h-3.5 text-emerald-500" /> Voluntários
-            </div>
-            <p className="text-lg font-extrabold text-slate-900 mt-0.5">
-              {totalVolunteers}
             </p>
           </div>
           <div className="p-3">
@@ -8633,18 +8625,6 @@ export default function App() {
 
         {/* Tab Selector Buttons */}
         <div className="flex border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider bg-slate-50/50">
-          <button
-            className={`flex-1 py-3 flex flex-col md:flex-row justify-center items-center gap-1 border-b-2 hover:bg-white hover:text-indigo-600 transition-all ${
-              activeTab === "areas"
-                ? "border-indigo-600 text-indigo-600 font-extrabold bg-white shadow-3xs"
-                : "border-transparent text-slate-500"
-            }`}
-            onClick={() => setActiveTab("areas")}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Panfletagem</span>
-          </button>
-
           <button
             className={`flex-1 py-3 flex flex-col md:flex-row justify-center items-center gap-1 border-b-2 hover:bg-white hover:text-indigo-600 transition-all ${
               activeTab === "pins"
