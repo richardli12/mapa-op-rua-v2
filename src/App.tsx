@@ -16,6 +16,7 @@ import { PARTY_LOGOS, BRAND_LOGO, CHECKIN_COVER } from "./mediaUrls";
 import OperationTypeSelect from "./components/OperationTypeSelect";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
+import BrandMark from "./components/BrandMark";
 import {
   VincularMembroModal,
   QrConviteModal,
@@ -25,6 +26,7 @@ import {
 import {
   MapPin,
   Users,
+  ShieldCheck,
   Layers,
   Flag,
   Megaphone,
@@ -4010,7 +4012,7 @@ export default function App() {
         : null;
 
       return (
-        <div className="min-h-screen w-full bg-[#DBE2E9] text-slate-800 flex flex-col justify-center items-center p-4 selection:bg-indigo-650 selection:text-white font-sans">
+        <div className="min-h-[100dvh] w-full flex flex-col text-slate-800 font-sans relative overflow-hidden bg-linear-to-b from-[#E8EEF4] to-[#D6DFE8] selection:bg-[#0C3556] selection:text-white">
           {/* Toast Notification HUD no modo Login */}
           <AnimatePresence>
             {notification && (
@@ -4018,9 +4020,9 @@ export default function App() {
                 initial={{ opacity: 0, y: -20, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                className="fixed top-4 left-1/2 -translate-x-1/2 z-[3000] max-w-sm px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border border-indigo-500/20 bg-indigo-600 text-white"
+                className="fixed top-4 left-1/2 -translate-x-1/2 z-3000 max-w-sm px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border border-indigo-500/20 bg-indigo-600 text-white"
               >
-                <Check className="w-5 h-5 flex-shrink-0 text-emerald-300" />
+                <Check className="w-5 h-5 shrink-0 text-emerald-300" />
                 <span className="text-xs font-semibold">
                   {notification.text}
                 </span>
@@ -4028,135 +4030,92 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Logo & Header info conforme solicitado pelo usuário */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex flex-col items-center mb-6 text-center select-none"
+          {/* Malha de pontos ligados, no canto de cima */}
+          <svg
+            className="absolute -top-2 right-0 w-[62%] max-w-[320px] pointer-events-none"
+            viewBox="0 0 240 190"
+            fill="none"
+            aria-hidden="true"
           >
-            {activeCandidate ? (
-              <>
-                {/* A tela de check-in é do cliente, então quem aparece é ele.
-                    O partido fica na linha de baixo, junto do pleito. */}
-                <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-slate-100 mb-3 overflow-hidden relative">
-                  {activeCandidate.image && (
-                    <img
-                      src={activeCandidate.image}
-                      alt={activeCandidate.name}
-                      className="w-full h-full object-cover rounded-full"
-                      referrerPolicy="no-referrer"
-                      // Foto fora do ar cai nas iniciais, em vez de deixar o
-                      // texto alternativo aparecendo dentro do círculo.
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                        const fallback = e.currentTarget
-                          .nextElementSibling as HTMLElement | null;
-                        fallback?.classList.remove("hidden");
-                      }}
-                    />
-                  )}
-                  <div
-                    className={`w-full h-full rounded-full bg-[#0D233A] flex items-center justify-center text-white font-extrabold text-2xl ${
-                      activeCandidate.image ? "hidden" : ""
-                    }`}
-                  >
-                    {activeCandidate.name
-                      .split(" ")
-                      .filter(Boolean)
-                      .slice(0, 2)
-                      .map((part) => part[0])
-                      .join("")
-                      .toUpperCase()}
-                  </div>
-                </div>
-                <h1 className="font-extrabold text-[#0D233A] text-[32px] tracking-tight leading-none font-sans">
-                  {activeCandidate.name}
-                </h1>
-                <p className="text-[11px] font-black tracking-[0.22em] text-[#5A6E85] uppercase mt-2.5 font-sans">
-                  {partyInfo?.name
-                    ? `${partyInfo.name} • Eleições 2026`
-                    : "Eleições 2026"}
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-[#FDEBDD] mb-3">
-                  <img
-                    src={CHECKIN_COVER}
-                    alt="Logo Solidariedade"
-                    className="w-full h-full object-contain rounded-full"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-                <h1 className="font-extrabold text-[#F58220] text-[32px] tracking-tight leading-none font-sans">
-                  Solidariedade
-                </h1>
-                <p className="text-[11px] font-black tracking-[0.22em] text-[#F58220]/85 uppercase mt-2.5 font-sans">
-                  Eleições 2026
-                </p>
-              </>
-            )}
+            <path
+              d="M96 66 L152 30 M152 30 L214 52 M214 52 L186 104 M186 104 L152 30 M186 104 L232 132"
+              stroke="#0C3556"
+              strokeOpacity="0.16"
+              strokeWidth="1.2"
+            />
+            {[
+              [96, 66, 5],
+              [152, 30, 6],
+              [214, 52, 5.5],
+              [186, 104, 5],
+              [232, 132, 4.5]
+            ].map(([cx, cy, r], i) => (
+              <circle key={i} cx={cx} cy={cy} r={r} fill="#0C3556" fillOpacity="0.2" />
+            ))}
+          </svg>
+
+          {/* Cabeçalho */}
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="relative px-7 pt-8 pb-5 select-none"
+          >
+            <div className="flex items-center gap-3">
+              <span className="w-12 h-12 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0">
+                <BrandMark size={44} rounded={14} variant="clara" />
+              </span>
+              <span className="text-[17px] font-extrabold text-[#0C3556] tracking-tight">
+                Mapa Operacional
+              </span>
+            </div>
+
+            <h1
+              className="mt-6 leading-[1.14] font-extrabold text-[#0C3556] tracking-tight"
+              style={{ fontSize: 'clamp(23px, 7.1vw, 32px)' }}
+            >
+              {activeCandidate ? (
+                <>
+                  Pronto para
+                  <br />
+                  entrar em campo?
+                </>
+              ) : (
+                <>
+                  Pronto para
+                  <br />
+                  entrar em campo?
+                </>
+              )}
+            </h1>
+            <p className="mt-3 text-[14px] leading-[1.5] font-semibold text-[#7A8A9B] max-w-[290px]">
+              Use seu WhatsApp para acessar
+              {activeCandidate ? ` a equipe de ${activeCandidate.name}` : " sua equipe"} e
+              iniciar as operações.
+            </p>
           </motion.div>
 
+          {/* Cartão de identificação */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            className="max-w-[460px] w-full bg-white rounded-[3rem] shadow-2xl p-8 md:p-10 border border-slate-100 flex flex-col gap-6 relative overflow-hidden"
+            className="relative flex-1 min-h-0 bg-white rounded-t-[2rem] shadow-[0_-8px_30px_rgba(12,53,86,.10)] px-7 pt-7 pb-8 overflow-y-auto"
           >
-            {/* Top Right Decorative Illustration */}
-            <div className="absolute right-0 top-4 w-36 h-36 pointer-events-none hidden xs:block">
-              {/* Smartphone mockup outline */}
-              <div className="absolute right-4 top-4 w-20 h-32 border-[3px] border-[#EBF1F6] rounded-2xl bg-white transform rotate-[15deg] shadow-3xs flex items-center justify-center">
-                <div className="w-16 h-28 bg-[#FAFBFD] border border-slate-50 rounded-lg flex flex-col justify-between p-2">
-                  <div className="w-6 h-1.5 bg-[#EBF1F6] rounded-full mx-auto" />
-                  <div className="flex-1 flex flex-col justify-center gap-1 opacity-20">
-                    <div className="w-full h-2 bg-[#EBF1F6] rounded-xs" />
-                    <div className="w-5/6 h-2 bg-[#EBF1F6] rounded-xs" />
-                  </div>
-                </div>
-              </div>
-              {/* Floating circular bubble with WhatsApp icon */}
-              <div className="absolute right-14 top-14 w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-lg border border-slate-100 transform -rotate-12">
-                <div className="w-9 h-9 rounded-full border border-[#F58220]/20 flex items-center justify-center text-[#F58220] bg-white">
-                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                    <path d="M12.004 0C5.378 0 .004 5.374.004 12c0 2.112.551 4.164 1.597 5.975L0 24l6.195-1.624c1.743.951 3.7 1.455 5.805 1.455 6.626 0 12-5.374 12-12s-5.374-12-12-12zm6.182 16.924c-.254.715-1.254 1.302-1.802 1.385-.497.075-.989.135-3.178-.711-2.793-1.082-4.593-3.924-4.733-4.11-.14-.186-1.121-1.488-1.121-2.84 0-1.353.702-2.013.952-2.28.25-.268.543-.332.723-.332.18 0 .36.002.518.01.164.007.382-.061.6.467.222.54.764 1.86.83 1.992.067.133.111.288.022.465-.088.177-.133.288-.266.442-.132.155-.278.347-.397.466-.134.133-.274.279-.118.547.155.267.69 1.135 1.482 1.84.1.088.2.176.3.262 1.02.88 1.84 1.155 2.156 1.314.316.159.5.133.687-.08.188-.213.803-.93.102-1.25-.111-.055-.66-.464-.66-.464s-.104-.087-.194-.038c-.09.049-.575.281-.652.32-.077.039-.155.058-.232.019-.078-.039-.328-.124-.627-.393-.243-.213-.615-.558-.87-1.02-.078-.143-.01-.22.068-.298.077-.078.188-.221.288-.332.1-.11.133-.188.199-.31.066-.122.033-.232-.016-.331-.05-.1-.443-1.062-.607-1.459-.16-.39-.325-.337-.442-.343-.114-.006-.244-.007-.375-.007s-.343.049-.523.243c-.18.194-.687.671-.687 1.636s.702 1.895.8 2.027c.098.132 1.38 2.109 3.344 2.96.468.203.832.324 1.116.417.47.148.898.127 1.237.076.378-.057 1.157-.473 1.319-.93z" />
-                  </svg>
-                </div>
-              </div>
-              {/* Halftone dots decoration */}
-              <div className="absolute right-24 top-8 w-10 h-10 opacity-30 flex flex-wrap gap-1 leading-none z-[-1]">
-                {Array.from({ length: 9 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className="inline-block w-1.5 h-1.5 bg-slate-300 rounded-full"
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Header Content */}
-            <div className="space-y-2 mt-2 select-none text-left max-w-[280px]">
-              <h2 className="font-extrabold text-[#0D233A] text-3xl md:text-4xl tracking-tight leading-tight">
-                Bem-vindo(a)!
-              </h2>
-              <p className="text-[14px] text-[#5A6E85] font-semibold leading-relaxed">
-                Para continuar, valide seu acesso com o WhatsApp cadastrado.
+            <div className="max-w-[420px] mx-auto w-full">
+              <p className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[#9AA9B8]">
+                Identificação
               </p>
-            </div>
+              <span className="block w-9 h-[3px] rounded-full bg-[#E3E9EF] mt-2.5" />
 
-            <form onSubmit={handleLoginSubmit} className="space-y-4 text-left">
-              {/* Styled gray input panel box */}
-              <div className="bg-[#F6F8FA] rounded-[1.8rem] p-6 border border-slate-100/50 space-y-3.5">
-                <label className="block text-[11px] font-extrabold uppercase tracking-widest text-[#8292A1] ml-1">
+              <form onSubmit={handleLoginSubmit} className="mt-6 text-left">
+                <label className="block text-[12px] font-extrabold uppercase tracking-wider text-[#5A6E85]">
                   Telefone (WhatsApp)
                 </label>
 
-                <div className="relative shadow-xs rounded-2xl bg-white border border-[#E1E8ED] flex items-center px-4 overflow-hidden focus-within:ring-2 focus-within:ring-[#F58220]/30 focus-within:border-[#F58220] transition-all">
-                  <span className="text-[#A5B4C2] mr-3">
-                    <Phone className="w-5 h-5 text-[#F58220]/75" />
-                  </span>
+                <div className="mt-2.5 rounded-2xl bg-[#F4F7FA] border border-[#E4EBF1] flex items-center px-4 overflow-hidden transition-all focus-within:border-[#F58220] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#F58220]/12">
+                  <Phone className="w-5 h-5 text-[#F58220] shrink-0 mr-3" />
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="numeric"
                     required
                     placeholder="(00) 00000-0000"
                     value={loginWhatsapp}
@@ -4179,56 +4138,59 @@ export default function App() {
                         setLoginWhatsapp(masked);
                       }
                     }}
-                    className="w-full py-4 bg-transparent border-none text-[15px] font-bold text-[#0D233A] placeholder-[#C2D0DC] focus:outline-hidden"
+                    className="w-full py-4 bg-transparent border-none text-[15px] font-bold text-[#0C3556] placeholder-[#B9C6D2] focus:outline-hidden"
                   />
                 </div>
 
-                <div className="text-[11px] text-[#8292A1] flex items-center gap-2 font-medium leading-normal ml-1 select-none">
-                  <Users className="w-4 h-4 text-[#A5B4C2] flex-shrink-0" />
-                  <span>
-                    Usaremos seu número apenas para validar seu acesso.
-                  </span>
+                <div className="mt-3.5 flex items-start gap-2 text-[12.5px] leading-snug font-medium text-[#8292A1] select-none">
+                  <Users className="w-4 h-4 text-[#A5B4C2] shrink-0 mt-0.5" />
+                  <span>Usaremos seu número apenas para validar seu acesso.</span>
                 </div>
-              </div>
 
-              <button
-                type="submit"
-                disabled={
-                  isVerifyingLogin ||
-                  loginWhatsapp.replace(/\D/g, "").length < 10
-                }
-                className="w-full py-4.5 bg-[#F58220] hover:bg-[#E06E10] focus:ring-4 focus:ring-[#F58220]/20 disabled:bg-[#C2D0DC] disabled:cursor-not-allowed text-white font-extrabold text-[#FFF] text-xs uppercase tracking-wider rounded-2xl transition-all shadow-xs active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer mt-4"
-              >
-                {isVerifyingLogin ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>Validando...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Entrar no Painel</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-            </form>
-
-            {!isDatabaseConfigured && (
-              <div className="mt-1 pt-4 border-t border-slate-100/80 space-y-2">
-                <p className="text-[10.5px] text-zinc-500 leading-normal bg-[#FAFAD2]/60 p-3 rounded-2xl border border-[#FAFAD2] text-left font-sans">
-                  ⚠️ <strong>Integração Offline:</strong> as credenciais do
-                  banco de dados não foram preenchidas. Caso queira testar o
-                  fluxo de login de forma simulada, use o botão de demonstração:
-                </p>
                 <button
-                  type="button"
-                  onClick={handleDemoBypass}
-                  className="w-full py-3 bg-[#EBF1F6] hover:bg-[#DDE5EE] text-[#5A6E85] font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  type="submit"
+                  disabled={
+                    isVerifyingLogin ||
+                    loginWhatsapp.replace(/\D/g, "").length < 10
+                  }
+                  className="mt-5 w-full py-4 bg-[#0C3556] hover:bg-[#10406A] focus:ring-4 focus:ring-[#0C3556]/20 disabled:bg-[#C2D0DC] disabled:cursor-not-allowed text-white font-extrabold text-[12.5px] uppercase tracking-wider rounded-xl transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  Demonstração Bypass (Apoiador Demo)
+                  {isVerifyingLogin ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Validando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Entrar no Painel</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
+              </form>
+
+              <div className="mt-6 pt-4 border-t border-[#EDF1F5] flex items-center justify-center gap-2 text-[12px] font-semibold text-[#8292A1] select-none">
+                <ShieldCheck className="w-4 h-4 text-[#A5B4C2]" />
+                Ambiente seguro e monitorado
               </div>
-            )}
+
+              {!isDatabaseConfigured && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-[10.5px] text-zinc-500 leading-normal bg-[#FAFAD2]/60 p-3 rounded-2xl border border-[#FAFAD2] text-left font-sans">
+                    ⚠️ <strong>Integração Offline:</strong> as credenciais do
+                    banco de dados não foram preenchidas. Caso queira testar o
+                    fluxo de login de forma simulada, use o botão de demonstração:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleDemoBypass}
+                    className="w-full py-3 bg-[#EBF1F6] hover:bg-[#DDE5EE] text-[#5A6E85] font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    Demonstração Bypass (Apoiador Demo)
+                  </button>
+                </div>
+              )}
+            </div>
           </motion.div>
         </div>
       );
