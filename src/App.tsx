@@ -6606,9 +6606,13 @@ export default function App() {
               },
               {
                 rotulo: "Estados",
+                // Cliente sem UF preenchida não pode zerar o quadro: quando
+                // falta o estado, a cidade entra como o lugar atendido.
                 valor: new Set(
                   candidates
-                    .map((c) => (c.estado || "").toUpperCase().trim())
+                    .map((c) =>
+                      ((c.estado || "").trim() || (c.city || "").trim()).toUpperCase(),
+                    )
                     .filter(Boolean),
                 ).size,
                 cor: "#A855F7",
@@ -7441,9 +7445,15 @@ export default function App() {
                           alt=""
                           aria-hidden="true"
                           referrerPolicy="no-referrer"
-                          className="absolute inset-0 w-full h-full object-cover opacity-35"
+                          className="absolute inset-0 w-full h-full object-cover opacity-60"
+                          onError={(e) => {
+                            // Endereço fora do ar não pode deixar a capa preta
+                            // sem explicação: entra a imagem antiga no lugar.
+                            const img = e.currentTarget as HTMLImageElement;
+                            if (img.src !== CHECKIN_COVER) img.src = CHECKIN_COVER;
+                          }}
                         />
-                        <div className="absolute inset-0 bg-linear-to-r from-[#0D233A] via-[#0D233A]/85 to-transparent" />
+                        <div className="absolute inset-0 bg-linear-to-r from-[#0D233A] via-[#0D233A]/70 to-[#0D233A]/20" />
 
                         <span
                           className={`absolute top-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold ${
