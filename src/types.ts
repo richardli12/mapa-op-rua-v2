@@ -46,6 +46,12 @@ export interface OperationType {
   /** Cliente dono deste tipo. Tipo sem dono não aparece em lugar nenhum. */
   candidateId?: string;
   createdAt?: string;
+  /** Explicação curta mostrada embaixo do nome. */
+  description?: string;
+  /** Tipo desligado sai dos formulários; o histórico continua intacto. */
+  active?: boolean;
+  /** Ordem em que aparece no check-in. */
+  position?: number;
 }
 
 /** Busca um tipo pelo id, tolerando pontos gravados com um tipo já apagado. */

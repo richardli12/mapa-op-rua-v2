@@ -328,17 +328,29 @@ export const DatabaseService = {
   async upsertOperationType(type: OperationType) {
     if (!db) return { success: false };
     try {
-      const { error } = await db
-        .from('operation_types')
-        .upsert({
-          id: type.id,
-          label: type.label,
-          icon: type.icon,
-          color: type.color,
-          candidateId: type.candidateId || null,
-          createdAt: type.createdAt || new Date().toISOString()
-        });
-      if (error) throw error;
+      const base = {
+        id: type.id,
+        label: type.label,
+        icon: type.icon,
+        color: type.color,
+        candidateId: type.candidateId || null,
+        createdAt: type.createdAt || new Date().toISOString()
+      };
+      const completo = {
+        ...base,
+        description: type.description || null,
+        active: type.active !== false,
+        position: type.position ?? 0
+      };
+
+      const { error } = await db.from('operation_types').upsert(completo);
+      if (error) {
+        // Banco ainda sem a migracao das colunas novas: grava o que ele tem
+        // em vez de recusar o cadastro inteiro.
+        if (!colunaDesconhecida(error)) throw error;
+        const { error: erroBase } = await db.from('operation_types').upsert(base);
+        if (erroBase) throw erroBase;
+      }
       return { success: true };
     } catch (err: any) {
       console.error('Erro ao salvar tipo de operação no banco de dados:', err);
