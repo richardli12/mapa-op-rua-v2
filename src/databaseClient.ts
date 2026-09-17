@@ -1209,6 +1209,52 @@ export const DatabaseService = {
   },
 
   /** Observações e operações de um check-in, para a ficha do administrador. */
+  /**
+   * Resumo de varios check-ins de uma vez: quantas operacoes e quantos
+   * arquivos cada um tem, mais os rotulos das operacoes.
+   *
+   * A lista da tela precisa disso em todas as linhas ao mesmo tempo; pedir a
+   * ficha completa de cada uma seria uma ida ao banco por linha.
+   */
+  async lerResumoCheckIns(ids: string[]) {
+    const vazio = { success: false, operacoes: {} as Record<string, string[]>, midias: {} as Record<string, { imagens: number; videos: number }> };
+    if (!db || ids.length === 0) return { ...vazio, success: ids.length === 0 };
+    try {
+      const [operacoes, midias] = await Promise.all([
+        db
+          .from('check_in_operations')
+          .select('check_in_id, operation_type_label, position')
+          .in('check_in_id', ids)
+          .order('position', { ascending: true }),
+        db
+          .from('check_in_media')
+          .select('check_in_id, kind')
+          .in('check_in_id', ids)
+      ]);
+
+      const porOperacao: Record<string, string[]> = {};
+      (operacoes.data || []).forEach((linha: any) => {
+        const lista = porOperacao[linha.check_in_id] || [];
+        if (linha.operation_type_label) lista.push(linha.operation_type_label);
+        porOperacao[linha.check_in_id] = lista;
+      });
+
+      const porMidia: Record<string, { imagens: number; videos: number }> = {};
+      (midias.data || []).forEach((linha: any) => {
+        const atual = porMidia[linha.check_in_id] || { imagens: 0, videos: 0 };
+        if (linha.kind === 'video') atual.videos += 1;
+        else atual.imagens += 1;
+        porMidia[linha.check_in_id] = atual;
+      });
+
+      return { success: true, operacoes: porOperacao, midias: porMidia };
+    } catch (err: any) {
+      // Banco sem as tabelas novas nao pode derrubar a lista de check-ins.
+      console.warn('Nao foi possivel ler o resumo dos check-ins:', err);
+      return vazio;
+    }
+  },
+
   async lerDetalhesCheckIn(checkInId: string) {
     if (!db) return { success: false, notas: [] as any[], operacoes: [] as any[], midias: [] as any[] };
     try {
