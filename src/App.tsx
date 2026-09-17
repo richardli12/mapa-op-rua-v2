@@ -7037,36 +7037,42 @@ export default function App() {
                 };
               });
 
-            // Ranking de check-ins: quem mais registrou vem primeiro. A conta
-            // usa o id do integrante e cai no nome quando o registro é antigo
-            // e não guardou o id.
+            // Ranking de check-ins: quem mais registrou vem primeiro. Toda a
+            // equipe do cliente entra na lista, mesmo quem ainda não registrou
+            // nada — zerado também é informação. A conta usa o id do integrante
+            // e cai no nome quando o registro é antigo e não guardou o id.
             const porIntegrante: {
               chave: string;
               nome: string;
               foto?: string;
               total: number;
-            }[] = [];
+            }[] = equipeDoCliente.map((m: any) => ({
+              chave: m.id,
+              nome: m.full_name || "Sem nome",
+              foto: m.image,
+              total: 0,
+            }));
             checkInsDoCliente.forEach((c: any) => {
               const chave = c.memberId || c.name;
               if (!chave) return;
-              const atual = porIntegrante.find((i) => i.chave === chave);
+              const atual = porIntegrante.find(
+                (i) => i.chave === chave || i.nome === c.name,
+              );
               if (atual) {
                 atual.total += 1;
                 return;
               }
-              const integrante = equipeDoCliente.find(
-                (m: any) => m.id === c.memberId || m.full_name === c.name,
-              );
+              // Registro de quem já saiu da equipe continua contando.
               porIntegrante.push({
                 chave,
-                nome: integrante?.full_name || c.name || "Sem nome",
-                foto: integrante?.image || c.memberPhoto,
+                nome: c.name || "Sem nome",
+                foto: c.memberPhoto,
                 total: 1,
               });
             });
-            const ranking = [...porIntegrante]
-              .sort((a, b) => b.total - a.total)
-              .slice(0, 5);
+            const ranking = [...porIntegrante].sort(
+              (a, b) => b.total - a.total || a.nome.localeCompare(b.nome),
+            );
             const maiorDoRanking = ranking[0]?.total || 1;
 
             // Ranking dos problemas: quantas vezes cada tipo de ocorrência foi
@@ -7075,12 +7081,19 @@ export default function App() {
             const tiposDoCliente = operationTypes.filter(
               (t) => t.candidateId === inspectedCandidate.id,
             );
+            // Todo tipo cadastrado entra na lista, mesmo zerado: o que ainda
+            // não apareceu em campo também diz alguma coisa.
             const porProblema: {
               chave: string;
               rotulo: string;
               cor: string;
               total: number;
-            }[] = [];
+            }[] = tiposDoCliente.map((t) => ({
+              chave: t.label,
+              rotulo: t.label,
+              cor: t.color || "#94A3B8",
+              total: 0,
+            }));
             checkInsDoCliente.forEach((c: any) => {
               const tipo = tiposDoCliente.find((t) => t.id === c.operationTypeId);
               const rotulo = c.operationTypeLabel || tipo?.label;
@@ -7090,6 +7103,7 @@ export default function App() {
                 atual.total += 1;
                 return;
               }
+              // Tipo apagado do cadastro, mas que já foi usado, não some daqui.
               porProblema.push({
                 chave: rotulo,
                 rotulo,
@@ -7097,9 +7111,9 @@ export default function App() {
                 total: 1,
               });
             });
-            const rankingProblemas = [...porProblema]
-              .sort((a, b) => b.total - a.total)
-              .slice(0, 5);
+            const rankingProblemas = [...porProblema].sort(
+              (a, b) => b.total - a.total || a.rotulo.localeCompare(b.rotulo),
+            );
             const maiorDosProblemas = rankingProblemas[0]?.total || 1;
 
             // A legenda explica o que está desenhado: só entram as cores que
@@ -7425,7 +7439,7 @@ export default function App() {
                         Nenhum problema registrado ainda
                       </div>
                     ) : (
-                      <div className="flex flex-col gap-2.5">
+                      <div className="flex flex-col gap-2.5 max-h-[320px] overflow-y-auto pr-1">
                         {rankingProblemas.map((item, posicao) => (
                           <div
                             key={item.chave}
@@ -7495,7 +7509,7 @@ export default function App() {
                         Nenhum check-in registrado ainda
                       </div>
                     ) : (
-                      <div className="flex flex-col gap-2.5">
+                      <div className="flex flex-col gap-2.5 max-h-[320px] overflow-y-auto pr-1">
                         {ranking.map((item, posicao) => (
                           <div
                             key={item.chave}
