@@ -79,6 +79,7 @@ create table if not exists public.candidates (
   party_logo_url       text,
   party_color          text,
 
+  sync_team            boolean default false,  -- trazer a equipe da origem?
   external_created_at  text,   -- data de cadastro na base de origem
   raw                  jsonb,  -- ficha crua da origem, inteira
   created_at           timestamptz default now()
@@ -225,6 +226,7 @@ alter table public.candidates        add column if not exists party_name text;
 alter table public.candidates        add column if not exists party_initials text;
 alter table public.candidates        add column if not exists party_logo_url text;
 alter table public.candidates        add column if not exists party_color text;
+alter table public.candidates        add column if not exists sync_team boolean default false;
 alter table public.candidates        add column if not exists external_created_at text;
 alter table public.candidates        add column if not exists raw jsonb;
 

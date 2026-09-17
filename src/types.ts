@@ -202,6 +202,14 @@ export interface Candidate {
   partyLogoUrl?: string;
   partyColor?: string;
 
+  /**
+   * Se a equipe deste cliente deve ser trazida da base de origem.
+   *
+   * Nasce desligado de proposito: trazer a equipe e uma escolha do
+   * administrador, cliente por cliente, e nao algo que acontece sozinho.
+   */
+  syncTeam?: boolean;
+
   /** Data de cadastro na base de origem. */
   externalCreatedAt?: string;
   /** Ficha crua da origem, guardada inteira para não perder nada. */
