@@ -352,6 +352,23 @@ insert into public.priority_levels (id, label, description, color, position) val
 on conflict (id) do nothing;
 
 -- ----------------------------------------------------------------------------
+-- 8.7 map_measurements - medicoes da regua do mapa
+-- ----------------------------------------------------------------------------
+create table if not exists public.map_measurements (
+  id            text primary key,
+  candidate_id  text,
+  name          text not null,
+  color         text not null default '#F58220',
+  points        jsonb not null,
+  total_meters  numeric not null default 0,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists idx_map_measurements_cliente
+  on public.map_measurements (candidate_id, created_at);
+
+-- ----------------------------------------------------------------------------
 -- 9. Migracoes - completa bancos que ja existiam antes
 -- ----------------------------------------------------------------------------
 -- Num banco novo nada aqui muda coisa alguma; num banco antigo, adiciona as
@@ -543,7 +560,7 @@ begin
     'candidates', 'parties', 'time_delta',
     'operation_types', 'panfletagem_areas', 'campaign_pins', 'check_ins',
     'check_in_media', 'check_in_notes', 'check_in_operations',
-    'member_devices', 'app_settings', 'priority_levels'
+    'member_devices', 'app_settings', 'priority_levels', 'map_measurements'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);

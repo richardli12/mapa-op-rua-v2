@@ -32,6 +32,9 @@ import {
   MapPin,
   Users,
   Settings,
+  Ruler,
+  Undo2,
+  Save,
   Smartphone,
   Layers,
   Flag,
@@ -102,6 +105,7 @@ import {
   CHECKIN_PRIORITIES,
   getCheckInPriority,
   PriorityLevel,
+  MapMeasurement,
   CheckInMedia,
   CheckInMediaType,
   CHECKIN_MAX_MEDIA,
@@ -776,7 +780,7 @@ export default function App() {
   // UI state variables
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "areas" | "pins" | "statistics" | "checkins"
+    "areas" | "pins" | "statistics" | "checkins" | "regua"
   >("areas");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -805,6 +809,21 @@ export default function App() {
    * nível nenhum cadastrado, não pode deixar a tela sem opção.
    */
   const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
+
+  /* ----------------------------------------------------------- régua ---
+   * Medição de distância no mapa. Fica aqui, junto dos demais controles,
+   * porque é uma ferramenta do sistema: tem cor, nome, e o que foi medido
+   * é guardado por cliente para a equipe inteira ver — não some ao fechar.
+   */
+  const [reguaLigada, setReguaLigada] = useState(false);
+  const [pontosRegua, setPontosRegua] = useState<{ lat: number; lng: number }[]>([]);
+  const [corRegua, setCorRegua] = useState("#F58220");
+  const [nomeRegua, setNomeRegua] = useState("");
+  const [medicoes, setMedicoes] = useState<MapMeasurement[]>([]);
+  const [medicaoEditando, setMedicaoEditando] = useState<string | null>(null);
+  const [medicoesOcultas, setMedicoesOcultas] = useState<string[]>([]);
+  const [medicaoEmFoco, setMedicaoEmFoco] = useState<string | null>(null);
+  const [salvandoMedicao, setSalvandoMedicao] = useState(false);
 
   /** Tela aberta na área do administrador. */
   const [telaAdm, setTelaAdm] = useState<'clientes' | 'configuracoes'>('clientes');
@@ -1102,6 +1121,136 @@ export default function App() {
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [isSyncingDatabase, setIsSyncingDatabase] = useState(false);
   const [showDatabaseModal, setShowDatabaseModal] = useState(false);
+
+  /* ----------------------------------------------------------- régua ---- */
+
+  /** Distância entre dois pontos, em metros (fórmula de Haversine). */
+  const distanciaEmMetros = (
+    a: { lat: number; lng: number },
+    b: { lat: number; lng: number },
+  ) => {
+    const R = 6371000;
+    const rad = (g: number) => (g * Math.PI) / 180;
+    const dLat = rad(b.lat - a.lat);
+    const dLng = rad(b.lng - a.lng);
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  };
+
+  const somaDoCaminho = (pontos: { lat: number; lng: number }[]) =>
+    pontos.reduce(
+      (total, ponto, i) => (i === 0 ? 0 : total + distanciaEmMetros(pontos[i - 1], ponto)),
+      0,
+    );
+
+  /** Como a distância se lê em campo: metros até um quilômetro, depois km. */
+  const formatarMedida = (metros: number) =>
+    metros < 1000 ? `${Math.round(metros)} m` : `${(metros / 1000).toFixed(2)} km`;
+
+  const totalRegua = somaDoCaminho(pontosRegua);
+
+  /** Frase de apoio da régua, conforme o que já foi marcado. */
+  const contarPontosRegua = () =>
+    pontosRegua.length === 0
+      ? "Toque no mapa para marcar o primeiro ponto."
+      : pontosRegua.length === 1
+        ? "Marque o próximo ponto para ver a distância."
+        : `${pontosRegua.length} pontos marcados.`;
+
+  /** Medições do cliente em foco. Medição pertence sempre a um cliente. */
+  const medicoesDoCliente = medicoes.filter(
+    (m) =>
+      selectedCandidateFilter === "all" || m.candidateId === selectedCandidateFilter,
+  );
+
+  const medicoesVisiveis = medicoesDoCliente.filter(
+    (m) => !medicoesOcultas.includes(m.id),
+  );
+
+  const carregarMedicoes = async () => {
+    const res = await DatabaseService.fetchMeasurements();
+    setMedicoes(res.data);
+  };
+
+  useEffect(() => {
+    if (ROTA_INICIAL.semLink) return;
+    carregarMedicoes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const limparReguaEmAndamento = () => {
+    setPontosRegua([]);
+    setNomeRegua("");
+    setMedicaoEditando(null);
+  };
+
+  /** Guarda a medição: nova, ou a que estava sendo editada. */
+  const salvarMedicao = async () => {
+    if (pontosRegua.length < 2) {
+      triggerNotification("Marque pelo menos dois pontos para medir.", "error");
+      return;
+    }
+    if (selectedCandidateFilter === "all") {
+      triggerNotification(
+        "Escolha um cliente no filtro do mapa: a medição pertence a ele.",
+        "error",
+      );
+      return;
+    }
+
+    const medicao: MapMeasurement = {
+      id: medicaoEditando || "med_" + Math.random().toString(36).substr(2, 9),
+      candidateId: selectedCandidateFilter,
+      name: nomeRegua.trim() || `Medição ${medicoesDoCliente.length + 1}`,
+      color: corRegua,
+      points: pontosRegua,
+      totalMeters: Math.round(totalRegua),
+    };
+
+    setSalvandoMedicao(true);
+    const res = await DatabaseService.upsertMeasurement(medicao);
+    setSalvandoMedicao(false);
+
+    if (!res.success) {
+      triggerNotification("Não foi possível salvar a medição.", "error");
+      return;
+    }
+    limparReguaEmAndamento();
+    carregarMedicoes();
+    triggerNotification(
+      medicaoEditando ? "Medição atualizada!" : "Medição salva!",
+      "success",
+    );
+  };
+
+  /** Traz a medição de volta para a régua, para mexer nos pontos ou na cor. */
+  const editarMedicao = (medicao: MapMeasurement) => {
+    setMedicaoEditando(medicao.id);
+    setPontosRegua(medicao.points);
+    setCorRegua(medicao.color);
+    setNomeRegua(medicao.name);
+    setReguaLigada(true);
+    setMedicaoEmFoco(medicao.id);
+  };
+
+  const removerMedicao = (medicao: MapMeasurement) =>
+    askConfirmation({
+      title: "Remover medição",
+      message: `A medição "${medicao.name}" sai do mapa para todo mundo.`,
+      confirmLabel: "Remover",
+      onConfirm: async () => {
+        const res = await DatabaseService.deleteMeasurement(medicao.id);
+        if (!res.success) {
+          triggerNotification("Não foi possível remover a medição.", "error");
+          return;
+        }
+        if (medicaoEditando === medicao.id) limparReguaEmAndamento();
+        carregarMedicoes();
+        triggerNotification("Medição removida.", "info");
+      },
+    });
 
   // Níveis de prioridade: a lista é do administrador, não do código.
   useEffect(() => {
@@ -8494,10 +8643,212 @@ export default function App() {
             <Check className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Check-ins</span>
           </button>
+
+          <button
+            className={`flex-1 py-3 flex flex-col md:flex-row justify-center items-center gap-1 border-b-2 hover:bg-white hover:text-[#F58220] transition-all ${
+              activeTab === "regua"
+                ? "border-[#F58220] text-[#F58220] font-extrabold bg-white shadow-3xs"
+                : "border-transparent text-slate-500"
+            }`}
+            onClick={() => setActiveTab("regua")}
+          >
+            <Ruler className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Régua</span>
+          </button>
         </div>
 
         {/* Scrollable control workspace */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-white">
+          {/* TAB 5: RÉGUA — medir distância no mapa */}
+          {activeTab === "regua" && (
+            <div className="space-y-4 animate-in fade-in duration-250">
+              <div className="bg-orange-50 border border-orange-100/70 p-4 rounded-2xl select-none">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-black text-[#0D233A] uppercase tracking-widest">
+                      Régua
+                    </h4>
+                    <p className="text-[10px] text-slate-500 font-semibold leading-snug mt-0.5">
+                      {reguaLigada
+                        ? "Toque no mapa para marcar cada ponto."
+                        : "Ligue para medir distâncias no mapa."}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ligando = !reguaLigada;
+                      setReguaLigada(ligando);
+                      if (!ligando) limparReguaEmAndamento();
+                    }}
+                    role="switch"
+                    aria-checked={reguaLigada}
+                    className={`w-14 h-8 rounded-full shrink-0 transition-colors cursor-pointer ${
+                      reguaLigada ? "bg-[#F58220]" : "bg-slate-300"
+                    }`}
+                  >
+                    <span
+                      className={`block w-6 h-6 bg-white rounded-full shadow transition-transform ${
+                        reguaLigada ? "translate-x-7" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {reguaLigada && (
+                  <div className="mt-3 space-y-2.5">
+                    <div className="bg-white border border-orange-100 rounded-xl px-3 py-2.5">
+                      <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">
+                        Distância medida
+                      </p>
+                      <p className="text-2xl font-black text-[#0D233A] leading-none mt-1">
+                        {pontosRegua.length < 2 ? "—" : formatarMedida(totalRegua)}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-semibold mt-1">
+                        {contarPontosRegua()}
+                      </p>
+                    </div>
+
+                    {/* Nome e cor da medição */}
+                    <div className="flex gap-2">
+                      <input
+                        type="color"
+                        value={corRegua}
+                        onChange={(e) => setCorRegua(e.target.value)}
+                        title="Cor da medição"
+                        aria-label="Cor da medição"
+                        className="w-10 h-10 rounded-xl border border-slate-200 bg-white cursor-pointer shrink-0"
+                      />
+                      <input
+                        type="text"
+                        value={nomeRegua}
+                        onChange={(e) => setNomeRegua(e.target.value)}
+                        placeholder="Nome da medição"
+                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-orange-300/40"
+                      />
+                    </div>
+
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setPontosRegua((p) => p.slice(0, -1))}
+                        disabled={pontosRegua.length === 0}
+                        className="flex-1 h-9 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 text-slate-600 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Undo2 className="w-3 h-3" />
+                        Voltar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={limparReguaEmAndamento}
+                        disabled={pontosRegua.length === 0}
+                        className="flex-1 h-9 rounded-xl bg-white border border-slate-200 hover:bg-rose-50 disabled:opacity-40 text-rose-600 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Limpar
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={salvarMedicao}
+                      disabled={pontosRegua.length < 2 || salvandoMedicao}
+                      className="w-full h-10 rounded-xl bg-[#F58220] hover:bg-[#E06E10] disabled:opacity-50 text-white text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
+                    >
+                      {salvandoMedicao ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4" />
+                      )}
+                      {medicaoEditando ? "Salvar alterações" : "Salvar medição"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Medições salvas */}
+              <div>
+                <p className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-2">
+                  Medições salvas ({medicoesDoCliente.length})
+                </p>
+                {medicoesDoCliente.length === 0 ? (
+                  <div className="py-8 text-center text-slate-400 font-bold text-[10px] uppercase tracking-widest bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
+                    Nenhuma medição guardada
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {medicoesDoCliente.map((medicao) => {
+                      const oculta = medicoesOcultas.includes(medicao.id);
+                      return (
+                        <div
+                          key={medicao.id}
+                          className={`border rounded-2xl px-3 py-2.5 flex items-center gap-2.5 transition-all ${
+                            medicaoEditando === medicao.id
+                              ? "border-[#F58220] bg-orange-50/60"
+                              : "border-slate-200 bg-white"
+                          }`}
+                        >
+                          <span
+                            className="w-2.5 h-8 rounded-full shrink-0"
+                            style={{ backgroundColor: medicao.color, opacity: oculta ? 0.3 : 1 }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMedicaoEmFoco(medicao.id)}
+                            title="Ver no mapa"
+                            className="min-w-0 flex-1 text-left cursor-pointer"
+                          >
+                            <p className="text-[12px] font-black text-slate-800 truncate leading-tight">
+                              {medicao.name}
+                            </p>
+                            <p className="text-[10px] font-bold text-slate-400">
+                              {formatarMedida(medicao.totalMeters)} •{" "}
+                              {medicao.points.length} pontos
+                            </p>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setMedicoesOcultas((lista) =>
+                                oculta
+                                  ? lista.filter((id) => id !== medicao.id)
+                                  : [...lista, medicao.id],
+                              )
+                            }
+                            title={oculta ? "Mostrar no mapa" : "Ocultar do mapa"}
+                            className="p-1.5 h-8 w-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 flex items-center justify-center cursor-pointer shrink-0"
+                          >
+                            {oculta ? (
+                              <EyeOff className="w-3.5 h-3.5" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => editarMedicao(medicao)}
+                            title="Editar medição"
+                            className="p-1.5 h-8 w-8 rounded-lg text-slate-400 hover:text-[#F58220] hover:bg-orange-50 flex items-center justify-center cursor-pointer shrink-0"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removerMedicao(medicao)}
+                            title="Remover medição"
+                            className="p-1.5 h-8 w-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* TAB 4: CHECK-INS REALIZADOS */}
           {activeTab === "checkins" && (
             <div className="space-y-4 animate-in fade-in duration-250">
@@ -9556,6 +9907,12 @@ export default function App() {
           }}
           operationTypes={operationTypes}
             priorityLevels={priorityLevels}
+            rulerActive={reguaLigada}
+            rulerPoints={pontosRegua}
+            rulerColor={corRegua}
+            onRulerPoint={(coords) => setPontosRegua((p) => [...p, coords])}
+            measurements={medicoesVisiveis}
+            focusMeasurementId={medicaoEmFoco}
           tempPlacementCoords={pickedCoords}
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor
