@@ -12,7 +12,12 @@ import {
   resolveCandidateLocation,
 } from "./services/candidateLocation";
 import { fetchExternalData, fetchExternalTeam } from "./services/externalApi";
-import { PARTY_LOGOS, BRAND_LOGO, CHECKIN_COVER } from "./mediaUrls";
+import {
+  PARTY_LOGOS,
+  BRAND_LOGO,
+  CHECKIN_COVER,
+  CLIENT_CARD_COVER,
+} from "./mediaUrls";
 import OperationTypeSelect from "./components/OperationTypeSelect";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
@@ -1154,6 +1159,21 @@ export default function App() {
       : pontosRegua.length === 1
         ? "Marque o próximo ponto para ver a distância."
         : `${pontosRegua.length} pontos marcados.`;
+
+  /**
+   * Equipe de todos os clientes.
+   *
+   * O cartão de cada cliente mostra quantos integrantes ele tem, e até aqui a
+   * lista só era buscada ao abrir um cliente — na tela inicial ela estava
+   * vazia, e todo mundo aparecia com zero.
+   */
+  useEffect(() => {
+    if (ROTA_INICIAL.semLink) return;
+    (async () => {
+      const res = await DatabaseService.fetchSupporters();
+      if (res.success && res.data) setSupporters(res.data);
+    })();
+  }, []);
 
   // Níveis de prioridade: a lista é do administrador, não do código.
   useEffect(() => {
@@ -7398,10 +7418,12 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {filteredClients.map((client) => {
                   const teamCount = supporters.filter(
-                    (s: any) => s.candidate_id === client.id,
+                    (s: any) =>
+                      s.candidate_id === client.id || s.candidateId === client.id,
                   ).length;
                   const checkInCount = checkIns.filter(
-                    (c: any) => c.candidateId === client.id,
+                    (c: any) =>
+                      c.candidateId === client.id || c.candidate_id === client.id,
                   ).length;
                   const ativo = client.status_active !== false;
 
@@ -7415,7 +7437,7 @@ export default function App() {
                         {/* A paisagem fica de fundo, esmaecida: é enfeite, não
                             informação — o que precisa ser lido é o nome. */}
                         <img
-                          src={CHECKIN_COVER}
+                          src={CLIENT_CARD_COVER}
                           alt=""
                           aria-hidden="true"
                           referrerPolicy="no-referrer"
