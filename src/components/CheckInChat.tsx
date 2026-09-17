@@ -371,7 +371,7 @@ export default function CheckInChat({
     setLocalConfirmado(true);
     marcarHora('local');
     // Veio da revisão para corrigir? Confirmado o ajuste, volta direto para lá.
-    setEtapa(midiasConfirmadas && obsConfirmadas && operacoesConfirmadas ? 5 : 2);
+    setEtapa(midiasConfirmadas && obsConfirmadas ? 5 : 3);
     // O rascunho passa a existir no banco: é nele que as mídias vão se ligar.
     DatabaseService.salvarRascunhoCheckIn(montarRegistro('rascunho'));
   };
@@ -456,7 +456,7 @@ export default function CheckInChat({
     }
     setMidiasConfirmadas(true);
     marcarHora('midias');
-    setEtapa(obsConfirmadas && operacoesConfirmadas ? 5 : 3);
+    setEtapa(obsConfirmadas ? 5 : 4);
   };
 
   // ------------------------------------------------------------ observações
@@ -519,7 +519,7 @@ export default function CheckInChat({
   const confirmarObservacoes = () => {
     setObsConfirmadas(true);
     marcarHora('observacoes');
-    setEtapa(operacoesConfirmadas ? 5 : 4);
+    setEtapa(5);
   };
 
   // -------------------------------------------------------------- operações
@@ -535,22 +535,23 @@ export default function CheckInChat({
     }
     setOperacoesConfirmadas(true);
     marcarHora('operacoes');
-    setEtapa(5);
+    // Escolhida a ação, o próximo passo é dizer de onde ela está sendo feita.
+    setEtapa(localConfirmado && midiasConfirmadas && obsConfirmadas ? 5 : 2);
   };
 
   // ------------------------------------------------------- voltar e corrigir
   const voltarPara = (destino: number) => {
     setEtapa(destino);
-    if (destino === 1) {
+    // Só a etapa aberta perde a confirmação: as outras continuam prontas, e a
+    // revisão volta assim que esta for confirmada de novo.
+    if (destino === 1) setOperacoesConfirmadas(false);
+    if (destino === 2) {
       setLocalConfirmado(false);
       // O ponto azul volta a acompanhar o aparelho enquanto a etapa está aberta.
       if (watchRef.current === null) capturarLocal();
     }
-    // Só a etapa aberta perde a confirmação: as outras continuam prontas, e a
-    // revisão volta assim que esta for confirmada de novo.
-    if (destino === 2) setMidiasConfirmadas(false);
-    if (destino === 3) setObsConfirmadas(false);
-    if (destino === 4) setOperacoesConfirmadas(false);
+    if (destino === 3) setMidiasConfirmadas(false);
+    if (destino === 4) setObsConfirmadas(false);
   };
 
   // ------------------------------------------------------------ confirmação
@@ -700,10 +701,94 @@ export default function CheckInChat({
 
       {/* FIO */}
       <div className="flex-1 min-h-0 px-3 pt-4 pb-6 space-y-3 overflow-y-auto">
-        <Fala texto="Primeiro, confirme sua localização." hora={horas.abertura} />
-
-        {/* ETAPA 1: mapa arrastável + confirmação do ponto ajustado */}
+        {/* ETAPA 1: tipo de ação do cliente */}
+        <Fala
+          texto="Qual ação você vai fazer? Pode marcar mais de uma."
+          hora={horas.abertura}
+        />
         {etapa === 1 && (
+          <div className="flex items-end gap-2 flex-row-reverse">
+            <span className="w-7 shrink-0" />
+            <div className="max-w-[80%] w-full flex flex-col items-end gap-2">
+              {operationTypes.length === 0 ? (
+                <p className="text-[12px] text-slate-400 font-semibold text-right">
+                  Nenhuma operação cadastrada para {clientName}.
+                </p>
+              ) : (
+                <>
+                  <div className="w-full grid grid-cols-2 gap-2">
+                    {operationTypes.map(tipo => {
+                      const marcado = operacoes.some(o => o.id === tipo.id);
+                      return (
+                        <button
+                          key={tipo.id}
+                          onClick={() => alternarOperacao(tipo)}
+                          className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
+                            marcado
+                              ? 'text-white border-transparent'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                          style={marcado ? { backgroundColor: AZUL } : undefined}
+                        >
+                          <span
+                            className="w-4 h-4 rounded-full flex items-center justify-center text-white shrink-0"
+                            style={{ backgroundColor: tipo.color }}
+                          >
+                            <OperationIcon icon={tipo.icon} size={10} />
+                          </span>
+                          {tipo.label}
+                          {marcado && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={confirmarOperacoes}
+                    disabled={operacoes.length === 0}
+                    className="w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                    style={{ backgroundColor: AZUL }}
+                  >
+                    Confirmar operações
+                  </button>
+                  <p className="text-[11px] text-slate-400 font-semibold text-right">
+                    {operacoes.length === 0
+                      ? 'Marque pelo menos um tipo de operação.'
+                      : `${contar(operacoes.length, 'tipo marcado', 'tipos marcados')}.`}
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+        {operacoesConfirmadas && etapa > 1 && (
+          <Resposta hora={horas.operacoes}>
+            <span className="flex flex-wrap gap-1.5">
+              {operacoes.map(op => (
+                <span
+                  key={op.id}
+                  className="inline-flex items-center gap-1.5 bg-white/15 rounded-full pl-1 pr-2 py-0.5"
+                >
+                  <span
+                    className="w-4 h-4 rounded-full flex items-center justify-center text-white shrink-0"
+                    style={{ backgroundColor: op.color }}
+                  >
+                    <OperationIcon icon={op.icon} size={10} />
+                  </span>
+                  {op.label}
+                </span>
+              ))}
+            </span>
+          </Resposta>
+        )}
+
+
+        {etapa >= 2 && (
+          <Fala texto="Agora confirme sua localização." hora={horas.operacoes} />
+        )}
+        {/* ETAPA 2: mapa arrastável + confirmação do ponto ajustado */}
+        {etapa === 2 && (
           <div className="flex items-end gap-2">
             <span className="shrink-0">{AvatarSistema}</span>
             <div className="max-w-[80%] w-full">
@@ -809,15 +894,15 @@ export default function CheckInChat({
           </div>
         )}
 
-        {/* ETAPA 2: fotos e vídeos */}
-        {etapa >= 2 && (
+        {/* ETAPA 3: fotos e vídeos */}
+        {etapa >= 3 && (
           <Fala texto="Agora envie as fotos e os vídeos do local." hora={horas.local} />
         )}
-        {etapa >= 2 && (midias.length > 0 || etapa === 2) && (
+        {etapa >= 3 && (midias.length > 0 || etapa === 3) && (
           <CheckInMidias
             itens={midias}
             permitirGaleria={permitirGaleria}
-            editavel={etapa === 2}
+            editavel={etapa === 3}
             avatar={AvatarMembro}
             hora={horas.midias || horas.local}
             onAdicionar={adicionarMidias}
@@ -827,17 +912,17 @@ export default function CheckInChat({
           />
         )}
 
-        {/* ETAPA 3: observações */}
-        {etapa >= 3 && (
+        {/* ETAPA 4: observações */}
+        {etapa >= 4 && (
           <Fala
             texto="Quer registrar alguma observação? Pode escrever ou gravar um áudio — esta etapa é opcional."
             hora={horas.midias}
           />
         )}
-        {etapa >= 3 && (
+        {etapa >= 4 && (
           <CheckInObservacoes
             itens={observacoes}
-            editavel={etapa === 3}
+            editavel={etapa === 4}
             avatar={AvatarMembro}
             hora={horas.observacoes || horas.midias}
             onAdicionarTexto={adicionarTexto}
@@ -848,98 +933,14 @@ export default function CheckInChat({
             onConfirmar={confirmarObservacoes}
           />
         )}
-        {etapa > 3 && obsProntas.length === 0 && (
+        {etapa > 4 && obsProntas.length === 0 && (
           <Resposta hora={horas.observacoes}>Sem observações.</Resposta>
-        )}
-
-        {/* ETAPA 4: tipos de operação do cliente */}
-        {etapa >= 4 && (
-          <Fala
-            texto="Quais operações você vai iniciar? Pode marcar mais de uma."
-            hora={horas.observacoes}
-          />
-        )}
-        {etapa === 4 && (
-          <div className="flex items-end gap-2 flex-row-reverse">
-            <span className="w-7 shrink-0" />
-            <div className="max-w-[80%] w-full flex flex-col items-end gap-2">
-              {operationTypes.length === 0 ? (
-                <p className="text-[12px] text-slate-400 font-semibold text-right">
-                  Nenhuma operação cadastrada para {clientName}.
-                </p>
-              ) : (
-                <>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    {operationTypes.map(tipo => {
-                      const marcado = operacoes.some(o => o.id === tipo.id);
-                      return (
-                        <button
-                          key={tipo.id}
-                          onClick={() => alternarOperacao(tipo)}
-                          className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
-                            marcado
-                              ? 'text-white border-transparent'
-                              : 'bg-white text-slate-700 border-slate-200'
-                          }`}
-                          style={marcado ? { backgroundColor: AZUL } : undefined}
-                        >
-                          <span
-                            className="w-4 h-4 rounded-full flex items-center justify-center text-white shrink-0"
-                            style={{ backgroundColor: tipo.color }}
-                          >
-                            <OperationIcon icon={tipo.icon} size={10} />
-                          </span>
-                          {tipo.label}
-                          {marcado && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={confirmarOperacoes}
-                    disabled={operacoes.length === 0}
-                    className="w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
-                    style={{ backgroundColor: AZUL }}
-                  >
-                    Confirmar operações
-                  </button>
-                  <p className="text-[11px] text-slate-400 font-semibold text-right">
-                    {operacoes.length === 0
-                      ? 'Marque pelo menos um tipo de operação.'
-                      : `${contar(operacoes.length, 'tipo marcado', 'tipos marcados')}.`}
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-        {operacoesConfirmadas && etapa > 4 && (
-          <Resposta hora={horas.operacoes}>
-            <span className="flex flex-wrap gap-1.5">
-              {operacoes.map(op => (
-                <span
-                  key={op.id}
-                  className="inline-flex items-center gap-1.5 bg-white/15 rounded-full pl-1 pr-2 py-0.5"
-                >
-                  <span
-                    className="w-4 h-4 rounded-full flex items-center justify-center text-white shrink-0"
-                    style={{ backgroundColor: op.color }}
-                  >
-                    <OperationIcon icon={op.icon} size={10} />
-                  </span>
-                  {op.label}
-                </span>
-              ))}
-            </span>
-          </Resposta>
         )}
 
         {/* ETAPA 5: revisão */}
         {etapa >= 5 && (
           <>
-            <Fala texto="Confira tudo antes de confirmar o check-in." hora={horas.operacoes} />
+            <Fala texto="Confira tudo antes de confirmar o check-in." hora={horas.observacoes} />
             <div
               className="rounded-2xl p-4 mt-1 border"
               style={{ backgroundColor: '#E9F8F3', borderColor: '#B6E6D7' }}
@@ -959,7 +960,7 @@ export default function CheckInChat({
                     <LinhaResumo
                       icone={<MapPin className="w-3.5 h-3.5" style={{ color: VERDE }} />}
                       texto={endereco?.rua || 'Local confirmado'}
-                      etapaDestino={1}
+                      etapaDestino={2}
                     />
                     <LinhaResumo
                       icone={<Camera className="w-3.5 h-3.5" style={{ color: VERDE }} />}
@@ -968,7 +969,7 @@ export default function CheckInChat({
                         'vídeo',
                         'vídeos'
                       )}`}
-                      etapaDestino={2}
+                      etapaDestino={3}
                     />
                     <LinhaResumo
                       icone={<MessageSquare className="w-3.5 h-3.5" style={{ color: VERDE }} />}
@@ -977,14 +978,14 @@ export default function CheckInChat({
                         'áudio',
                         'áudios'
                       )}`}
-                      etapaDestino={3}
+                      etapaDestino={4}
                     />
                     <LinhaResumo
                       icone={<Flag className="w-3.5 h-3.5" style={{ color: VERDE }} />}
                       texto={
                         operacoes.map(o => o.label).join(', ') || 'Nenhuma operação'
                       }
-                      etapaDestino={4}
+                      etapaDestino={1}
                     />
                     <li
                       className="flex items-center gap-2 text-[12px] font-semibold"
