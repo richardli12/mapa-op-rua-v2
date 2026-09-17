@@ -1156,7 +1156,7 @@ export default function MapContainer({
           }
         })
         .catch(err => {
-          console.log("Status geocode cidade candidata (recuperação silenciosa):", err?.message || err);
+          console.log("Status do geocode da cidade sugerida (recuperação silenciosa):", err?.message || err);
           if (active) setIsMapLoading(false);
         });
 

@@ -13,6 +13,14 @@ import {
 } from "./services/candidateLocation";
 import { fetchExternalData, fetchExternalTeam } from "./services/externalApi";
 import { PARTY_LOGOS, BRAND_LOGO, CHECKIN_COVER } from "./mediaUrls";
+import OperationTypeSelect from "./components/OperationTypeSelect";
+import TeamSignupPage from "./components/TeamSignupPage";
+import {
+  VincularMembroModal,
+  QrConviteModal,
+  CadastroManualModal,
+  CamposColetaModal,
+} from "./components/TeamManagerModals";
 import {
   MapPin,
   Users,
@@ -46,6 +54,7 @@ import {
   Calendar,
   Search,
   Link2,
+  QrCode,
   Building2,
   ChevronDown,
   Loader2,
@@ -374,7 +383,7 @@ export default function App() {
     useState<string>("all");
 
   /**
-   * Estado e município do candidato em foco, usados como ponto de partida do
+   * Estado e município do cliente em foco, usados como ponto de partida do
    * painel de endereço e dos formulários de pin e raio. É só um padrão: o
    * usuário continua livre para trocar nos seletores.
    */
@@ -587,9 +596,13 @@ export default function App() {
           },
         ];
   });
-  const [isAddingSupporter, setIsAddingSupporter] = useState(false);
-  const [newSupName, setNewSupName] = useState("");
-  const [newSupPhone, setNewSupPhone] = useState("");
+
+  /** Qual caminho de cadastro de integrante está aberto. */
+  const [teamModal, setTeamModal] = useState<
+    "vincular" | "qrcode" | "manual" | "campos" | null
+  >(null);
+  /** Campos de coleta do cliente em foco, configurados pelo ADM. */
+  const [teamFields, setTeamFields] = useState<any[]>([]);
 
   // UI state variables
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -605,6 +618,12 @@ export default function App() {
   );
 
   // Modo de visualização (admin / checkin)
+  /** Token do QR Code, quando alguém abre o link de cadastro. */
+  const [inviteToken] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("convite") || "";
+  });
+
   const [currentUrlView, setCurrentUrlView] = useState<"admin" | "checkin">(
     "admin",
   );
@@ -926,7 +945,7 @@ export default function App() {
         setCurrentUrlView("checkin");
 
         if (candidateSlugOrId) {
-          // Encontra o candidato por ID ou por slug de nome
+          // Encontra o cliente por ID ou por slug de nome
           const cand = candidates.find(
             (c) =>
               c.id === candidateSlugOrId ||
@@ -1017,7 +1036,7 @@ export default function App() {
           if (fetchedCheckins.length > 0) setCheckIns(fetchedCheckins);
         }
 
-        // Candidatos e partidos não vêm mais do banco de dados: a fonte é a base externa,
+        // Clientes e partidos não vêm mais do banco de dados: a fonte é a base externa,
         // carregado no efeito logo abaixo.
 
         // A Equipe também vem da base externa, no efeito mais abaixo.
@@ -1249,17 +1268,17 @@ export default function App() {
   const [pinCandidateId, setPinCandidateId] = useState<string>("");
 
   /**
-   * Candidato que dita o padrão de estado e município.
+   * Cliente que dita o padrão de estado e município.
    *
-   * Dentro do formulário vale o candidato escolhido nele; fora, vale o
-   * candidato filtrado no mapa. Sem candidato em foco, não há padrão.
+   * Dentro do formulário vale o cliente escolhido nele; fora, vale o
+   * cliente filtrado no mapa. Sem cliente em foco, não há padrão.
    */
   const locationCandidateId =
     (creationModalType === "area" ? areaCandidateId : "") ||
     (creationModalType === "pin" ? pinCandidateId : "") ||
     (selectedCandidateFilter !== "all" ? selectedCandidateFilter : "");
 
-  // Descobre estado e município do candidato em foco.
+  // Descobre estado e município do cliente em foco.
   useEffect(() => {
     const candidate = candidates.find((c) => c.id === locationCandidateId);
     if (!candidate) {
@@ -1294,10 +1313,10 @@ export default function App() {
     };
   }, [locationCandidateId, candidates]);
 
-  // Casa o município que ainda está só pelo nome — o do candidato, por exemplo
+  // Casa o município que ainda está só pelo nome — o do cliente, por exemplo
   // — com o registro oficial, que é quem traz o código IBGE usado para listar
   // os bairros. Fica em efeito próprio porque precisa rodar tanto quando a
-  // lista de municípios chega quanto quando o candidato muda sem trocar de
+  // lista de municípios chega quanto quando o cliente muda sem trocar de
   // estado.
   useEffect(() => {
     if (creationCityIbgeId || !creationCityName || brasilCities.length === 0) {
@@ -1314,7 +1333,7 @@ export default function App() {
   }, [brasilCities, creationCityIbgeId, creationCityName]);
 
   /**
-   * Código IBGE do município do candidato, quando ele já aparece na lista de
+   * Código IBGE do município do cliente, quando ele já aparece na lista de
    * municípios carregada para o estado.
    */
   const candidateCityIbgeId = React.useMemo(() => {
@@ -1339,10 +1358,10 @@ export default function App() {
         : false;
 
   /**
-   * Candidato do link de check-in compartilhado pelo mapa.
+   * Cliente do link de check-in compartilhado pelo mapa.
    *
-   * O link precisa apontar para um candidato: é ele que identifica de quem é o
-   * check-in. Sem candidato em foco não há link a oferecer.
+   * O link precisa apontar para um cliente: é ele que identifica de quem é o
+   * check-in. Sem cliente em foco não há link a oferecer.
    */
   const shareCandidate =
     selectedCandidateFilter !== "all"
@@ -1369,7 +1388,7 @@ export default function App() {
       };
 
   /**
-   * Devolve os seletores ao padrão do candidato em foco. Sem candidato, cai no
+   * Devolve os seletores ao padrão do cliente em foco. Sem cliente, cai no
    * padrão histórico do sistema.
    */
   const applyDefaultCreationLocation = () => {
@@ -1386,9 +1405,9 @@ export default function App() {
     setCreationCityName("Maceió");
   };
 
-  // Aplica esse padrão aos seletores. Roda quando o candidato em foco muda, e
+  // Aplica esse padrão aos seletores. Roda quando o cliente em foco muda, e
   // não a cada render, então a escolha manual do usuário é preservada até ele
-  // trocar de candidato.
+  // trocar de cliente.
   useEffect(() => {
     if (!candidateLocation) return;
     setCreationStateShortName(candidateLocation.uf);
@@ -2117,7 +2136,7 @@ export default function App() {
     type: "success" | "info" | "error";
   } | null>(null);
 
-  // Carrega partidos e candidatos da base externa, a fonte oficial desses dados.
+  // Carrega partidos e clientes da base externa, a fonte oficial desses dados.
   // A lista local só permanece se a consulta falhar, para o sistema não ficar
   // vazio por causa de uma queda momentânea.
   const [isLoadingExternal, setIsLoadingExternal] = useState(true);
@@ -2132,6 +2151,23 @@ export default function App() {
   const [togglingTeamId, setTogglingTeamId] = useState<string | null>(null);
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [isLoadingClients, setIsLoadingClients] = useState(false);
+
+  /** Campos de coleta e equipe do cliente aberto na ficha. */
+  const reloadTeamOfClient = async (candidateId: string) => {
+    if (!isDatabaseConfigured || !candidateId) return;
+    const [campos, equipe] = await Promise.all([
+      DatabaseService.fetchTeamFields(candidateId),
+      DatabaseService.fetchSupporters(candidateId),
+    ]);
+    if (campos.success) setTeamFields(campos.data);
+    if (equipe.success && equipe.data) {
+      // Troca só a equipe deste cliente: a dos outros continua como está.
+      setSupporters((prev: any[]) => [
+        ...prev.filter((m) => m.candidate_id !== candidateId),
+        ...equipe.data,
+      ]);
+    }
+  };
 
   /** Carrega os clientes do nosso banco: é esta lista que a tela mostra. */
   const reloadClients = async () => {
@@ -2148,6 +2184,16 @@ export default function App() {
     reloadClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Ao abrir a ficha de um cliente, carrega a equipe e os campos dele.
+  useEffect(() => {
+    if (inspectedCandidate?.id) {
+      reloadTeamOfClient(inspectedCandidate.id);
+    } else {
+      setTeamFields([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectedCandidate?.id]);
 
   /**
    * Liga ou desliga a busca da equipe de um cliente.
@@ -2339,7 +2385,7 @@ export default function App() {
 
       if (!active || loadedIds.size === 0) return;
 
-      // Só os candidatos consultados com sucesso são substituídos; os demais
+      // Só os clientes consultados com sucesso são substituídos; os demais
       // mantêm o que já estava carregado.
       setSupporters((previous) => [
         ...previous.filter((s: any) => !loadedIds.has(s.candidate_id)),
@@ -2483,14 +2529,9 @@ export default function App() {
             current ||
             `Ações de panfletagem da equipe focadas na ${local}${bairro ? `, bairro ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${uf ? ` - ${uf}` : ""}.`,
         );
-      } else {
-        setPinTitle((current) => current || `Ponto - ${local}`);
-        setPinDescription(
-          (current) =>
-            current ||
-            `Ponto estratégico de campanha política situado na ${local}${bairro ? `, ${bairro}` : ""}${cidade ? `, ${cidade}` : ""}${uf ? ` - ${uf}` : ""}.`,
-        );
       }
+      // O ponto não ganha título nem anotação automáticos: esses dois campos
+      // são escritos por quem cria o ponto.
     })();
 
     return () => {
@@ -2605,12 +2646,8 @@ export default function App() {
           `Ações de panfletagem da equipe focadas na ${ruaName}, bairro ${creationBairroName}, ${finalCity} - ${finalState}.`,
         );
         setAreaBairro(creationBairroName);
-      } else {
-        setPinTitle(`Ponto - ${ruaName}`);
-        setPinDescription(
-          `Ponto estratégico de campanha política situado na ${ruaName}, ${creationBairroName}, ${finalCity} - ${finalState}.`,
-        );
       }
+      // Ponto estratégico não tem título nem anotação preenchidos sozinhos.
     }
   };
 
@@ -3290,7 +3327,7 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // Quantas missões o integrante logado tem atribuídas no candidato escolhido.
+  // Quantas missões o integrante logado tem atribuídas no cliente escolhido.
   const userMissionCount = (() => {
     if (!checkInCandidateId || !authenticatedSupporter?.id) return 0;
     const isMine = (assigned: any) =>
@@ -3525,7 +3562,7 @@ export default function App() {
       }
       if (!checkInCandidateId) {
         triggerNotification(
-          "Por favor, selecione quem é o seu candidato.",
+          "Por favor, selecione o cliente.",
           "error",
         );
         return;
@@ -3851,7 +3888,7 @@ export default function App() {
           return;
         }
 
-        // Número existe, mas na Equipe de outro candidato: dizer isso é mais
+        // Número existe, mas na Equipe de outro cliente: dizer isso é mais
         // útil do que um "não localizado" genérico.
         const otherTeamMatch = supporters.find((member: any) =>
           samePhoneNumber(member?.whatsapp, contactInput),
@@ -3861,7 +3898,7 @@ export default function App() {
             (c) => c.id === checkInCandidateId,
           );
           triggerNotification(
-            `Este número não faz parte da Equipe de ${currentCandidate?.name || "este candidato"}.`,
+            `Este número não faz parte da Equipe de ${currentCandidate?.name || "este cliente"}.`,
             "error",
           );
           return;
@@ -3904,7 +3941,7 @@ export default function App() {
           const sImage = sup.image || sup.foto_url || "";
           const sCandId = sup.candidate_id || sup.candidateId || "";
 
-          // Validação: de qual base de candidato o apoiador faz parte?
+          // Validação: de qual base de cliente o apoiador faz parte?
           if (
             checkInCandidateId &&
             String(sCandId) !== String(checkInCandidateId)
@@ -3914,9 +3951,9 @@ export default function App() {
             );
             const candidateName = currentCandidate
               ? currentCandidate.name
-              : "este candidato";
+              : "este cliente";
             triggerNotification(
-              `Este número não foi encontrado na base de apoiadores do candidato ${candidateName}.`,
+              `Este número não foi encontrado na base de integrantes de ${candidateName}.`,
               "error",
             );
             return;
@@ -3998,7 +4035,7 @@ export default function App() {
           >
             {activeCandidate ? (
               <>
-                {/* A tela de check-in é do candidato, então quem aparece é ele.
+                {/* A tela de check-in é do cliente, então quem aparece é ele.
                     O partido fica na linha de baixo, junto do pleito. */}
                 <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-slate-100 mb-3 overflow-hidden relative">
                   {activeCandidate.image && (
@@ -4559,7 +4596,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Escolher Candidato Apoiado */}
+                {/* Escolher Cliente Apoiado */}
                 <div className="space-y-1.5 text-left">
                   {candidates.find((c) => c.id === checkInCandidateId) ? (
                     <div className="bg-slate-50 border border-slate-250/60 rounded-xl p-3 flex items-center justify-between shadow-2xs">
@@ -4572,14 +4609,14 @@ export default function App() {
                               )?.image ||
                               "https://images.unsplash.com/photo-1540910419892-4a36d2c3266c?auto=format&fit=crop&w=256&h=256&q=80"
                             }
-                            alt="Candidato"
+                            alt="Cliente"
                             referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
                           />
                         </div>
                         <div className="font-sans">
                           <span className="text-[9px] font-black uppercase text-[#F58220] tracking-wider block">
-                            Candidato Vinculado
+                            Cliente Vinculado
                           </span>
                           <span className="font-bold text-xs sm:text-sm text-slate-800 block leading-tight">
                             {
@@ -4590,7 +4627,7 @@ export default function App() {
                           </span>
                           <span className="text-[10px] text-slate-500 block leading-tight">
                             {candidates.find((c) => c.id === checkInCandidateId)
-                              ?.office || "Candidato"}
+                              ?.office || "Cliente"}
                           </span>
                         </div>
                       </div>
@@ -4599,7 +4636,7 @@ export default function App() {
                   ) : (
                     <>
                       <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-500 font-sans">
-                        Candidato Apoiado neste Check-in *
+                        Cliente deste Check-in *
                       </label>
                       <select
                         value={checkInCandidateId}
@@ -4607,10 +4644,10 @@ export default function App() {
                         required
                         className="w-full px-4 py-3 bg-white border border-slate-200 focus:border-[#F58220] focus:ring-2 focus:ring-[#F58220]/15 rounded-xl text-sm font-sans font-semibold text-slate-800 transition-all cursor-pointer hover:border-slate-350 focus:outline-hidden"
                       >
-                        <option value="">Selecione o Candidato...</option>
+                        <option value="">Selecione o Cliente...</option>
                         {candidates.map((c) => (
                           <option key={c.id} value={c.id}>
-                            {c.name} ({c.office || "Candidato"})
+                            {c.name} ({c.office || "Cliente"})
                           </option>
                         ))}
                       </select>
@@ -4702,7 +4739,7 @@ export default function App() {
                           <Target className="w-4 h-4" />
                         </div>
                         <p className="text-xs text-slate-500 font-bold">
-                          Selecione o candidato acima para carregar suas missões
+                          Selecione o cliente acima para carregar as missões
                           de campo.
                         </p>
                       </div>
@@ -5529,6 +5566,11 @@ export default function App() {
     );
   }
 
+  // O link do QR Code é público e não depende de login nem de check-in.
+  if (inviteToken) {
+    return <TeamSignupPage token={inviteToken} />;
+  }
+
   if (currentUrlView !== "checkin" && !adminUser) {
     const handleAdminLoginSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -5776,7 +5818,7 @@ export default function App() {
         .filter(Boolean),
     ).size;
 
-    // Calcula o partido com mais candidatos em tempo de execução
+    // Calcula o partido com mais clientes em tempo de execução
     const partyCounts: Record<string, number> = {};
     candidates.forEach((c) => {
       let pName = "PL";
@@ -5943,7 +5985,7 @@ export default function App() {
             return [...prev, { ...payload, id: updatedId }];
           }
         });
-        triggerNotification("Candidato salvo localmente!", "success");
+        triggerNotification("Cliente salvo localmente!", "success");
         setIsCandidateModalOpen(false);
       }
     };
@@ -6149,7 +6191,7 @@ export default function App() {
               </div>
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-widest text-[#8492A6]">
-                  Candidatos
+                  Clientes
                 </p>
                 <p className="text-2xl font-black text-slate-800 mt-0.5">
                   {totalCount}
@@ -6253,7 +6295,7 @@ export default function App() {
                 <thead>
                   <tr className="bg-[#FAFBFD] border-b border-slate-100">
                     <th className="py-4 px-6 text-[10px] uppercase font-black tracking-widest text-[#8492A6]">
-                      Candidato
+                      Cliente
                     </th>
                     <th className="py-4 px-6 text-[10px] uppercase font-black tracking-widest text-[#8492A6]">
                       Partido
@@ -6279,7 +6321,7 @@ export default function App() {
                         colSpan={6}
                         className="py-16 text-center text-slate-400 font-bold text-xs uppercase tracking-widest"
                       >
-                        Nenhum candidato encontrado
+                        Nenhum cliente encontrado
                       </td>
                     </tr>
                   ) : (
@@ -6441,7 +6483,7 @@ export default function App() {
                                     });
                                 }}
                                 className="p-1.5 h-8 w-8 hover:bg-emerald-50 text-slate-450 hover:text-emerald-600 border border-transparent hover:border-emerald-100 rounded-lg transition-all cursor-pointer flex items-center justify-center"
-                                title="Copiar Link de Check-in deste Candidato"
+                                title="Copiar Link de Check-in deste Cliente"
                               >
                                 <Link className="w-4 h-4" />
                               </button>
@@ -6457,7 +6499,7 @@ export default function App() {
                                   );
                                 }}
                                 className="p-1.5 h-8 w-8 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 border border-transparent hover:border-indigo-100 rounded-lg transition-all cursor-pointer flex items-center justify-center font-bold"
-                                title="Ver Mapa Isolado deste Candidato"
+                                title="Ver Mapa Isolado deste Cliente"
                               >
                                 <Map className="w-4 h-4" />
                               </button>
@@ -6509,7 +6551,7 @@ export default function App() {
             {/* TABLE FOOTER & MOCK PAGINATION BAR */}
             <div className="py-5 px-6 border-t border-slate-100 bg-[#FAFBFD] flex flex-col sm:flex-row justify-between items-center gap-3">
               <span className="text-[#8492A6] text-xs font-bold">
-                Mostrando {filteredCandidates.length} de {totalCount} candidatos
+                Mostrando {filteredCandidates.length} de {totalCount} clientes
               </span>
 
               {/* Pagination Controls */}
@@ -6627,7 +6669,7 @@ export default function App() {
                       }
                     </h3>
                     <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                      Multiplicadores do candidato
+                      Multiplicadores do cliente
                     </p>
                   </div>
 
@@ -6733,115 +6775,39 @@ export default function App() {
                         </button>
 
                         <button
-                          onClick={() => setIsAddingSupporter(true)}
+                          onClick={() => setTeamModal("campos")}
+                          title="Escolher o que perguntar no cadastro deste cliente"
+                          className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <PenTool className="w-3.5 h-3.5" />
+                          <span>Campos</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTeamModal("vincular")}
+                          className="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          <span>Vincular</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTeamModal("qrcode")}
+                          className="px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-600 border border-indigo-200 font-bold text-[11px] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>QR Code</span>
+                        </button>
+
+                        <button
+                          onClick={() => setTeamModal("manual")}
                           className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-xl flex items-center gap-1 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
                         >
                           <PlusCircle className="w-3.5 h-3.5" />
-                          <span>Novo Integrante</span>
+                          <span>Cadastrar</span>
                         </button>
                       </div>
                     </div>
-
-                    {/* ADD NEW SUPPORTER FORM POPUP/CARD INLINE */}
-                    {isAddingSupporter && (
-                      <div className="p-5 bg-emerald-50/50 border-b border-slate-100">
-                        <h5 className="text-xs font-black text-emerald-800 uppercase tracking-wider mb-3">
-                          Novo Integrante da Equipe
-                        </h5>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[10px] uppercase font-black tracking-wider text-slate-500 mb-1">
-                              Nome Completo
-                            </label>
-                            <input
-                              type="text"
-                              value={newSupName}
-                              onChange={(e) => setNewSupName(e.target.value)}
-                              placeholder="Ex: Carlos Santos"
-                              className="w-full h-10 px-3 border border-slate-200 bg-white rounded-xl text-xs font-semibold focus:outline-hidden"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] uppercase font-black tracking-wider text-slate-500 mb-1">
-                              WhatsApp (DDD + Celular)
-                            </label>
-                            <input
-                              type="text"
-                              value={newSupPhone}
-                              onChange={(e) => setNewSupPhone(e.target.value)}
-                              placeholder="Ex: 82999991234"
-                              className="w-full h-10 px-3 border border-slate-200 bg-white rounded-xl text-xs font-semibold focus:outline-hidden"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex justify-end gap-2.5 mt-4">
-                          <button
-                            onClick={() => {
-                              setIsAddingSupporter(false);
-                              setNewSupName("");
-                              setNewSupPhone("");
-                            }}
-                            className="px-3.5 py-2 hover:bg-slate-100 text-slate-500 font-bold text-xs rounded-xl"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (!newSupName.trim() || !newSupPhone.trim()) {
-                                triggerNotification(
-                                  "Preencha o nome e o whatsapp.",
-                                  "error",
-                                );
-                                return;
-                              }
-                              const cleanPhone = newSupPhone.replace(/\D/g, "");
-                              const currentId = "sup-local-" + Date.now();
-                              const item = {
-                                id: currentId,
-                                full_name: newSupName,
-                                whatsapp: cleanPhone,
-                                candidate_id: inspectedCandidate.id,
-                              };
-
-                              setSupporters((prev) => [...prev, item]);
-
-                              if (isDatabaseConfigured) {
-                                const addRes =
-                                  await DatabaseService.upsertSupporter(item);
-                                if (addRes.success) {
-                                  triggerNotification(
-                                    `${newSupName} cadastrado!`,
-                                    "success",
-                                  );
-                                  // Recarrega lista
-                                  const supRes =
-                                    await DatabaseService.fetchSupporters();
-                                  if (supRes.success && supRes.data) {
-                                    setSupporters(supRes.data);
-                                  }
-                                } else {
-                                  triggerNotification(
-                                    `${newSupName} salvo localmente somente.`,
-                                    "info",
-                                  );
-                                }
-                              } else {
-                                triggerNotification(
-                                  `${newSupName} salvo localmente!`,
-                                  "success",
-                                );
-                              }
-                              setNewSupName("");
-                              setNewSupPhone("");
-                              setIsAddingSupporter(false);
-                            }}
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
-                          >
-                            Adicionar ao Time
-                          </button>
-                        </div>
-                      </div>
-                    )}
 
                     {/* SUPPORTERS LIST */}
                     <div className="overflow-x-auto">
@@ -6917,7 +6883,7 @@ export default function App() {
                                           onClick={() => {
                                             askConfirmation({
                                               title: "Remover da Equipe",
-                                              message: `${sup.full_name} deixa de receber as missões deste candidato.`,
+                                              message: `${sup.full_name} deixa de receber as missões deste cliente.`,
                                               confirmLabel: "Remover",
                                               onConfirm: async () => {
                                                 setSupporters((prev) =>
@@ -6968,7 +6934,7 @@ export default function App() {
                         <span>📍 Atividades Recentes</span>
                       </h4>
                       <p className="text-[10px] text-slate-400 font-bold mt-0.5">
-                        Atividades registradas no território do candidato
+                        Atividades registradas no território do cliente
                       </p>
                     </div>
 
@@ -7229,6 +7195,50 @@ export default function App() {
               </span>
             </div>
           </div>
+        )}
+
+        {/* MODAIS DA EQUIPE DO CLIENTE */}
+        {teamModal && inspectedCandidate && (
+          <>
+            {teamModal === "vincular" && (
+              <VincularMembroModal
+                client={inspectedCandidate}
+                allMembers={supporters}
+                notify={triggerNotification}
+                onClose={() => setTeamModal(null)}
+                onChanged={() => reloadTeamOfClient(inspectedCandidate.id)}
+              />
+            )}
+            {teamModal === "qrcode" && (
+              <QrConviteModal
+                client={inspectedCandidate}
+                notify={triggerNotification}
+                onClose={() => {
+                  setTeamModal(null);
+                  reloadTeamOfClient(inspectedCandidate.id);
+                }}
+                onChanged={() => reloadTeamOfClient(inspectedCandidate.id)}
+              />
+            )}
+            {teamModal === "manual" && (
+              <CadastroManualModal
+                client={inspectedCandidate}
+                fields={teamFields}
+                notify={triggerNotification}
+                onClose={() => setTeamModal(null)}
+                onChanged={() => reloadTeamOfClient(inspectedCandidate.id)}
+              />
+            )}
+            {teamModal === "campos" && (
+              <CamposColetaModal
+                client={inspectedCandidate}
+                fields={teamFields}
+                notify={triggerNotification}
+                onClose={() => setTeamModal(null)}
+                onChanged={() => reloadTeamOfClient(inspectedCandidate.id)}
+              />
+            )}
+          </>
         )}
 
         {/* MODAL: VINCULAR CLIENTE */}
@@ -7597,7 +7607,7 @@ export default function App() {
                     type="submit"
                     className="px-6 py-3 bg-[#015FC9] hover:bg-blue-600 text-white text-xs uppercase font-extrabold tracking-wider rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer"
                   >
-                    Salvar Candidato
+                    Salvar Cliente
                   </button>
                 </div>
               </form>
@@ -7695,7 +7705,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Ir para o mapa do candidato */}
+                {/* Ir para o mapa do cliente */}
                 <button
                   onClick={() => {
                     setSelectedCandidateFilter(candViewDetail.id);
@@ -7709,7 +7719,7 @@ export default function App() {
                   className="mt-3 w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-505 text-white font-extrabold text-[11px] uppercase tracking-wider rounded-xl text-center shadow-lg hover:shadow-xl hover:bg-indigo-500 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Map className="w-4 h-4" />
-                  Ir para o Mapa do Candidato
+                  Ir para o Mapa do Cliente
                 </button>
 
                 <button
@@ -8365,21 +8375,21 @@ export default function App() {
                       />
                     </div>
 
-                    {/* Associar Candidato */}
+                    {/* Associar Cliente */}
                     {selectedCandidateFilter === "all" && (
                       <div>
                         <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                          Associar Candidato (Para mapas isolados)
+                          Associar Cliente (Para mapas isolados)
                         </label>
                         <select
                           value={areaCandidateId}
                           onChange={(e) => setAreaCandidateId(e.target.value)}
                           className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs font-semibold"
                         >
-                          <option value="">Geral / Sem Candidato</option>
+                          <option value="">Geral / Sem Cliente</option>
                           {candidates.map((c) => (
                             <option key={c.id} value={c.id}>
-                              {c.name} ({c.office || "Candidato"})
+                              {c.name} ({c.office || "Cliente"})
                             </option>
                           ))}
                         </select>
@@ -8734,21 +8744,21 @@ export default function App() {
                       />
                     </div>
 
-                    {/* Associar Candidato */}
+                    {/* Associar Cliente */}
                     {selectedCandidateFilter === "all" && (
                       <div>
                         <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                          Associar Candidato (Para mapas isolados)
+                          Associar Cliente (Para mapas isolados)
                         </label>
                         <select
                           value={pinCandidateId}
                           onChange={(e) => setPinCandidateId(e.target.value)}
                           className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-slate-800 shadow-2xs font-semibold"
                         >
-                          <option value="">Geral / Sem Candidato</option>
+                          <option value="">Geral / Sem Cliente</option>
                           {candidates.map((c) => (
                             <option key={c.id} value={c.id}>
-                              {c.name} ({c.office || "Candidato"})
+                              {c.name} ({c.office || "Cliente"})
                             </option>
                           ))}
                         </select>
@@ -8770,36 +8780,12 @@ export default function App() {
                           Gerenciar
                         </button>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-2xs"
-                          style={{
-                            backgroundColor:
-                              getOperationType(pinIconType)?.color || pinColor,
-                          }}
-                        >
-                          <OperationIcon
-                            icon={operationTypeIcon(pinIconType)}
-                            size={16}
-                          />
-                        </div>
-                        <select
-                          value={pinIconType}
-                          onChange={(e) => handlePinTypeChange(e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-slate-800 shadow-2xs cursor-pointer"
-                        >
-                          {!getOperationType(pinIconType) && (
-                            <option value={pinIconType}>
-                              Sem tipo definido
-                            </option>
-                          )}
-                          {clientOperationTypes.map((type) => (
-                            <option key={type.id} value={type.id}>
-                              {type.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                      <OperationTypeSelect
+                        types={clientOperationTypes}
+                        value={pinIconType}
+                        onChange={handlePinTypeChange}
+                        accent="orange"
+                      />
                     </div>
 
                     {/* Color selection */}
@@ -10194,12 +10180,12 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Associar Candidato & Seleção de Membros da Equipe */}
+                        {/* Associar Cliente & Seleção de Membros da Equipe */}
                         <div className="space-y-3 pt-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                           {selectedCandidateFilter === "all" && (
                             <div>
                               <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                                Candidato Associado à Missão
+                                Cliente Associado à Missão
                               </label>
                               <select
                                 value={areaCandidateId}
@@ -10209,10 +10195,10 @@ export default function App() {
                                 }}
                                 className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs cursor-pointer"
                               >
-                                <option value="">Geral / Sem Candidato</option>
+                                <option value="">Geral / Sem Cliente</option>
                                 {candidates.map((c) => (
                                   <option key={c.id} value={c.id}>
-                                    {c.name} ({c.office || "Candidato"})
+                                    {c.name} ({c.office || "Cliente"})
                                   </option>
                                 ))}
                               </select>
@@ -10221,12 +10207,12 @@ export default function App() {
 
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
-                              Direcionar Missão à Equipe do Candidato
+                              Direcionar Missão à Equipe
                             </label>
                             <p className="text-[10px] text-slate-500 font-medium mb-1 leading-tight">
                               Selecione os membros que devem receber esta
                               missão. Se nenhum for marcado, ela ficará visível
-                              para todo o time do candidato.
+                              para todo o time.
                             </p>
                             {(() => {
                               const activeCandId = areaCandidateId;
@@ -10239,7 +10225,7 @@ export default function App() {
                               if (!activeCandId) {
                                 return (
                                   <div className="text-[10px] text-slate-400 italic bg-white p-2 rounded-xl border border-slate-150 text-center">
-                                    Selecione um candidato acima para carregar a
+                                    Selecione um cliente acima para carregar a
                                     sua Equipe.
                                   </div>
                                 );
@@ -10248,8 +10234,7 @@ export default function App() {
                               if (candidatesDeltas.length === 0) {
                                 return (
                                   <div className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-xl font-semibold text-center">
-                                    Nenhum integrante cadastrado na Equipe
-                                    deste candidato.
+                                    Nenhum integrante cadastrado na Equipe.
                                   </div>
                                 );
                               }
@@ -10386,39 +10371,11 @@ export default function App() {
                                 Gerenciar
                               </button>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-2xs"
-                                style={{
-                                  backgroundColor:
-                                    getOperationType(pinIconType)?.color ||
-                                    pinColor,
-                                }}
-                              >
-                                <OperationIcon
-                                  icon={operationTypeIcon(pinIconType)}
-                                  size={16}
-                                />
-                              </div>
-                              <select
-                                value={pinIconType}
-                                onChange={(e) =>
-                                  handlePinTypeChange(e.target.value)
-                                }
-                                className="w-full min-w-0 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs cursor-pointer"
-                              >
-                                {!getOperationType(pinIconType) && (
-                                  <option value={pinIconType}>
-                                    Sem tipo definido
-                                  </option>
-                                )}
-                                {clientOperationTypes.map((type) => (
-                                  <option key={type.id} value={type.id}>
-                                    {type.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                            <OperationTypeSelect
+                              types={clientOperationTypes}
+                              value={pinIconType}
+                              onChange={handlePinTypeChange}
+                            />
                           </div>
 
                           <div>
@@ -10466,12 +10423,12 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Associar Candidato & Seleção de Membros da Equipe para PIN */}
+                        {/* Associar Cliente & Seleção de Membros da Equipe para PIN */}
                         <div className="space-y-3 pt-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                           {selectedCandidateFilter === "all" && (
                             <div>
                               <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                                Candidato Associado à Missão
+                                Cliente Associado à Missão
                               </label>
                               <select
                                 value={pinCandidateId}
@@ -10481,10 +10438,10 @@ export default function App() {
                                 }}
                                 className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs cursor-pointer"
                               >
-                                <option value="">Geral / Sem Candidato</option>
+                                <option value="">Geral / Sem Cliente</option>
                                 {candidates.map((c) => (
                                   <option key={c.id} value={c.id}>
-                                    {c.name} ({c.office || "Candidato"})
+                                    {c.name} ({c.office || "Cliente"})
                                   </option>
                                 ))}
                               </select>
@@ -10493,12 +10450,12 @@ export default function App() {
 
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
-                              Direcionar Missão à Equipe do Candidato
+                              Direcionar Missão à Equipe
                             </label>
                             <p className="text-[10px] text-slate-500 font-medium mb-1 leading-tight">
                               Selecione os membros que devem receber esta
                               missão. Se nenhum for marcado, ela ficará visível
-                              para todo o time do candidato.
+                              para todo o time.
                             </p>
                             {(() => {
                               const activeCandId = pinCandidateId;
@@ -10511,7 +10468,7 @@ export default function App() {
                               if (!activeCandId) {
                                 return (
                                   <div className="text-[10px] text-slate-400 italic bg-white p-2 rounded-xl border border-slate-150 text-center">
-                                    Selecione um candidato acima para carregar a
+                                    Selecione um cliente acima para carregar a
                                     sua Equipe.
                                   </div>
                                 );
@@ -10520,8 +10477,7 @@ export default function App() {
                               if (candidatesDeltas.length === 0) {
                                 return (
                                   <div className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-xl font-semibold text-center">
-                                    Nenhum integrante cadastrado na Equipe
-                                    deste candidato.
+                                    Nenhum integrante cadastrado na Equipe.
                                   </div>
                                 );
                               }
@@ -10774,8 +10730,8 @@ export default function App() {
                   </p>
                 ) : (
                   <p className="text-[10px] text-amber-600 font-semibold leading-snug">
-                    Selecione um candidato no filtro do mapa para gerar o link.
-                    Sem candidato, o check-in não teria a quem ser atribuído.
+                    Selecione um cliente no filtro do mapa para gerar o link.
+                    Sem cliente, o check-in não teria a quem ser atribuído.
                   </p>
                 )}
               </div>
@@ -10796,7 +10752,7 @@ export default function App() {
                   onClick={() => {
                     setIsShareModalOpen(false);
                     setCurrentUrlView("checkin");
-                    // A simulação abre no candidato em foco, como o link real
+                    // A simulação abre no cliente em foco, como o link real
                     if (shareCandidate) setCheckInCandidateId(shareCandidate.id);
                     // Atualizar url temporariamente sem dar reload
                     const url = new URL(window.location.href);
