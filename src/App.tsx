@@ -11,7 +11,8 @@ import {
   CandidateLocation,
   resolveCandidateLocation,
 } from "./services/candidateLocation";
-import { fetchNexusData, fetchNexusTeam } from "./services/nexusApi";
+import { fetchExternalData, fetchExternalTeam } from "./services/externalApi";
+import { PARTY_LOGOS, BRAND_LOGO, CHECKIN_COVER } from "./mediaUrls";
 import {
   MapPin,
   Users,
@@ -90,12 +91,11 @@ import {
   CHECKIN_MAX_VIDEO_BYTES,
 } from "./types";
 import {
-  SupabaseService,
-  isSupabaseConfigured,
-  SUPABASE_SQL_SETUP,
-  supabase,
+  DatabaseService,
+  isDatabaseConfigured,
+  db,
   normalizeRecord,
-} from "./supabaseClient";
+} from "./databaseClient";
 
 const INITIAL_PARTIES: Party[] = [
   {
@@ -103,21 +103,21 @@ const INITIAL_PARTIES: Party[] = [
     name: "Solidariedade",
     initials: "SD",
     logo_url:
-      "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/SD_LOGO.png",
+      PARTY_LOGOS.SD,
   },
   {
     id: "party-2",
     name: "Partido Progressistas",
     initials: "PP",
     logo_url:
-      "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PP_LOGO.png",
+      PARTY_LOGOS.PP,
   },
   {
     id: "party-3",
     name: "Partido Liberal",
     initials: "PL",
     logo_url:
-      "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PL_LOGO.png",
+      PARTY_LOGOS.PL,
   },
 ];
 
@@ -452,7 +452,7 @@ export default function App() {
     const officeUpper = (cand.office || "").toUpperCase();
     const nameUpper = (cand.name || "").toUpperCase();
 
-    // Procura primeiro correspondência em nossa lista de partidos ativa do Supabase/LocalStorage
+    // Procura primeiro correspondência em nossa lista de partidos ativa do banco de dados/LocalStorage
     const foundParty = parties.find((p) => {
       const pInitials = (p.initials || "").trim().toUpperCase();
       const pName = (p.name || "").trim().toUpperCase();
@@ -527,10 +527,10 @@ export default function App() {
 
     // Fallbacks absolutos com o domínio atual correto (dwglbabfqopddrqwddmb)
     const staticLogos: Record<string, string> = {
-      SD: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/SD_LOGO.png",
-      PP: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PP_LOGO.png",
-      PL: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PL_LOGO.png",
-      PT: "https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/PT_LOGO.png",
+      SD: PARTY_LOGOS.SD,
+      PP: PARTY_LOGOS.PP,
+      PL: PARTY_LOGOS.PL,
+      PT: PARTY_LOGOS.PT,
     };
 
     return {
@@ -612,7 +612,7 @@ export default function App() {
     "admin",
   );
 
-  // Supabase Supporter Auth for Check-In
+  // banco de dados Supporter Auth for Check-In
   const [authenticatedSupporter, setAuthenticatedSupporter] = useState<
     any | null
   >(() => {
@@ -897,10 +897,10 @@ export default function App() {
   const [checkInMunicipioDropdownOpen, setCheckInMunicipioDropdownOpen] =
     useState(false);
 
-  // Supabase Sync States
-  const [supabaseError, setSupabaseError] = useState<string | null>(null);
-  const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
-  const [showSupabaseSqlModal, setShowSupabaseSqlModal] = useState(false);
+  // banco de dados Sync States
+  const [databaseError, setDatabaseError] = useState<string | null>(null);
+  const [isSyncingDatabase, setIsSyncingDatabase] = useState(false);
+  const [showDatabaseModal, setShowDatabaseModal] = useState(false);
 
   // Monitorar query parameter e caminhos para entrar no modo check-in (com suporte a checkin/slug)
   useEffect(() => {
@@ -968,19 +968,19 @@ export default function App() {
     return () => window.removeEventListener("popstate", handleUrlCheck);
   }, [candidates]);
 
-  // Sync / Load data from Supabase on mount
+  // Sync / Load data from banco de dados on mount
   useEffect(() => {
-    if (!isSupabaseConfigured) {
+    if (!isDatabaseConfigured) {
       console.log(
-        "Supabase não está configurado nas Secrets (VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY). Utilizando armazenamento local.",
+        "Banco de dados não configurado. Usando armazenamento local.",
       );
       return;
     }
 
-    const loadAllFromSupabase = async () => {
-      setIsSyncingSupabase(true);
-      setSupabaseError(null);
-      const res = await SupabaseService.fetchAll();
+    const loadAllFromDatabase = async () => {
+      setIsSyncingDatabase(true);
+      setDatabaseError(null);
+      const res = await DatabaseService.fetchAll();
       if (res.success && res.data) {
         const {
           areas: fetchedAreas,
@@ -988,69 +988,69 @@ export default function App() {
           checkins: fetchedCheckins,
         } = res.data;
 
-        // If Supabase tables are completely empty, let's pre-populate them with our current local storage or initial data
+        // If banco de dados tables are completely empty, let's pre-populate them with our current local storage or initial data
         if (
           fetchedAreas.length === 0 &&
           fetchedPins.length === 0 &&
           fetchedCheckins.length === 0
         ) {
           console.log(
-            "Supabase está configurado mas as tabelas estão vazias. Inicializando Supabase com dados locais...",
+            "Banco de dados vazio. Enviando os dados locais...",
           );
           // Upsert current areas
           for (const a of areas) {
-            await SupabaseService.upsertArea(a);
+            await DatabaseService.upsertArea(a);
           }
           // Upsert current pins
           for (const p of pins) {
-            await SupabaseService.upsertPin(p);
+            await DatabaseService.upsertPin(p);
           }
           // Upsert current checkins
           for (const c of checkIns) {
-            await SupabaseService.upsertCheckIn(c);
+            await DatabaseService.upsertCheckIn(c);
           }
           triggerNotification(
-            "Tabelas do Supabase inicializadas com os dados locais!",
+            "Dados locais enviados para o banco!",
             "success",
           );
         } else {
-          // Update React states with Supabase data
+          // Update React states with banco de dados data
           if (fetchedAreas.length > 0) setAreas(fetchedAreas);
           if (fetchedPins.length > 0) setPins(fetchedPins);
           if (fetchedCheckins.length > 0) setCheckIns(fetchedCheckins);
         }
 
-        // Candidatos e partidos não vêm mais do Supabase: a fonte é o Nexus,
+        // Candidatos e partidos não vêm mais do banco de dados: a fonte é a base externa,
         // carregado no efeito logo abaixo.
 
-        // A Equipe também vem do Nexus, no efeito mais abaixo.
+        // A Equipe também vem da base externa, no efeito mais abaixo.
       } else if (res.error) {
-        setSupabaseError(res.error);
+        setDatabaseError(res.error);
         triggerNotification(res.error, "error");
       }
-      setIsSyncingSupabase(false);
+      setIsSyncingDatabase(false);
     };
 
-    loadAllFromSupabase();
+    loadAllFromDatabase();
   }, []); // Only on mount
 
-  // Tipos de Operação vindos do Supabase.
+  // Tipos de Operação vindos do banco de dados.
   // Banco vazio (primeiro acesso) recebe a lista padrão para que a instalação
   // já comece utilizável; a partir daí quem manda é o que está gravado lá.
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (!isDatabaseConfigured) return;
 
     let active = true;
 
     (async () => {
-      const res = await SupabaseService.fetchOperationTypes();
+      const res = await DatabaseService.fetchOperationTypes();
       if (!active) return;
 
       if (!res.success) return;
 
       if (res.data.length === 0) {
         for (const type of DEFAULT_OPERATION_TYPES) {
-          await SupabaseService.upsertOperationType({
+          await DatabaseService.upsertOperationType({
             ...type,
             createdAt: new Date().toISOString(),
           });
@@ -1071,11 +1071,11 @@ export default function App() {
     };
   }, []);
 
-  // Escuta em Realtime das alterações do Supabase para manter tudo sincronizado de forma instantânea
+  // Escuta em Realtime das alterações do banco de dados para manter tudo sincronizado de forma instantânea
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!isDatabaseConfigured || !db) return;
 
-    const channel = supabase
+    const channel = db
       .channel("realtime_campaign_data")
       .on(
         "postgres_changes",
@@ -1156,7 +1156,7 @@ export default function App() {
       });
 
     return () => {
-      supabase.removeChannel(channel);
+      db.removeChannel(channel);
     };
   }, []);
 
@@ -1655,11 +1655,11 @@ export default function App() {
     creationStateShortName,
   ]);
 
-  // 0.9 Sincronizar apoiador com o Supabase quando carregar a tela de checkin
+  // 0.9 Sincronizar apoiador com o banco de dados quando carregar a tela de checkin
   useEffect(() => {
     if (
       currentUrlView !== "checkin" ||
-      !isSupabaseConfigured ||
+      !isDatabaseConfigured ||
       !authenticatedSupporter?.whatsapp
     )
       return;
@@ -1670,7 +1670,7 @@ export default function App() {
           /\D/g,
           "",
         );
-        const res = await SupabaseService.checkSupporter(cleanWhatsapp);
+        const res = await DatabaseService.checkSupporter(cleanWhatsapp);
         if (res.success && res.supporter) {
           const sup = res.supporter;
           const sName =
@@ -1703,14 +1703,14 @@ export default function App() {
         }
       } catch (err) {
         console.error(
-          "Erro ao sincronizar dados do apoiador com o Supabase:",
+          "Erro ao sincronizar dados do integrante:",
           err,
         );
       }
     };
 
     syncSupporterData();
-  }, [currentUrlView, isSupabaseConfigured]);
+  }, [currentUrlView, isDatabaseConfigured]);
 
   // 1. Load Cities based on selected state UF or Candidate's state
   useEffect(() => {
@@ -2133,11 +2133,11 @@ export default function App() {
     type: "success" | "info" | "error";
   } | null>(null);
 
-  // Carrega partidos e candidatos do Nexus, a fonte oficial desses dados.
+  // Carrega partidos e candidatos da base externa, a fonte oficial desses dados.
   // A lista local só permanece se a consulta falhar, para o sistema não ficar
   // vazio por causa de uma queda momentânea.
-  const [isLoadingNexus, setIsLoadingNexus] = useState(true);
-  const [nexusError, setNexusError] = useState<string | null>(null);
+  const [isLoadingExternal, setIsLoadingExternal] = useState(true);
+  const [externalError, setExternalError] = useState<string | null>(null);
 
   /** Fichas disponíveis para vínculo. Só o modal de vincular usa esta lista. */
   const [externalCandidates, setExternalCandidates] = useState<Candidate[]>([]);
@@ -2151,9 +2151,9 @@ export default function App() {
 
   /** Carrega os clientes do nosso banco: é esta lista que a tela mostra. */
   const reloadClients = async () => {
-    if (!isSupabaseConfigured) return;
+    if (!isDatabaseConfigured) return;
     setIsLoadingClients(true);
-    const res = await SupabaseService.fetchClients();
+    const res = await DatabaseService.fetchClients();
     if (res.success && res.data) {
       setCandidates(res.data);
     }
@@ -2184,9 +2184,9 @@ export default function App() {
         : atual,
     );
 
-    if (isSupabaseConfigured) {
+    if (isDatabaseConfigured) {
       setTogglingTeamId(client.id);
-      const res = await SupabaseService.upsertClient({
+      const res = await DatabaseService.upsertClient({
         ...client,
         syncTeam: novoValor,
       });
@@ -2212,7 +2212,7 @@ export default function App() {
       }
 
       if (!novoValor) {
-        const sup = await SupabaseService.fetchSupporters();
+        const sup = await DatabaseService.fetchSupporters();
         if (sup.success && sup.data) setSupporters(sup.data);
       }
     }
@@ -2232,7 +2232,7 @@ export default function App() {
    * novo atualiza o cadastro em vez de criar um segundo.
    */
   const handleLinkClient = async (ficha: Candidate) => {
-    if (!isSupabaseConfigured) {
+    if (!isDatabaseConfigured) {
       triggerNotification(
         "Configure o banco de dados para vincular clientes.",
         "error",
@@ -2241,7 +2241,7 @@ export default function App() {
     }
 
     setLinkingId(ficha.id);
-    const res = await SupabaseService.upsertClient({
+    const res = await DatabaseService.upsertClient({
       ...ficha,
       source: "vinculado",
       externalId: ficha.externalId || ficha.id,
@@ -2269,7 +2269,7 @@ export default function App() {
     (async () => {
       try {
         const { candidates: externos, parties: partidosExternos } =
-          await fetchNexusData(controller.signal);
+          await fetchExternalData(controller.signal);
         if (!active) return;
 
         // A base externa nao alimenta mais a tela: ela so abastece a lista de
@@ -2277,21 +2277,21 @@ export default function App() {
         // os que estao no nosso banco.
         setExternalCandidates(externos);
         setParties(partidosExternos);
-        setNexusError(null);
+        setExternalError(null);
 
         // Sem banco configurado nao ha onde guardar cliente, entao a lista
         // externa vira a lista da tela para o painel nao ficar vazio.
-        if (!isSupabaseConfigured) {
+        if (!isDatabaseConfigured) {
           setCandidates(externos);
         }
       } catch (err: any) {
         if (!active || err?.name === "AbortError") return;
         console.error("Erro ao carregar a lista de vínculo:", err);
-        setNexusError(
+        setExternalError(
           err?.message || "Não foi possível carregar a lista para vínculo.",
         );
       } finally {
-        if (active) setIsLoadingNexus(false);
+        if (active) setIsLoadingExternal(false);
       }
     })();
 
@@ -2331,7 +2331,7 @@ export default function App() {
         const results = await Promise.all(
           batch.map(async (candidate) => {
             try {
-              const team = await fetchNexusTeam(
+              const team = await fetchExternalTeam(
                 candidate.id,
                 controller.signal,
               );
@@ -2674,10 +2674,10 @@ export default function App() {
       setAreas((prev) =>
         prev.map((a) => (a.id === editingAreaId ? updatedArea : a)),
       );
-      if (isSupabaseConfigured) {
-        SupabaseService.upsertArea(updatedArea).then((res) => {
+      if (isDatabaseConfigured) {
+        DatabaseService.upsertArea(updatedArea).then((res) => {
           if (!res.success)
-            triggerNotification(`Supabase: ${res.error}`, "error");
+            triggerNotification(`Banco de dados: ${res.error}`, "error");
         });
       }
       triggerNotification(
@@ -2703,10 +2703,10 @@ export default function App() {
         assignedDeltas: selectedDeltas,
       };
       setAreas((prev) => [newArea, ...prev]);
-      if (isSupabaseConfigured) {
-        SupabaseService.upsertArea(newArea).then((res) => {
+      if (isDatabaseConfigured) {
+        DatabaseService.upsertArea(newArea).then((res) => {
           if (!res.success)
-            triggerNotification(`Supabase: ${res.error}`, "error");
+            triggerNotification(`Banco de dados: ${res.error}`, "error");
         });
       }
       triggerNotification(
@@ -2824,9 +2824,9 @@ export default function App() {
         : [...prev, saved],
     );
 
-    if (isSupabaseConfigured) {
-      SupabaseService.upsertOperationType(saved).then((res) => {
-        if (!res.success) triggerNotification(`Supabase: ${res.error}`, "error");
+    if (isDatabaseConfigured) {
+      DatabaseService.upsertOperationType(saved).then((res) => {
+        if (!res.success) triggerNotification(`Banco de dados: ${res.error}`, "error");
       });
     }
 
@@ -2868,10 +2868,10 @@ export default function App() {
       onConfirm: () => {
         setOperationTypes((prev) => prev.filter((t) => t.id !== id));
 
-        if (isSupabaseConfigured) {
-          SupabaseService.deleteOperationType(id).then((res) => {
+        if (isDatabaseConfigured) {
+          DatabaseService.deleteOperationType(id).then((res) => {
             if (!res.success)
-              triggerNotification(`Supabase: ${res.error}`, "error");
+              triggerNotification(`Banco de dados: ${res.error}`, "error");
           });
         }
 
@@ -2926,10 +2926,10 @@ export default function App() {
       setPins((prev) =>
         prev.map((p) => (p.id === editingPinId ? updatedPin : p)),
       );
-      if (isSupabaseConfigured) {
-        SupabaseService.upsertPin(updatedPin).then((res) => {
+      if (isDatabaseConfigured) {
+        DatabaseService.upsertPin(updatedPin).then((res) => {
           if (!res.success)
-            triggerNotification(`Supabase: ${res.error}`, "error");
+            triggerNotification(`Banco de dados: ${res.error}`, "error");
         });
       }
       triggerNotification("Ponto estratégico editado!", "success");
@@ -2950,10 +2950,10 @@ export default function App() {
         assignedDeltas: selectedDeltas,
       };
       setPins((prev) => [newPin, ...prev]);
-      if (isSupabaseConfigured) {
-        SupabaseService.upsertPin(newPin).then((res) => {
+      if (isDatabaseConfigured) {
+        DatabaseService.upsertPin(newPin).then((res) => {
           if (!res.success)
-            triggerNotification(`Supabase: ${res.error}`, "error");
+            triggerNotification(`Banco de dados: ${res.error}`, "error");
         });
       }
       triggerNotification(
@@ -2999,10 +2999,10 @@ export default function App() {
       prev.map((a) => {
         if (a.id === id) {
           const updated = { ...a, active: !a.active };
-          if (isSupabaseConfigured) {
-            SupabaseService.upsertArea(updated).then((res) => {
+          if (isDatabaseConfigured) {
+            DatabaseService.upsertArea(updated).then((res) => {
               if (!res.success)
-                triggerNotification(`Supabase: ${res.error}`, "error");
+                triggerNotification(`Banco de dados: ${res.error}`, "error");
             });
           }
           return updated;
@@ -3018,10 +3018,10 @@ export default function App() {
       prev.map((p) => {
         if (p.id === id) {
           const updated = { ...p, active: !p.active };
-          if (isSupabaseConfigured) {
-            SupabaseService.upsertPin(updated).then((res) => {
+          if (isDatabaseConfigured) {
+            DatabaseService.upsertPin(updated).then((res) => {
               if (!res.success)
-                triggerNotification(`Supabase: ${res.error}`, "error");
+                triggerNotification(`Banco de dados: ${res.error}`, "error");
             });
           }
           return updated;
@@ -3043,10 +3043,10 @@ export default function App() {
       onConfirm: () => {
         setAreas((prev) => prev.filter((a) => a.id !== id));
         if (selectedId === id) setSelectedId(null);
-        if (isSupabaseConfigured) {
-          SupabaseService.deleteArea(id).then((res) => {
+        if (isDatabaseConfigured) {
+          DatabaseService.deleteArea(id).then((res) => {
             if (!res.success)
-              triggerNotification(`Supabase: ${res.error}`, "error");
+              triggerNotification(`Banco de dados: ${res.error}`, "error");
           });
         }
         triggerNotification("Área de panfletagem removida", "success");
@@ -3065,10 +3065,10 @@ export default function App() {
       onConfirm: () => {
         setPins((prev) => prev.filter((p) => p.id !== id));
         if (selectedId === id) setSelectedId(null);
-        if (isSupabaseConfigured) {
-          SupabaseService.deletePin(id).then((res) => {
+        if (isDatabaseConfigured) {
+          DatabaseService.deletePin(id).then((res) => {
             if (!res.success)
-              triggerNotification(`Supabase: ${res.error}`, "error");
+              triggerNotification(`Banco de dados: ${res.error}`, "error");
           });
         }
         triggerNotification("Ponto estratégico removido", "success");
@@ -3672,9 +3672,9 @@ export default function App() {
       for (const draft of checkInMediaDrafts) {
         let resolvedUrl: string | null = null;
 
-        if (isSupabaseConfigured) {
+        if (isDatabaseConfigured) {
           try {
-            const uploadRes = await SupabaseService.uploadMedia(draft.file);
+            const uploadRes = await DatabaseService.uploadMedia(draft.file);
             if (uploadRes.success && uploadRes.url) {
               resolvedUrl = uploadRes.url;
             } else {
@@ -3705,7 +3705,7 @@ export default function App() {
 
       if (failedUploads > 0) {
         triggerNotification(
-          `${failedUploads} arquivo(s) não puderam ser enviados. Vídeos precisam do Supabase configurado.`,
+          `${failedUploads} arquivo(s) não puderam ser enviados. Vídeos precisam do banco de dados configurado.`,
           "info",
         );
       }
@@ -3741,11 +3741,11 @@ export default function App() {
           : undefined,
       };
 
-      if (isSupabaseConfigured) {
-        const res = await SupabaseService.upsertCheckIn(newCheckIn);
+      if (isDatabaseConfigured) {
+        const res = await DatabaseService.upsertCheckIn(newCheckIn);
         if (!res.success) {
-          console.error("Erro ao salvar check-in no Supabase:", res.error);
-          triggerNotification(`Erro ao Salvar no Banco: ${res.error || "Erro desconhecido"}. Verifique se a tabela check_ins foi criada corretamente em seu Supabase.`, "error");
+          console.error("Erro ao salvar check-in:", res.error);
+          triggerNotification(`Erro ao salvar no banco: ${res.error || "Erro desconhecido"}. Confira se a tabela check_ins foi criada corretamente.`, "error");
           setIsSubmittingCheckIn(false);
           return; // Block success screen so user knows it failed to persist in backend database
         }
@@ -3759,7 +3759,7 @@ export default function App() {
             image:
               uploadedPhotoUrl || authenticatedSupporter.image || undefined,
           };
-          const supRes = await SupabaseService.upsertSupporter(supporterPayload);
+          const supRes = await DatabaseService.upsertSupporter(supporterPayload);
           if (supRes.success) {
             const updatedAuth = {
               ...authenticatedSupporter,
@@ -3820,7 +3820,7 @@ export default function App() {
           return;
         }
 
-        // A Equipe vem do Nexus, então é nela que o número é procurado
+        // A Equipe vem da base externa, então é nela que o número é procurado
         // primeiro. Só se não houver correspondência o fluxo antigo entra.
         const teamMatch = supporters.find(
           (member: any) =>
@@ -3864,9 +3864,9 @@ export default function App() {
           return;
         }
 
-        if (!isSupabaseConfigured) {
+        if (!isDatabaseConfigured) {
           triggerNotification(
-            "Supabase não configurado. Entrando em modo demonstração.",
+            "Banco de dados não configurado. Entrando em modo demonstração.",
             "info",
           );
           const demoSupporter = {
@@ -3887,7 +3887,7 @@ export default function App() {
         }
 
         setIsVerifyingLogin(true);
-        const res = await SupabaseService.checkSupporter(contactInput);
+        const res = await DatabaseService.checkSupporter(contactInput);
         setIsVerifyingLogin(false);
 
         if (res.success && res.supporter) {
@@ -4041,7 +4041,7 @@ export default function App() {
               <>
                 <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-[#FDEBDD] mb-3">
                   <img
-                    src="https://dwglbabfqopddrqwddmb.supabase.co/storage/v1/object/public/imagens/ChatGPT%20Image%2017%20de%20jun.%20de%202026,%2016_27_00.png"
+                    src={CHECKIN_COVER}
                     alt="Logo Solidariedade"
                     className="w-full h-full object-contain rounded-full"
                     referrerPolicy="no-referrer"
@@ -4172,12 +4172,12 @@ export default function App() {
               </button>
             </form>
 
-            {!isSupabaseConfigured && (
+            {!isDatabaseConfigured && (
               <div className="mt-1 pt-4 border-t border-slate-100/80 space-y-2">
                 <p className="text-[10.5px] text-zinc-500 leading-normal bg-[#FAFAD2]/60 p-3 rounded-2xl border border-[#FAFAD2] text-left font-sans">
-                  ⚠️ <strong>Integração Offline:</strong> VITE_SUPABASE_URL não
-                  foi preenchido. Caso queira testar o fluxo de login de forma
-                  simulada, use o botão de demonstração:
+                  ⚠️ <strong>Integração Offline:</strong> as credenciais do
+                  banco de dados não foram preenchidas. Caso queira testar o
+                  fluxo de login de forma simulada, use o botão de demonstração:
                 </p>
                 <button
                   type="button"
@@ -4465,16 +4465,16 @@ export default function App() {
                 </div>
 
                 {/* Status da Conexão com o Banco de Dados */}
-                {isSupabaseConfigured ? (
-                  supabaseError ? (
+                {isDatabaseConfigured ? (
+                  databaseError ? (
                     <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-left">
                       <div className="flex gap-2.5 items-start">
                         <span className="text-xl">⚠️</span>
                         <div className="font-sans select-none">
                           <h4 className="text-xs font-black text-rose-800 uppercase tracking-widest">Erro de Banco de Dados</h4>
                           <p className="text-[10px] text-rose-600 font-bold mt-1 leading-relaxed">
-                            O Supabase está configurado, mas houve um erro ao sincronizar os dados: <code className="bg-rose-100 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">{supabaseError}</code>. 
-                            Verifique se a tabela <code className="bg-rose-100 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">check_ins</code> e as demais tabelas foram criadas corretamente com o script SQL de instalação disponível no Painel Administrativo.
+                            O banco de dados está configurado, mas houve um erro ao sincronizar: <code className="bg-rose-100 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">{databaseError}</code>. 
+                            Confira se a tabela <code className="bg-rose-100 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">check_ins</code> e as demais foram criadas com o script de instalação.
                           </p>
                         </div>
                       </div>
@@ -4484,7 +4484,7 @@ export default function App() {
                       <div className="flex gap-2 items-center">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                         <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider font-sans select-none">
-                          Sincronização em Tempo Real Ativa (Supabase Conectado)
+                          Sincronização em Tempo Real Ativa
                         </span>
                       </div>
                     </div>
@@ -4496,7 +4496,7 @@ export default function App() {
                       <div className="font-sans select-none">
                         <h4 className="text-xs font-black text-amber-850 uppercase tracking-widest">Aviso: Modo de Teste / Local Ativo</h4>
                         <p className="text-[10px] text-amber-700 font-bold mt-1 leading-relaxed">
-                          As variáveis de ambiente do <strong className="text-amber-900 font-black">Supabase</strong> não foram configuradas nas Secrets da hospedagem deste site (estão faltando <code className="bg-amber-100 text-amber-900 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">VITE_SUPABASE_URL</code> e <code className="bg-amber-100 text-amber-900 px-1 py-0.5 rounded font-mono text-[9px] font-extrabold">VITE_SUPABASE_ANON_KEY</code>).
+                          As credenciais do <strong className="text-amber-900 font-black">banco de dados</strong> não foram configuradas na hospedagem deste site.
                         </p>
                         <p className="text-[10px] text-amber-700 font-bold mt-1 leading-relaxed">
                           O check-in ficará registrado <strong className="text-amber-900 font-black">apenas localmente</strong> na memória deste navegador e não será enviado para o painel consolidado do comitê de campanha.
@@ -5534,9 +5534,9 @@ export default function App() {
         return;
       }
 
-      if (!isSupabaseConfigured) {
+      if (!isDatabaseConfigured) {
         triggerNotification(
-          "Supabase não configurado. Entrando em modo demonstração.",
+          "Banco de dados não configurado. Entrando em modo demonstração.",
           "info",
         );
         const demoUser = { email: adminEmail.trim().toLowerCase() };
@@ -5546,7 +5546,7 @@ export default function App() {
       }
 
       setIsVerifyingAdminLogin(true);
-      const res = await SupabaseService.loginAdmin(adminEmail, adminPassword);
+      const res = await DatabaseService.loginAdmin(adminEmail, adminPassword);
       setIsVerifyingAdminLogin(false);
 
       if (res.success && res.user) {
@@ -5600,7 +5600,7 @@ export default function App() {
         >
           <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-slate-100 mb-3">
             <img
-              src="https://aisfizoyfpcisykarrnt.supabase.co/storage/v1/object/public/imagens/LOGO%20TRIAD3%20.png"
+              src={BRAND_LOGO}
               alt="Logo Inteligência Territorial"
               className="w-full h-full object-contain rounded-full"
               referrerPolicy="no-referrer"
@@ -5731,12 +5731,12 @@ export default function App() {
             </button>
           </form>
 
-          {!isSupabaseConfigured && (
+          {!isDatabaseConfigured && (
             <div className="mt-1 pt-4 border-t border-slate-100/80 space-y-2">
               <p className="text-[10.5px] text-zinc-500 leading-normal bg-[#FAFAD2]/60 p-3 rounded-2xl border border-[#FAFAD2] text-left font-sans">
-                ⚠️ <strong>Integração Offline:</strong> VITE_SUPABASE_URL não
-                foi preenchido. Caso queira testar o fluxo de login de forma
-                simulada, use o botão de demonstração:
+                ⚠️ <strong>Integração Offline:</strong> as credenciais do
+                banco de dados não foram preenchidas. Caso queira testar o
+                fluxo de login de forma simulada, use o botão de demonstração:
               </p>
               <button
                 type="button"
@@ -5890,15 +5890,15 @@ export default function App() {
         raw: candidateEditing?.raw,
       };
 
-      if (isSupabaseConfigured) {
+      if (isDatabaseConfigured) {
         triggerNotification("Salvando cliente...", "info");
-        const res = await SupabaseService.upsertCandidate({
+        const res = await DatabaseService.upsertCandidate({
           id: candidateEditing?.id,
           ...payload,
         });
         if (res.success) {
           triggerNotification("Cliente salvo com sucesso!", "success");
-          const reload = await SupabaseService.fetchCandidates();
+          const reload = await DatabaseService.fetchCandidates();
           if (reload.success && reload.data) {
             setCandidates(reload.data);
           } else {
@@ -5920,7 +5920,7 @@ export default function App() {
           setIsCandidateModalOpen(false);
         } else {
           triggerNotification(
-            `Erro Supabase: ${res.error || "Falha ao salvar"}`,
+            `Erro no banco: ${res.error || "Falha ao salvar"}`,
             "error",
           );
         }
@@ -5951,14 +5951,14 @@ export default function App() {
         message: `${name} sai do painel junto com o mapa isolado dele.`,
         confirmLabel: "Remover cliente",
         onConfirm: async () => {
-          if (isSupabaseConfigured) {
+          if (isDatabaseConfigured) {
             triggerNotification("Excluindo cliente...", "info");
-            const res = await SupabaseService.deleteCandidate(id);
+            const res = await DatabaseService.deleteCandidate(id);
             if (res.success) {
               setCandidates((prev) => prev.filter((c) => c.id !== id));
               triggerNotification("Cliente removido com sucesso!", "success");
             } else {
-              triggerNotification(`Erro Supabase: ${res.error}`, "error");
+              triggerNotification(`Erro no banco: ${res.error}`, "error");
             }
           } else {
             setCandidates((prev) => prev.filter((c) => c.id !== id));
@@ -5978,10 +5978,10 @@ export default function App() {
         ),
       );
 
-      if (isSupabaseConfigured) {
+      if (isDatabaseConfigured) {
         // A ficha inteira vai junto: o upsert grava o registro completo, e
         // mandar só alguns campos apagaria o resto do cadastro.
-        await SupabaseService.upsertClient({ ...cand, status_active: newStatus });
+        await DatabaseService.upsertClient({ ...cand, status_active: newStatus });
       }
       triggerNotification(`Status de ${cand.name} atualizado.`, "success");
     };
@@ -6802,17 +6802,17 @@ export default function App() {
 
                               setSupporters((prev) => [...prev, item]);
 
-                              if (isSupabaseConfigured) {
+                              if (isDatabaseConfigured) {
                                 const addRes =
-                                  await SupabaseService.upsertSupporter(item);
+                                  await DatabaseService.upsertSupporter(item);
                                 if (addRes.success) {
                                   triggerNotification(
-                                    `${newSupName} cadastrado no Supabase!`,
+                                    `${newSupName} cadastrado!`,
                                     "success",
                                   );
                                   // Recarrega lista
                                   const supRes =
-                                    await SupabaseService.fetchSupporters();
+                                    await DatabaseService.fetchSupporters();
                                   if (supRes.success && supRes.data) {
                                     setSupporters(supRes.data);
                                   }
@@ -6922,9 +6922,9 @@ export default function App() {
                                                     (s) => s.id !== sup.id,
                                                   ),
                                                 );
-                                                if (isSupabaseConfigured) {
+                                                if (isDatabaseConfigured) {
                                                   const delRes =
-                                                    await SupabaseService.deleteSupporter(
+                                                    await DatabaseService.deleteSupporter(
                                                       sup.id,
                                                     );
                                                   if (delRes.success) {
@@ -7033,13 +7033,13 @@ export default function App() {
         ) : (
           /* GRADE DE CLIENTES */
           <div className="flex flex-col flex-1 gap-6">
-            {nexusError && !isLinkModalOpen && (
+            {externalError && !isLinkModalOpen && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5">
                 <p className="text-xs font-bold text-amber-800">
                   A lista para vínculo não pôde ser carregada
                 </p>
                 <p className="text-[11px] text-amber-700 mt-1 leading-snug">
-                  {nexusError} Os clientes já cadastrados continuam aqui, e o
+                  {externalError} Os clientes já cadastrados continuam aqui, e o
                   cadastro manual segue funcionando normalmente.
                 </p>
               </div>
@@ -7292,17 +7292,17 @@ export default function App() {
               </div>
 
               <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-2.5">
-                {isLoadingNexus ? (
+                {isLoadingExternal ? (
                   <div className="py-16 text-center text-slate-400 font-bold text-xs uppercase tracking-widest">
                     Carregando lista...
                   </div>
-                ) : nexusError ? (
+                ) : externalError ? (
                   <div className="py-10 px-5 text-center bg-amber-50 border border-amber-200 rounded-2xl">
                     <p className="text-xs font-bold text-amber-800">
                       Não foi possível carregar a lista
                     </p>
                     <p className="text-[11px] text-amber-700 mt-1 leading-snug">
-                      {nexusError}
+                      {externalError}
                     </p>
                   </div>
                 ) : (
@@ -8028,7 +8028,7 @@ export default function App() {
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl overflow-hidden bg-slate-800 border border-slate-700/50 p-1.5 flex items-center justify-center shrink-0">
               <img
-                src="https://aisfizoyfpcisykarrnt.supabase.co/storage/v1/object/public/imagens/LOGO%20TRIAD3%20.png"
+                src={BRAND_LOGO}
                 alt="Triad3 Logo"
                 className="w-full h-full object-contain"
                 referrerPolicy="no-referrer"
@@ -8303,13 +8303,13 @@ export default function App() {
                                     setCheckIns((prev) =>
                                       prev.filter((c) => c.id !== checkIn.id),
                                     );
-                                    if (isSupabaseConfigured) {
-                                      SupabaseService.deleteCheckIn(
+                                    if (isDatabaseConfigured) {
+                                      DatabaseService.deleteCheckIn(
                                         checkIn.id,
                                       ).then((res) => {
                                         if (!res.success)
                                           triggerNotification(
-                                            `Supabase: ${res.error}`,
+                                            `Banco de dados: ${res.error}`,
                                             "error",
                                           );
                                       });
@@ -10833,7 +10833,7 @@ export default function App() {
 
       {/* SUPABASE STATUS AND SQL SETUP MODAL */}
       <AnimatePresence>
-        {showSupabaseSqlModal && (
+        {showDatabaseModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -10855,7 +10855,7 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-extrabold text-indigo-950 text-sm leading-tight uppercase tracking-wider">
-                      Integração Supabase Live
+                      Integração do Banco de Dados
                     </h3>
                     <p className="text-[10px] text-slate-400 mt-0.5">
                       Sincronização de Pins, Check-ins e Áreas em tempo real.
@@ -10864,7 +10864,7 @@ export default function App() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowSupabaseSqlModal(false)}
+                  onClick={() => setShowDatabaseModal(false)}
                   className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -10877,7 +10877,7 @@ export default function App() {
                   <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 block pb-1">
                     Status da Chave
                   </span>
-                  {isSupabaseConfigured ? (
+                  {isDatabaseConfigured ? (
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                       <strong className="text-emerald-700 text-xs font-bold uppercase">
@@ -10893,9 +10893,8 @@ export default function App() {
                         </strong>
                       </div>
                       <p className="text-[10px] text-slate-400 leading-snug">
-                        Insira as credenciais <strong>VITE_SUPABASE_URL</strong>{" "}
-                        e <strong>VITE_SUPABASE_ANON_KEY</strong> em Secrets no
-                        menu de configurações.
+                        Preencha as credenciais do banco de dados nas
+                        variáveis de ambiente da hospedagem.
                       </p>
                     </div>
                   )}
@@ -10905,7 +10904,7 @@ export default function App() {
                   <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 block pb-1">
                     Tabelas e Comunicação
                   </span>
-                  {supabaseError ? (
+                  {databaseError ? (
                     <div className="space-y-1 mt-0.5">
                       <div className="flex items-start gap-1 text-rose-700">
                         <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
@@ -10914,17 +10913,17 @@ export default function App() {
                         </span>
                       </div>
                       <p className="text-[10px] text-rose-500/90 leading-snug">
-                        {supabaseError}
+                        {databaseError}
                       </p>
                     </div>
-                  ) : !isSupabaseConfigured ? (
+                  ) : !isDatabaseConfigured ? (
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="inline-block w-2.5 h-2.5 rounded-full bg-slate-400" />
                       <strong className="text-slate-500 text-xs font-bold uppercase">
                         Aguardando Chaves...
                       </strong>
                     </div>
-                  ) : isSyncingSupabase ? (
+                  ) : isSyncingDatabase ? (
                     <div className="flex items-center gap-2 mt-0.5">
                       <Loader2 className="w-3.5 h-3.5 text-[#3B82F6] animate-spin" />
                       <strong className="text-slate-700 text-xs font-bold uppercase">
@@ -10948,7 +10947,7 @@ export default function App() {
               </div>
 
               {/* Sincronização Manual / Seed */}
-              {isSupabaseConfigured && !supabaseError && (
+              {isDatabaseConfigured && !databaseError && (
                 <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-2xl text-left space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -10956,27 +10955,26 @@ export default function App() {
                         Sincronização Forçada das Tabelas
                       </strong>
                       <p className="text-[10px] text-slate-550 leading-relaxed mt-0.5">
-                        Pressione para fazer o upload e mesclar todos os seus
-                        pins, áreas e check-ins locais ativos atuais diretamente
-                        para seu banco live do Supabase.
+                        Pressione para enviar e mesclar todos os seus pins,
+                        áreas e check-ins locais diretamente no banco de dados.
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={async () => {
-                        setIsSyncingSupabase(true);
+                        setIsSyncingDatabase(true);
                         try {
                           for (const a of areas) {
-                            await SupabaseService.upsertArea(a);
+                            await DatabaseService.upsertArea(a);
                           }
                           for (const p of pins) {
-                            await SupabaseService.upsertPin(p);
+                            await DatabaseService.upsertPin(p);
                           }
                           for (const c of checkIns) {
-                            await SupabaseService.upsertCheckIn(c);
+                            await DatabaseService.upsertCheckIn(c);
                           }
                           triggerNotification(
-                            "Todos os registros locais foram consolidados no Supabase!",
+                            "Todos os registros locais foram enviados ao banco!",
                             "success",
                           );
                         } catch (err: any) {
@@ -10985,69 +10983,29 @@ export default function App() {
                             "error",
                           );
                         } finally {
-                          setIsSyncingSupabase(false);
+                          setIsSyncingDatabase(false);
                         }
                       }}
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer transition-all hover:scale-105 active:scale-95 text-center flex items-center justify-center gap-1 min-w-[130px]"
                     >
-                      {isSyncingSupabase ? (
+                      {isSyncingDatabase ? (
                         <>
                           <Loader2 className="w-3 h-3 animate-spin text-white" />
                           <span>Enviando...</span>
                         </>
                       ) : (
-                        <span>Enviar ao Supabase</span>
+                        <span>Enviar ao banco</span>
                       )}
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Big Explanation & SQL script instructions */}
-              <div className="space-y-1.5 flex-1 flex flex-col min-h-0 text-left">
-                <label className="block text-[10px] uppercase font-bold tracking-wider text-black">
-                  Instalação SQL do Supabase
-                </label>
-                <p className="text-[10.5px] text-slate-500 leading-relaxed">
-                  Para conectar com sucesso, copie e execute o script SQL abaixo
-                  dentro do <strong>SQL Editor</strong> do painel do seu projeto
-                  no Supabase para criar as três tabelas necessárias em um
-                  clique:
-                </p>
-
-                <div className="relative flex-1 min-h-[140px] border border-slate-200 rounded-2xl overflow-hidden bg-slate-905 flex flex-col font-mono text-[11px]">
-                  <textarea
-                    readOnly
-                    value={SUPABASE_SQL_SETUP}
-                    className="w-full flex-1 p-3.5 bg-slate-900 border-none resize-none focus:outline-hidden font-mono text-[10px] text-slate-300 leading-relaxed block overflow-y-auto"
-                  />
-                  <div className="absolute right-3.5 top-3.5 z-[10]">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard
-                          .writeText(SUPABASE_SQL_SETUP)
-                          .then(() => {
-                            triggerNotification(
-                              "Script SQL copiado com sucesso!",
-                              "success",
-                            );
-                          });
-                      }}
-                      className="px-3 py-1.5 bg-slate-850 hover:bg-slate-800 text-zinc-300 hover:text-white rounded-lg cursor-pointer border border-slate-750 font-bold transition-all flex items-center gap-1.5 active:scale-95 text-[9px] uppercase tracking-wider"
-                    >
-                      <Share2 className="w-3 h-3" />
-                      <span>Copiar Código</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
               {/* Footer */}
               <div className="flex gap-3 pt-1 justify-end">
                 <button
                   type="button"
-                  onClick={() => setShowSupabaseSqlModal(false)}
+                  onClick={() => setShowDatabaseModal(false)}
                   className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-colors shadow-3xs"
                 >
                   Fechar
