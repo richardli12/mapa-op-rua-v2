@@ -7446,12 +7446,6 @@ export default function App() {
                           aria-hidden="true"
                           referrerPolicy="no-referrer"
                           className="absolute inset-0 w-full h-full object-cover opacity-60"
-                          onError={(e) => {
-                            // Endereço fora do ar não pode deixar a capa preta
-                            // sem explicação: entra a imagem antiga no lugar.
-                            const img = e.currentTarget as HTMLImageElement;
-                            if (img.src !== CHECKIN_COVER) img.src = CHECKIN_COVER;
-                          }}
                         />
                         <div className="absolute inset-0 bg-linear-to-r from-[#0D233A] via-[#0D233A]/70 to-[#0D233A]/20" />
 
