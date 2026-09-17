@@ -7037,6 +7037,71 @@ export default function App() {
                 };
               });
 
+            // Ranking de check-ins: quem mais registrou vem primeiro. A conta
+            // usa o id do integrante e cai no nome quando o registro é antigo
+            // e não guardou o id.
+            const porIntegrante: {
+              chave: string;
+              nome: string;
+              foto?: string;
+              total: number;
+            }[] = [];
+            checkInsDoCliente.forEach((c: any) => {
+              const chave = c.memberId || c.name;
+              if (!chave) return;
+              const atual = porIntegrante.find((i) => i.chave === chave);
+              if (atual) {
+                atual.total += 1;
+                return;
+              }
+              const integrante = equipeDoCliente.find(
+                (m: any) => m.id === c.memberId || m.full_name === c.name,
+              );
+              porIntegrante.push({
+                chave,
+                nome: integrante?.full_name || c.name || "Sem nome",
+                foto: integrante?.image || c.memberPhoto,
+                total: 1,
+              });
+            });
+            const ranking = [...porIntegrante]
+              .sort((a, b) => b.total - a.total)
+              .slice(0, 5);
+            const maiorDoRanking = ranking[0]?.total || 1;
+
+            // Ranking dos problemas: quantas vezes cada tipo de ocorrência foi
+            // registrado. A cor vem do tipo cadastrado para este cliente, a
+            // mesma que ele tem no resto do sistema.
+            const tiposDoCliente = operationTypes.filter(
+              (t) => t.candidateId === inspectedCandidate.id,
+            );
+            const porProblema: {
+              chave: string;
+              rotulo: string;
+              cor: string;
+              total: number;
+            }[] = [];
+            checkInsDoCliente.forEach((c: any) => {
+              const tipo = tiposDoCliente.find((t) => t.id === c.operationTypeId);
+              const rotulo = c.operationTypeLabel || tipo?.label;
+              if (!rotulo) return;
+              const atual = porProblema.find((i) => i.chave === rotulo);
+              if (atual) {
+                atual.total += 1;
+                return;
+              }
+              porProblema.push({
+                chave: rotulo,
+                rotulo,
+                cor: tipo?.color || "#94A3B8",
+                total: 1,
+              });
+            });
+            const rankingProblemas = [...porProblema]
+              .sort((a, b) => b.total - a.total)
+              .slice(0, 5);
+            const maiorDosProblemas = rankingProblemas[0]?.total || 1;
+
             // A legenda explica o que está desenhado: só entram as cores que
             // aparecem de fato nos pinos deste cliente.
             const legendaDoMapa: { chave: string; rotulo: string; cor: string }[] = [];
@@ -7058,36 +7123,6 @@ export default function App() {
               { id: "checkins" as const, rotulo: "Check-ins" },
             ];
 
-            const AcaoRapida = ({
-              icone,
-              titulo,
-              descricao,
-              onClick,
-            }: {
-              icone: React.ReactNode;
-              titulo: string;
-              descricao: string;
-              onClick: () => void;
-            }) => (
-              <button
-                type="button"
-                onClick={onClick}
-                className="w-full flex items-center gap-3 p-3.5 rounded-2xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50/70 transition-all cursor-pointer text-left"
-              >
-                <span className="w-10 h-10 rounded-xl bg-[#F1F5FB] text-[#015FC9] flex items-center justify-center shrink-0">
-                  {icone}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-black text-slate-800 leading-tight">
-                    {titulo}
-                  </span>
-                  <span className="block text-[11px] text-slate-400 font-semibold truncate">
-                    {descricao}
-                  </span>
-                </span>
-                <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
-              </button>
-            );
 
             return (
           <div className="flex flex-col flex-1 gap-5 font-sans">
@@ -7374,98 +7409,149 @@ export default function App() {
 
                   <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
                     <div className="flex items-center gap-2.5 mb-3">
-                      <Sparkles className="w-5 h-5 text-[#015FC9]" />
-                      <h3 className="text-[15px] font-black text-[#0D233A]">
-                        Ações rápidas
-                      </h3>
+                      <AlertCircle className="w-5 h-5 text-[#015FC9]" />
+                      <div>
+                        <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                          Ranking de problemas
+                        </h3>
+                        <p className="text-[11px] text-slate-400 font-semibold">
+                          O que mais aparece nos check-ins
+                        </p>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <AcaoRapida
-                        icone={<Users className="w-4 h-4" />}
-                        titulo="Gerenciar equipe"
-                        descricao="Membros, convites e campos"
-                        onClick={() => setAbaCliente("equipe")}
-                      />
-                      <AcaoRapida
-                        icone={<Settings className="w-4 h-4" />}
-                        titulo="Tipos de operação"
-                        descricao="Configurar opções deste cliente"
-                        onClick={openOperationTypesManager}
-                      />
-                      <AcaoRapida
-                        icone={<MapPin className="w-4 h-4" />}
-                        titulo="Campos de coleta"
-                        descricao="Personalizar dados da equipe"
-                        onClick={() => setTeamModal("campos")}
-                      />
-                    </div>
+
+                    {rankingProblemas.length === 0 ? (
+                      <div className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                        Nenhum problema registrado ainda
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2.5">
+                        {rankingProblemas.map((item, posicao) => (
+                          <div
+                            key={item.chave}
+                            className="flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100"
+                          >
+                            <span
+                              className={`w-6 h-6 rounded-lg text-[11px] font-black flex items-center justify-center shrink-0 ${
+                                posicao === 0
+                                  ? "bg-amber-100 text-amber-700"
+                                  : posicao === 1
+                                    ? "bg-slate-200 text-slate-600"
+                                    : posicao === 2
+                                      ? "bg-orange-100 text-orange-700"
+                                      : "bg-slate-50 text-slate-400"
+                              }`}
+                            >
+                              {posicao + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[13px] font-black text-slate-800 truncate leading-tight flex items-center gap-1.5">
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                                  style={{ backgroundColor: item.cor }}
+                                />
+                                <span className="truncate">{item.rotulo}</span>
+                              </p>
+                              {/* A barra compara com o problema mais registrado. */}
+                              <span className="mt-1 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                <span
+                                  className="block h-full rounded-full"
+                                  style={{
+                                    width: `${(item.total / maiorDosProblemas) * 100}%`,
+                                    backgroundColor: item.cor,
+                                  }}
+                                />
+                              </span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[15px] font-black text-[#0D233A] leading-none">
+                                {item.total}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-bold">
+                                {item.total === 1 ? "registro" : "registros"}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
                     <div className="flex items-center gap-2.5 mb-3">
-                      <Compass className="w-5 h-5 text-emerald-600" />
+                      <Star className="w-5 h-5 text-emerald-600" />
                       <div>
                         <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
-                          Equipe em campo
+                          Ranking da equipe
                         </h3>
                         <p className="text-[11px] text-slate-400 font-semibold">
-                          Membros que registraram algo hoje
+                          Quem mais registrou em campo
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex -space-x-2">
-                        {equipeDoCliente.slice(0, 4).map((m: any) => (
-                          <span
-                            key={m.id}
-                            className="w-10 h-10 rounded-full border-2 border-white bg-slate-100 overflow-hidden flex items-center justify-center"
-                            title={m.full_name}
+                    {ranking.length === 0 ? (
+                      <div className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                        Nenhum check-in registrado ainda
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2.5">
+                        {ranking.map((item, posicao) => (
+                          <div
+                            key={item.chave}
+                            className="flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100"
                           >
-                            {m.image ? (
-                              <img
-                                src={m.image}
-                                alt={m.full_name}
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <span className="text-[10px] font-black text-slate-500 uppercase">
-                                {(m.full_name || "?").substring(0, 2)}
+                            <span
+                              className={`w-6 h-6 rounded-lg text-[11px] font-black flex items-center justify-center shrink-0 ${
+                                posicao === 0
+                                  ? "bg-amber-100 text-amber-700"
+                                  : posicao === 1
+                                    ? "bg-slate-200 text-slate-600"
+                                    : posicao === 2
+                                      ? "bg-orange-100 text-orange-700"
+                                      : "bg-slate-50 text-slate-400"
+                              }`}
+                            >
+                              {posicao + 1}
+                            </span>
+                            <span className="w-9 h-9 rounded-full bg-slate-100 overflow-hidden flex items-center justify-center shrink-0">
+                              {item.foto ? (
+                                <img
+                                  src={item.foto}
+                                  alt={item.nome}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <span className="text-[10px] font-black text-slate-500">
+                                  {item.nome.slice(0, 2).toUpperCase()}
+                                </span>
+                              )}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[13px] font-black text-slate-800 truncate leading-tight">
+                                {item.nome}
+                              </p>
+                              {/* A barra compara com o primeiro colocado. */}
+                              <span className="mt-1 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                <span
+                                  className="block h-full rounded-full bg-emerald-500"
+                                  style={{
+                                    width: `${(item.total / maiorDoRanking) * 100}%`,
+                                  }}
+                                />
                               </span>
-                            )}
-                          </span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[15px] font-black text-[#0D233A] leading-none">
+                                {item.total}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-bold">
+                                {item.total === 1 ? "check-in" : "check-ins"}
+                              </p>
+                            </div>
+                          </div>
                         ))}
-                        {equipeDoCliente.length === 0 && (
-                          <span className="text-[11px] text-slate-400 font-semibold">
-                            Sem integrantes vinculados
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-xl font-black text-[#0D233A] leading-none">
-                          {emCampo.size}
-                        </p>
-                        <p className="text-[10px] text-slate-400 font-semibold">
-                          ativo agora
-                        </p>
-                      </div>
-                    </div>
-
-                    {checkInsDeHoje.length > 0 && (
-                      <div className="mt-3 bg-emerald-50/70 border border-emerald-100 rounded-2xl px-3.5 py-2.5">
-                        <p className="text-[12px] font-bold text-emerald-900">
-                          {checkInsDeHoje[0].name} está em campo
-                        </p>
-                        <p className="text-[10.5px] text-emerald-700/80 font-semibold">
-                          Último registro às{" "}
-                          {new Date(
-                            checkInsDeHoje[0].createdAt,
-                          ).toLocaleTimeString("pt-BR", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
                       </div>
                     )}
                   </div>
