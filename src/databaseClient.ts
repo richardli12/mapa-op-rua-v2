@@ -1080,6 +1080,39 @@ export const DatabaseService = {
     }
   },
 
+  // ----------------------------------------------------------- configuracoes
+  /** Lê um ajuste do sistema. Sem banco ou sem valor, devolve vazio. */
+  async lerConfiguracao(chave: string) {
+    if (!db) return { success: false, value: '' };
+    try {
+      const { data, error } = await db
+        .from('app_settings')
+        .select('value')
+        .eq('key', chave)
+        .limit(1);
+      if (error) throw error;
+      return { success: true, value: data?.[0]?.value || '' };
+    } catch (err: any) {
+      console.error('Erro ao ler configuração:', err);
+      return { success: false, value: '', error: err.message };
+    }
+  },
+
+  /** Grava um ajuste do sistema. */
+  async gravarConfiguracao(chave: string, valor: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('app_settings')
+        .upsert({ key: chave, value: valor, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao gravar configuração:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
   async loginAdmin(email: string, password: string) {
     if (!db) {
       return { success: false, error: 'banco de dados não configurado.' };
