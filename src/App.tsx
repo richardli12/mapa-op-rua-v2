@@ -4578,35 +4578,73 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Malha de pontos ligados, no canto de cima */}
-          <svg
-            className="absolute -top-2 right-0 w-[62%] max-w-[320px] pointer-events-none"
-            viewBox="0 0 240 190"
-            fill="none"
-            aria-hidden="true"
+          {/* Malha de pontos ligados, ocupando o topo.
+              O espaço acima do título não é sobra: é a área do desenho. A
+              malha atravessa a tela toda, em tom bem baixo, para o vazio virar
+              composição em vez de buraco. */}
+          <div
+            className="absolute inset-x-0 top-0 h-[62%] pointer-events-none overflow-hidden"
+            style={{
+              // O desenho some por transparência, não por cima de uma cor:
+              // pintar uma faixa deixaria emenda visível contra o degradê.
+              maskImage:
+                'linear-gradient(to bottom, #000 58%, rgba(0,0,0,.35) 82%, transparent 100%)',
+              WebkitMaskImage:
+                'linear-gradient(to bottom, #000 58%, rgba(0,0,0,.35) 82%, transparent 100%)'
+            }}
           >
-            <path
-              d="M96 66 L152 30 M152 30 L214 52 M214 52 L186 104 M186 104 L152 30 M186 104 L232 132"
-              stroke="#0C3556"
-              strokeOpacity="0.16"
-              strokeWidth="1.2"
-            />
-            {[
-              [96, 66, 5],
-              [152, 30, 6],
-              [214, 52, 5.5],
-              [186, 104, 5],
-              [232, 132, 4.5]
-            ].map(([cx, cy, r], i) => (
-              <circle key={i} cx={cx} cy={cy} r={r} fill="#0C3556" fillOpacity="0.2" />
-            ))}
-          </svg>
+            <svg
+              className="absolute inset-0 w-full h-full"
+              viewBox="0 0 390 520"
+              preserveAspectRatio="xMidYMin slice"
+              fill="none"
+              aria-hidden="true"
+            >
+              <defs>
+                <radialGradient id="brilhoMalha" cx="72%" cy="18%" r="62%">
+                  <stop offset="0%" stopColor="#0C3556" stopOpacity="0.10" />
+                  <stop offset="100%" stopColor="#0C3556" stopOpacity="0" />
+                </radialGradient>
+              </defs>
+              <rect width="390" height="520" fill="url(#brilhoMalha)" />
+              <path
+                d="M232 92 L300 44 M300 44 L362 74 M362 74 L330 150 M330 150 L300 44 M330 150 L378 196
+                   M232 92 L168 168 M168 168 L86 132 M86 132 L24 190 M168 168 L212 268 M212 268 L330 150
+                   M212 268 L120 330 M120 330 L24 190 M120 330 L268 392 M268 392 L378 196"
+                stroke="#0C3556"
+                strokeOpacity="0.13"
+                strokeWidth="1.1"
+                strokeLinecap="round"
+              />
+              {[
+                [300, 44, 6.5],
+                [362, 74, 5],
+                [330, 150, 5.5],
+                [378, 196, 4.5],
+                [232, 92, 5],
+                [168, 168, 5.5],
+                [86, 132, 4.5],
+                [24, 190, 5],
+                [212, 268, 6],
+                [120, 330, 5],
+                [268, 392, 4.5]
+              ].map(([cx, cy, r], i) => (
+                <g key={i}>
+                  <circle cx={cx} cy={cy} r={r * 2.6} fill="#0C3556" fillOpacity="0.05" />
+                  <circle cx={cx} cy={cy} r={r} fill="#0C3556" fillOpacity="0.2" />
+                </g>
+              ))}
+            </svg>
+          </div>
 
-          {/* Cabeçalho */}
+          {/* Cabeçalho.
+              Ele fica com a sobra da tela e empurra o título para baixo, até
+              encostar no cartão. Assim o espaço que sobra vira respiro no topo,
+              atrás da malha de pontos, em vez de um buraco embaixo do botão. */}
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            className="relative px-7 pt-8 pb-5 select-none"
+            className="relative flex-1 min-h-0 flex flex-col px-7 pt-8 pb-7 select-none"
           >
             <div className="flex items-center gap-3">
               <span className="w-12 h-12 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0">
@@ -4618,22 +4656,12 @@ export default function App() {
             </div>
 
             <h1
-              className="mt-6 leading-[1.14] font-extrabold text-[#0C3556] tracking-tight"
-              style={{ fontSize: 'clamp(23px, 7.1vw, 32px)' }}
+              className="mt-auto pt-10 leading-[1.14] font-extrabold text-[#0C3556] tracking-tight"
+              style={{ fontSize: 'clamp(26px, 8vw, 36px)' }}
             >
-              {activeCandidate ? (
-                <>
-                  Pronto para
-                  <br />
-                  entrar em campo?
-                </>
-              ) : (
-                <>
-                  Pronto para
-                  <br />
-                  entrar em campo?
-                </>
-              )}
+              Pronto para
+              <br />
+              entrar em campo?
             </h1>
           </motion.div>
 
@@ -4641,7 +4669,7 @@ export default function App() {
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            className="relative flex-1 min-h-0 bg-white rounded-t-[2rem] shadow-[0_-8px_30px_rgba(12,53,86,.10)] px-7 pt-7 pb-8 overflow-y-auto"
+            className="relative shrink-0 bg-white rounded-t-[2rem] shadow-[0_-8px_30px_rgba(12,53,86,.10)] px-7 pt-7 pb-[max(2rem,env(safe-area-inset-bottom))]"
           >
             <div className="max-w-[420px] mx-auto w-full">
               <p className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[#9AA9B8]">
