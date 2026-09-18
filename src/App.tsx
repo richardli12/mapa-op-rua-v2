@@ -4578,179 +4578,180 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Malha de pontos ligados, ocupando o topo.
-              O espaço acima do título não é sobra: é a área do desenho. A
-              malha atravessa a tela toda, em tom bem baixo, para o vazio virar
-              composição em vez de buraco. */}
+          {/* Malha de pontos ligados, de fundo.
+              Fica atrás de tudo, bem discreta, e some antes do rodapé. */}
           <div
-            className="absolute inset-x-0 top-0 h-[62%] pointer-events-none overflow-hidden"
+            className="absolute inset-0 pointer-events-none overflow-hidden"
             style={{
-              // O desenho some por transparência, não por cima de uma cor:
-              // pintar uma faixa deixaria emenda visível contra o degradê.
+              // Forte no topo e um sussurro embaixo: a malha envolve a
+              // composição inteira, sem deixar metade da tela pelada.
               maskImage:
-                'linear-gradient(to bottom, #000 58%, rgba(0,0,0,.35) 82%, transparent 100%)',
+                'linear-gradient(to bottom, #000 0%, #000 42%, rgba(0,0,0,.28) 68%, rgba(0,0,0,.16) 100%)',
               WebkitMaskImage:
-                'linear-gradient(to bottom, #000 58%, rgba(0,0,0,.35) 82%, transparent 100%)'
+                'linear-gradient(to bottom, #000 0%, #000 42%, rgba(0,0,0,.28) 68%, rgba(0,0,0,.16) 100%)'
             }}
           >
             <svg
               className="absolute inset-0 w-full h-full"
-              viewBox="0 0 390 520"
-              preserveAspectRatio="xMidYMin slice"
+              viewBox="0 0 390 700"
+              preserveAspectRatio="xMidYMid slice"
               fill="none"
               aria-hidden="true"
             >
               <defs>
-                <radialGradient id="brilhoMalha" cx="72%" cy="18%" r="62%">
-                  <stop offset="0%" stopColor="#0C3556" stopOpacity="0.10" />
+                <radialGradient id="brilhoMalha" cx="74%" cy="16%" r="60%">
+                  <stop offset="0%" stopColor="#0C3556" stopOpacity="0.09" />
                   <stop offset="100%" stopColor="#0C3556" stopOpacity="0" />
                 </radialGradient>
               </defs>
-              <rect width="390" height="520" fill="url(#brilhoMalha)" />
+              <rect width="390" height="700" fill="url(#brilhoMalha)" />
               <path
-                d="M232 92 L300 44 M300 44 L362 74 M362 74 L330 150 M330 150 L300 44 M330 150 L378 196
-                   M232 92 L168 168 M168 168 L86 132 M86 132 L24 190 M168 168 L212 268 M212 268 L330 150
-                   M212 268 L120 330 M120 330 L24 190 M120 330 L268 392 M268 392 L378 196"
+                d="M232 82 L300 38 M300 38 L362 66 M362 66 L330 134 M330 134 L300 38 M330 134 L378 176
+                   M232 82 L168 150 M168 150 L86 118 M86 118 L24 170 M168 150 L212 240 M212 240 L330 134
+                   M212 240 L120 296 M120 296 L24 170 M120 296 L268 352 M268 352 L378 176
+                   M268 352 L196 470 M196 470 L64 424 M196 470 L318 556 M318 556 L378 176
+                   M196 470 L120 620 M120 620 L64 424 M120 620 L286 668 M286 668 L318 556"
                 stroke="#0C3556"
-                strokeOpacity="0.13"
+                strokeOpacity="0.12"
                 strokeWidth="1.1"
                 strokeLinecap="round"
               />
               {[
-                [300, 44, 6.5],
-                [362, 74, 5],
-                [330, 150, 5.5],
-                [378, 196, 4.5],
-                [232, 92, 5],
-                [168, 168, 5.5],
-                [86, 132, 4.5],
-                [24, 190, 5],
-                [212, 268, 6],
-                [120, 330, 5],
-                [268, 392, 4.5]
+                [300, 38, 6],
+                [362, 66, 4.5],
+                [330, 134, 5],
+                [378, 176, 4],
+                [232, 82, 4.5],
+                [168, 150, 5],
+                [86, 118, 4],
+                [24, 170, 4.5],
+                [212, 240, 5.5],
+                [120, 296, 4.5],
+                [268, 352, 4],
+                [196, 470, 5],
+                [64, 424, 4],
+                [318, 556, 4.5],
+                [120, 620, 4],
+                [286, 668, 3.5]
               ].map(([cx, cy, r], i) => (
                 <g key={i}>
-                  <circle cx={cx} cy={cy} r={r * 2.6} fill="#0C3556" fillOpacity="0.05" />
-                  <circle cx={cx} cy={cy} r={r} fill="#0C3556" fillOpacity="0.2" />
+                  <circle cx={cx} cy={cy} r={r * 2.6} fill="#0C3556" fillOpacity="0.045" />
+                  <circle cx={cx} cy={cy} r={r} fill="#0C3556" fillOpacity="0.18" />
                 </g>
               ))}
             </svg>
           </div>
 
-          {/* Cabeçalho.
-              Ele fica com a sobra da tela e empurra o título para baixo, até
-              encostar no cartão. Assim o espaço que sobra vira respiro no topo,
-              atrás da malha de pontos, em vez de um buraco embaixo do botão. */}
+          {/* Uma composição só, centrada na tela.
+              O formulário é curto e o celular é alto: em vez de esticar cartão
+              ou empilhar tudo no topo, marca, título e cartão viajam juntos no
+              meio, e a sobra vira margem igual em cima e embaixo. */}
           <motion.div
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
-            className="relative flex-1 min-h-0 flex flex-col px-7 pt-8 pb-7 select-none"
+            className="relative flex-1 min-h-0 flex items-center justify-center px-6 py-8"
           >
-            <div className="flex items-center gap-3">
-              <span className="w-12 h-12 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0">
-                <BrandMark size={44} rounded={14} variant="clara" />
-              </span>
-              <span className="text-[17px] font-extrabold text-[#0C3556] tracking-tight">
-                Mapa Operacional
-              </span>
-            </div>
+            <div className="w-full max-w-[400px]">
+              <div className="flex items-center gap-3 select-none">
+                <span className="w-12 h-12 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0">
+                  <BrandMark size={44} rounded={14} variant="clara" />
+                </span>
+                <span className="text-[17px] font-extrabold text-[#0C3556] tracking-tight">
+                  Mapa Operacional
+                </span>
+              </div>
 
-            <h1
-              className="mt-auto pt-10 leading-[1.14] font-extrabold text-[#0C3556] tracking-tight"
-              style={{ fontSize: 'clamp(26px, 8vw, 36px)' }}
-            >
-              Pronto para
-              <br />
-              entrar em campo?
-            </h1>
-          </motion.div>
+              <h1
+                className="mt-6 leading-[1.12] font-extrabold text-[#0C3556] tracking-tight select-none"
+                style={{ fontSize: 'clamp(27px, 8.4vw, 34px)' }}
+              >
+                Pronto para
+                <br />
+                entrar em campo?
+              </h1>
 
-          {/* Cartão de identificação */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="relative shrink-0 bg-white rounded-t-[2rem] shadow-[0_-8px_30px_rgba(12,53,86,.10)] px-7 pt-7 pb-[max(2rem,env(safe-area-inset-bottom))]"
-          >
-            <div className="max-w-[420px] mx-auto w-full">
-              <p className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[#9AA9B8]">
-                Identificação
-              </p>
-              <span className="block w-9 h-[3px] rounded-full bg-[#E3E9EF] mt-2.5" />
+              <div className="mt-7 bg-white rounded-[1.75rem] shadow-[0_18px_40px_-18px_rgba(12,53,86,.35)] border border-white/70 px-6 py-7">
+                <p className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[#9AA9B8]">
+                  Identificação
+                </p>
+                <span className="block w-9 h-[3px] rounded-full bg-[#E3E9EF] mt-2.5" />
 
-              <form onSubmit={handleLoginSubmit} className="mt-6 text-left">
-                <label className="block text-[12px] font-extrabold uppercase tracking-wider text-[#5A6E85]">
-                  Telefone (WhatsApp)
-                </label>
+                <form onSubmit={handleLoginSubmit} className="mt-5 text-left">
+                  <label className="block text-[12px] font-extrabold uppercase tracking-wider text-[#5A6E85]">
+                    Telefone (WhatsApp)
+                  </label>
 
-                <div className="mt-2.5 rounded-2xl bg-[#F4F7FA] border border-[#E4EBF1] flex items-center px-4 overflow-hidden transition-all focus-within:border-[#F58220] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#F58220]/12">
-                  <Phone className="w-5 h-5 text-[#F58220] shrink-0 mr-3" />
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    required
-                    placeholder="(00) 00000-0000"
-                    value={loginWhatsapp}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      const digits = val.replace(/\D/g, "");
-                      if (digits.length <= 11) {
-                        let masked = "";
-                        if (digits.length > 0) {
-                          if (digits.length <= 2) {
-                            masked = `(${digits}`;
-                          } else if (digits.length <= 6) {
-                            masked = `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
-                          } else if (digits.length <= 10) {
-                            masked = `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
-                          } else {
-                            masked = `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+                  <div className="mt-2.5 rounded-2xl bg-[#F4F7FA] border border-[#E4EBF1] flex items-center px-4 overflow-hidden transition-all focus-within:border-[#F58220] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#F58220]/12">
+                    <Phone className="w-5 h-5 text-[#F58220] shrink-0 mr-3" />
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      required
+                      placeholder="(00) 00000-0000"
+                      value={loginWhatsapp}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const digits = val.replace(/\D/g, "");
+                        if (digits.length <= 11) {
+                          let masked = "";
+                          if (digits.length > 0) {
+                            if (digits.length <= 2) {
+                              masked = `(${digits}`;
+                            } else if (digits.length <= 6) {
+                              masked = `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+                            } else if (digits.length <= 10) {
+                              masked = `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+                            } else {
+                              masked = `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+                            }
                           }
+                          setLoginWhatsapp(masked);
                         }
-                        setLoginWhatsapp(masked);
-                      }
-                    }}
-                    className="w-full py-4 bg-transparent border-none text-[15px] font-bold text-[#0C3556] placeholder-[#B9C6D2] focus:outline-hidden"
-                  />
-                </div>
+                      }}
+                      className="w-full py-4 bg-transparent border-none text-[15px] font-bold text-[#0C3556] placeholder-[#B9C6D2] focus:outline-hidden"
+                    />
+                  </div>
 
-                <button
-                  type="submit"
-                  disabled={
-                    isVerifyingLogin ||
-                    loginWhatsapp.replace(/\D/g, "").length < 10
-                  }
-                  className="mt-5 w-full py-4 bg-[#0C3556] hover:bg-[#10406A] focus:ring-4 focus:ring-[#0C3556]/20 disabled:bg-[#C2D0DC] disabled:cursor-not-allowed text-white font-extrabold text-[12.5px] uppercase tracking-wider rounded-xl transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {isVerifyingLogin ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Validando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Entrar no Painel</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </form>
-
-              {!isDatabaseConfigured && (
-                <div className="mt-4 space-y-2">
-                  <p className="text-[10.5px] text-zinc-500 leading-normal bg-[#FAFAD2]/60 p-3 rounded-2xl border border-[#FAFAD2] text-left font-sans">
-                    ⚠️ <strong>Integração Offline:</strong> as credenciais do
-                    banco de dados não foram preenchidas. Caso queira testar o
-                    fluxo de login de forma simulada, use o botão de demonstração:
-                  </p>
                   <button
-                    type="button"
-                    onClick={handleDemoBypass}
-                    className="w-full py-3 bg-[#EBF1F6] hover:bg-[#DDE5EE] text-[#5A6E85] font-bold text-xs rounded-xl transition-all cursor-pointer"
+                    type="submit"
+                    disabled={
+                      isVerifyingLogin ||
+                      loginWhatsapp.replace(/\D/g, "").length < 10
+                    }
+                    className="mt-4 w-full py-4 bg-[#0C3556] hover:bg-[#10406A] focus:ring-4 focus:ring-[#0C3556]/20 disabled:bg-[#C2D0DC] disabled:cursor-not-allowed text-white font-extrabold text-[12.5px] uppercase tracking-wider rounded-xl transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    Demonstração Bypass (Apoiador Demo)
+                    {isVerifyingLogin ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Validando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Entrar no Painel</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
-                </div>
-              )}
+                </form>
+
+                {!isDatabaseConfigured && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-[10.5px] text-zinc-500 leading-normal bg-[#FAFAD2]/60 p-3 rounded-2xl border border-[#FAFAD2] text-left font-sans">
+                      ⚠️ <strong>Integração Offline:</strong> as credenciais do
+                      banco de dados não foram preenchidas. Caso queira testar o
+                      fluxo de login de forma simulada, use o botão de
+                      demonstração:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleDemoBypass}
+                      className="w-full py-3 bg-[#EBF1F6] hover:bg-[#DDE5EE] text-[#5A6E85] font-bold text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                      Demonstração Bypass (Apoiador Demo)
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </motion.div>
         </div>
