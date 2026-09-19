@@ -19,6 +19,7 @@ import {
   CLIENT_CARD_COVER,
 } from "./mediaUrls";
 import OperationTypeSelect from "./components/OperationTypeSelect";
+import FiltroCheckIns, { PessoaDoFiltro } from "./components/FiltroCheckIns";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
 import { lerDispositivo } from "./services/dispositivo";
@@ -840,6 +841,18 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+  /* ------------------------------------------------------- filtro do mapa ---
+   * Quatro cortes sobre os check-ins desenhados: quem, quando, com que
+   * urgência e fazendo o quê. Ficam aqui em cima porque é daqui que sai a
+   * lista que o mapa recebe.
+   */
+  const [filtroCheckInsAberto, setFiltroCheckInsAberto] = useState(false);
+  const [filtroPessoas, setFiltroPessoas] = useState<string[]>([]);
+  const [filtroDe, setFiltroDe] = useState("");
+  const [filtroAte, setFiltroAte] = useState("");
+  const [filtroNiveis, setFiltroNiveis] = useState<string[]>([]);
+  const [filtroTiposAcao, setFiltroTiposAcao] = useState<string[]>([]);
+
   const [mapFilter, setMapFilter] = useState<"all" | "checkins" | "markers" | "favoritos">(
     "all",
   );
@@ -3877,32 +3890,177 @@ export default function App() {
     searchQuery,
   ]);
 
-  const filteredCheckIns = React.useMemo(() => checkIns.filter((c) => {
-    // Registro na lixeira não aparece no mapa nem nas contas.
-    if (c.trashed) return false;
-    const activeCandidate =
-      currentUrlView === "checkin"
-        ? checkInCandidateId
-        : selectedCandidateFilter;
-    if (
-      activeCandidate &&
-      activeCandidate !== "all" &&
-      c.candidateId !== activeCandidate
-    ) {
-      return false;
-    }
-    return (
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.bairro || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.rua || "").toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }), [
-    checkIns,
-    currentUrlView,
-    checkInCandidateId,
-    selectedCandidateFilter,
-    searchQuery,
-  ]);
+  /** Id do cliente cujo mapa está aberto agora. */
+  const clienteEmFoco =
+    currentUrlView === "checkin" ? checkInCandidateId : selectedCandidateFilter;
+
+  /** Equipe do cliente em foco, que povoa a lista de pessoas do filtro. */
+  const equipeDoMapa = React.useMemo(
+    () =>
+      !clienteEmFoco || clienteEmFoco === "all"
+        ? supporters
+        : supporters.filter(
+            (s: any) =>
+              s.candidate_id === clienteEmFoco || s.candidateId === clienteEmFoco,
+          ),
+    [supporters, clienteEmFoco],
+  );
+
+  /**
+   * Quem registrou um check-in.
+   *
+   * O registro guarda o id do integrante, mas os antigos guardam só o nome —
+   * então a busca aceita os dois, e a chave é sempre o id de quem está na
+   * equipe. Sem isso a mesma pessoa apareceria duas vezes na lista.
+   */
+  const pessoaDoCheckIn = React.useCallback(
+    (c: any) => {
+      const membro = equipeDoMapa.find(
+        (m: any) => m.id === c.memberId || m.full_name === c.name,
+      );
+      return {
+        chave: membro?.id || c.memberId || c.name || "sem-nome",
+        nome: membro?.full_name || c.name || "Sem nome",
+        foto: membro?.image || c.memberPhoto,
+        daEquipe: Boolean(membro),
+      };
+    },
+    [equipeDoMapa],
+  );
+
+  /** Check-ins do cliente em foco, antes dos cortes do painel de filtro. */
+  const checkInsDoMapa = React.useMemo(
+    () =>
+      checkIns.filter((c) => {
+        // Registro na lixeira não aparece no mapa nem nas contas.
+        if (c.trashed) return false;
+        if (
+          clienteEmFoco &&
+          clienteEmFoco !== "all" &&
+          c.candidateId !== clienteEmFoco
+        ) {
+          return false;
+        }
+        return (
+          c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (c.bairro || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (c.rua || "").toLowerCase().includes(searchQuery.toLowerCase())
+        );
+      }),
+    [checkIns, clienteEmFoco, searchQuery],
+  );
+
+  /**
+   * Os cortes de período, prioridade e tipo, separados do corte por pessoa.
+   *
+   * A contagem ao lado de cada foto sai daqui: ela precisa respeitar os
+   * outros filtros e ignorar o de pessoas, senão marcar alguém zeraria todo
+   * mundo e a lista viraria um espelho da própria escolha.
+   */
+  const passaNosCortes = React.useCallback(
+    (c: any) => {
+      if (filtroDe || filtroAte) {
+        const dia = new Date(c.createdAt);
+        if (Number.isNaN(dia.getTime())) return false;
+        const iso = dia.toLocaleDateString("sv-SE");
+        if (filtroDe && iso < filtroDe) return false;
+        if (filtroAte && iso > filtroAte) return false;
+      }
+      if (filtroNiveis.length > 0 && !filtroNiveis.includes(c.priority || ""))
+        return false;
+      if (filtroTiposAcao.length > 0) {
+        const rotulos = operationTypes
+          .filter((t) => filtroTiposAcao.includes(t.id))
+          .map((t) => t.label);
+        // Registro antigo guarda só o rótulo do tipo; o id nem sempre existe.
+        const bate =
+          filtroTiposAcao.includes(c.operationTypeId || "") ||
+          rotulos.includes(c.operationTypeLabel || "");
+        if (!bate) return false;
+      }
+      return true;
+    },
+    [filtroDe, filtroAte, filtroNiveis, filtroTiposAcao, operationTypes],
+  );
+
+  /**
+   * Lista de pessoas do painel, com a contagem de cada uma. Zero inclusive.
+   *
+   * Um objeto simples no lugar de um Map: neste arquivo `Map` é o ícone do
+   * lucide, importado lá em cima, e `new Map()` quebraria a tela inteira.
+   */
+  const pessoasDoFiltro: PessoaDoFiltro[] = React.useMemo(() => {
+    const porChave: Record<string, PessoaDoFiltro> = {};
+    const ordem: string[] = [];
+
+    const guardar = (pessoa: PessoaDoFiltro) => {
+      porChave[pessoa.chave] = pessoa;
+      ordem.push(pessoa.chave);
+    };
+
+    // Toda a equipe entra, mesmo quem nunca registrou nada: saber que alguém
+    // está zerado é metade da informação que este painel existe para dar.
+    equipeDoMapa.forEach((m: any) => {
+      if (porChave[m.id]) return;
+      guardar({
+        chave: m.id,
+        nome: m.full_name || "Sem nome",
+        foto: m.image,
+        total: 0,
+      });
+    });
+
+    checkInsDoMapa.forEach((c: any) => {
+      const pessoa = pessoaDoCheckIn(c);
+      const conta = passaNosCortes(c) ? 1 : 0;
+      const atual = porChave[pessoa.chave];
+      if (atual) {
+        atual.total += conta;
+        return;
+      }
+      // Quem saiu da equipe não some do histórico nem do filtro.
+      guardar({
+        chave: pessoa.chave,
+        nome: pessoa.nome,
+        foto: pessoa.foto,
+        total: conta,
+        foraDaEquipe: true,
+      });
+    });
+
+    return ordem.map((chave) => porChave[chave]);
+  }, [equipeDoMapa, checkInsDoMapa, pessoaDoCheckIn, passaNosCortes]);
+
+  const filteredCheckIns = React.useMemo(
+    () =>
+      checkInsDoMapa.filter((c: any) => {
+        if (!passaNosCortes(c)) return false;
+        if (
+          filtroPessoas.length > 0 &&
+          !filtroPessoas.includes(pessoaDoCheckIn(c).chave)
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [checkInsDoMapa, passaNosCortes, filtroPessoas, pessoaDoCheckIn],
+  );
+
+  /** Quantos filtros do painel estão ligados, para o aviso no botão do mapa. */
+  const filtrosDeCheckInLigados =
+    filtroPessoas.length +
+    filtroNiveis.length +
+    filtroTiposAcao.length +
+    (filtroDe ? 1 : 0) +
+    (filtroAte ? 1 : 0);
+
+  const limparFiltrosDeCheckIn = () => {
+    setFiltroPessoas([]);
+    setFiltroNiveis([]);
+    setFiltroTiposAcao([]);
+    setFiltroDe("");
+    setFiltroAte("");
+  };
 
   // Statistics Computations
   const totalVolunteers = filteredAreas.reduce(
@@ -11397,6 +11555,35 @@ export default function App() {
 
         <div className="w-8 h-[1px] bg-slate-800/50" />
 
+        {/* Filtro dos check-ins: por pessoa, período, prioridade e tipo */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setFiltroCheckInsAberto((v) => !v);
+            setIsFilterDropdownOpen(false);
+          }}
+          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
+            filtrosDeCheckInLigados > 0
+              ? "bg-[#015FC9] border-blue-700 text-white shadow-lg shadow-blue-500/20"
+              : filtroCheckInsAberto
+                ? "bg-indigo-700 border-indigo-600 text-white"
+                : "bg-indigo-900/80 hover:bg-indigo-800 border-indigo-700 text-indigo-200"
+          }`}
+          title="Filtrar check-ins por pessoa, data, prioridade e tipo"
+        >
+          <Users className="w-5 h-5" />
+          {filtrosDeCheckInLigados > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-[#F58220] border-2 border-[#0c1322] text-white text-[9px] font-black flex items-center justify-center">
+              {filtrosDeCheckInLigados}
+            </span>
+          )}
+          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
+            Filtrar check-ins
+          </span>
+        </button>
+
+        <div className="w-8 h-[1px] bg-slate-800/50" />
+
         {/* Button 4: Exibir Camadas / Filtros - Layers Icon */}
         <button
           onClick={(e) => {
@@ -11593,16 +11780,7 @@ export default function App() {
 
             {nomeandoRaio === "pergunta" ? (
               <>
-                {/* A pessoa decide sabendo como a área vai ficar se disser não. */}
-                <p className="text-[11.5px] font-semibold text-slate-400 leading-snug pt-4">
-                  Salvando sem nome, ela entra na lista como{" "}
-                  <span className="text-slate-700 font-bold">
-                    {nomePadraoDaArea()}
-                  </span>
-                  .
-                </p>
-
-                <div className="flex flex-col gap-2 pt-4">
+                <div className="flex flex-col gap-2 pt-5">
                   <button
                     type="button"
                     autoFocus
@@ -11670,14 +11848,6 @@ export default function App() {
                       className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs resize-none"
                     />
                   </div>
-
-                  {/* Mudou de ideia no meio: a área ainda precisa de um nome. */}
-                  {!areaTitle.trim() && (
-                    <p className="text-[11px] font-semibold text-slate-400 leading-snug">
-                      Deixando o título em branco, ela entra na lista como{" "}
-                      <span className="text-slate-600">{nomePadraoDaArea()}</span>.
-                    </p>
-                  )}
                 </div>
 
                 <div className="flex items-center gap-2 pt-5">
@@ -11701,6 +11871,46 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* PAINEL DE FILTRO DOS CHECK-INS */}
+      <FiltroCheckIns
+        aberto={filtroCheckInsAberto}
+        onFechar={() => setFiltroCheckInsAberto(false)}
+        pessoas={pessoasDoFiltro}
+        pessoasSelecionadas={filtroPessoas}
+        onPessoas={setFiltroPessoas}
+        de={filtroDe}
+        ate={filtroAte}
+        onPeriodo={(de, ate) => {
+          setFiltroDe(de);
+          setFiltroAte(ate);
+        }}
+        niveis={opcoesDePrioridade.map((o) => ({
+          id: o.value,
+          label: o.label,
+          color: o.color,
+        }))}
+        niveisSelecionados={filtroNiveis}
+        onNiveis={setFiltroNiveis}
+        tipos={operationTypes
+          .filter(
+            (t) =>
+              (!clienteEmFoco ||
+                clienteEmFoco === "all" ||
+                t.candidateId === clienteEmFoco) &&
+              t.active !== false,
+          )
+          .sort(
+            (a, b) =>
+              (a.position ?? 0) - (b.position ?? 0) ||
+              a.label.localeCompare(b.label),
+          )}
+        tiposSelecionados={filtroTiposAcao}
+        onTipos={setFiltroTiposAcao}
+        visiveis={filteredCheckIns.length}
+        total={checkInsDoMapa.length}
+        onLimpar={limparFiltrosDeCheckIn}
+      />
 
       {/* Top Banner Guide for Coordinate Picking */}
       {clickToPickCoords && (
