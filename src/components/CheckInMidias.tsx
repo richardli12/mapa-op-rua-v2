@@ -341,13 +341,6 @@ export default function CheckInMidias({
             <h3 className="mt-3 text-[15px] font-black text-slate-800 leading-tight">
               Podemos usar a câmera do seu aparelho?
             </h3>
-            <p className="mt-1.5 text-[12.5px] font-semibold text-slate-500 leading-snug">
-              {pedindoCamera === 'image'
-                ? 'É para tirar a foto deste check-in.'
-                : 'É para gravar o vídeo deste check-in.'}{' '}
-              A imagem vai só para o comitê, junto do seu ponto no mapa. Nada é
-              gravado sem você apertar o botão.
-            </p>
             <p className="mt-2 text-[11px] font-semibold text-slate-400 leading-snug">
               Ao liberar, o seu aparelho ainda pode pedir a confirmação dele uma
               primeira vez.
