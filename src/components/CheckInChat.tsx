@@ -917,9 +917,6 @@ export default function CheckInChat({
                     placeholder="Nome da categoria"
                     className="w-full px-3 py-2.5 text-[13px] font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl outline-hidden focus:border-slate-400"
                   />
-                  <p className="text-[11px] text-slate-400 font-semibold">
-                    Só o nome. O ícone e a cor o comitê ajusta depois.
-                  </p>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
