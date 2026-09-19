@@ -1519,6 +1519,8 @@ export default function App() {
   const [clickToPickCoords, setClickToPickCoords] = useState(false);
   /** Centro marcado, agora é a vez de arrastar o raio direto no mapa. */
   const [definindoRaio, setDefinindoRaio] = useState(false);
+  /** Passo depois do desenho: título e descrição, os dois opcionais. */
+  const [nomeandoRaio, setNomeandoRaio] = useState(false);
   const [coordsPickingMode, setCoordsPickingMode] = useState<"area" | "pin">(
     "area",
   );
@@ -3082,10 +3084,6 @@ export default function App() {
   const saveArea = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!areaTitle) {
-      triggerNotification("Falta preencher o título da equipe!", "error");
-      return;
-    }
 
     if (!Number(areaRadius)) {
       triggerNotification(
@@ -3097,12 +3095,24 @@ export default function App() {
 
     const targetCoords = pickedCoords || { lat: -9.6548, lng: -35.715 }; // Default Maceió Centro
 
+    /**
+     * Título não é obrigatório, mas a área precisa de um nome para ser
+     * encontrada na lista depois. Sem título, vale o endereço que o mapa
+     * descobriu; sem endereço, um nome neutro — e a pessoa renomeia quando
+     * quiser, na edição.
+     */
+    const titulo =
+      areaTitle.trim() ||
+      (pickedAddressLabel || "").split(",").slice(0, 2).join(",").trim() ||
+      areaBairro.trim() ||
+      "Área sem título";
+
     if (editingAreaId) {
       // Edit existing
       const existingArea = areas.find((a) => a.id === editingAreaId);
       const updatedArea: PanfletagemArea = {
         id: editingAreaId,
-        title: areaTitle,
+        title: titulo,
         description: areaDescription,
         bairro: areaBairro,
         center: { ...targetCoords, assignedDeltas: selectedDeltas },
@@ -3135,8 +3145,8 @@ export default function App() {
       // Create new
       const newArea: PanfletagemArea = {
         id: "area_" + Math.random().toString(36).substr(2, 9),
-        title: areaTitle,
-        description: areaDescription || "Sem detalhes fornecidos.",
+        title: titulo,
+        description: areaDescription.trim(),
         bairro: areaBairro,
         center: { ...targetCoords, assignedDeltas: selectedDeltas },
         radius: Number(areaRadius),
@@ -3167,6 +3177,7 @@ export default function App() {
 
   const resetAreaForm = () => {
     setDefinindoRaio(false);
+    setNomeandoRaio(false);
     setAreaTitle("");
     setAreaDescription("");
     setAreaRadius("");
@@ -3692,7 +3703,7 @@ export default function App() {
     setSelectedId(area.id);
     setEditingAreaId(area.id);
     setAreaTitle(area.title);
-    setAreaDescription(area.description);
+    setAreaDescription(area.description || "");
     setAreaBairro(area.bairro);
     setAreaRadius(area.radius);
     setAreaColor(area.color);
@@ -3746,6 +3757,12 @@ export default function App() {
     setCreationModalType("area");
     // Mapa armado: o próximo gesto na tela é o centro e o raio.
     setClickToPickCoords(true);
+  };
+
+  /** Salva a área direto do passo do nome, sem passar pelo formulário longo. */
+  const concluirRaio = () => {
+    setNomeandoRaio(false);
+    saveArea({ preventDefault: () => {} } as React.FormEvent);
   };
 
   /** Larga a criação do raio inteira: nada fica desenhado nem pela metade. */
@@ -3805,7 +3822,7 @@ export default function App() {
     return (
       a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       a.bairro.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.description.toLowerCase().includes(searchQuery.toLowerCase())
+      (a.description || "").toLowerCase().includes(searchQuery.toLowerCase())
     );
   }), [
     areas,
@@ -11543,6 +11560,110 @@ export default function App() {
         </AnimatePresence>
       </div>
 
+      {/* PASSO DO NOME: o desenho acabou, e o resto é opcional */}
+      {nomeandoRaio && (
+        <div className="fixed inset-0 z-[3000] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 p-6 text-slate-800">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="min-w-0">
+                <h3 className="font-extrabold text-indigo-950 text-base leading-tight">
+                  Quer dar um nome a essa área?
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Título e descrição são opcionais — pode salvar sem nenhum dos
+                  dois.
+                </p>
+              </div>
+              <span className="shrink-0 px-3 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-[11px] font-black text-indigo-700 whitespace-nowrap">
+                {Number(areaRadius) || 0} m de raio
+              </span>
+            </div>
+
+            <div className="space-y-3.5 pt-4">
+              <div>
+                <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
+                  Título <span className="normal-case tracking-normal font-semibold text-slate-300">(opcional)</span>
+                </label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={areaTitle}
+                  onChange={(e) => setAreaTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      concluirRaio();
+                    }
+                  }}
+                  maxLength={80}
+                  placeholder="Como essa área é chamada"
+                  className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
+                  Descrição <span className="normal-case tracking-normal font-semibold text-slate-300">(opcional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={areaDescription}
+                  onChange={(e) => setAreaDescription(e.target.value)}
+                  maxLength={400}
+                  placeholder="O que precisa ser feito aqui"
+                  className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs resize-none"
+                />
+              </div>
+
+              {/* Sem título a área ainda precisa ser achada na lista depois. */}
+              {!areaTitle.trim() && (
+                <p className="text-[11px] font-semibold text-slate-400 leading-snug">
+                  Sem título, a área entra na lista como{" "}
+                  <span className="text-slate-600">
+                    {(pickedAddressLabel || "")
+                      .split(",")
+                      .slice(0, 2)
+                      .join(",")
+                      .trim() ||
+                      areaBairro.trim() ||
+                      "Área sem título"}
+                  </span>
+                  . Dá para renomear depois.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 pt-5">
+              <button
+                type="button"
+                onClick={cancelarRaio}
+                className="px-4 py-2.5 text-[11px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 cursor-pointer transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // Quem precisa de equipe, contato ou cor segue para o
+                  // formulário completo; o caminho curto fica para os outros.
+                  setNomeandoRaio(false);
+                }}
+                className="px-4 py-2.5 text-[11px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 hover:border-indigo-400 hover:text-indigo-700 cursor-pointer transition-all"
+              >
+                Mais opções
+              </button>
+              <button
+                type="button"
+                onClick={concluirRaio}
+                className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99]"
+              >
+                Salvar área
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner Guide for Coordinate Picking */}
       {clickToPickCoords && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2001] bg-[#0c1322]/95 backdrop-blur-md border border-indigo-500/50 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 animate-bounce pointer-events-auto">
@@ -11831,12 +11952,14 @@ export default function App() {
             onClick={() => {
               if (!Number(areaRadius)) {
                 triggerNotification(
-                  "Arraste a alça para abrir o raio antes de concluir.",
+                  "Arraste a borda para abrir o raio antes de concluir.",
                   "error",
                 );
                 return;
               }
               setDefinindoRaio(false);
+              // Desenho pronto: agora a única pergunta é se essa área tem nome.
+              setNomeandoRaio(true);
             }}
             className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-[10px] text-white rounded-full font-bold border border-indigo-500 cursor-pointer transition-all"
           >
@@ -12168,11 +12291,12 @@ export default function App() {
                     {/* Title */}
                     <div>
                       <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Título da Equipe / Ação *
+                        Título da Equipe / Ação
                       </label>
                       <input
                         type="text"
-                        required
+                        placeholder="Opcional"
+
                         value={areaTitle}
                         onChange={(e) => setAreaTitle(e.target.value)}
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
@@ -12453,7 +12577,9 @@ export default function App() {
                             <span className="font-semibold text-[10px] text-slate-400 not-italic block mb-0.5 uppercase tracking-wider">
                               Legenda / Missão:
                             </span>
-                            "{area.description}"
+                            {area.description
+                              ? `"${area.description}"`
+                              : "Sem descrição cadastrada."}
                           </p>
 
                           {area.contactName && (
@@ -13298,7 +13424,7 @@ export default function App() {
 
       {/* CENTER RE-DESIGNED CREATION MODAL */}
       <AnimatePresence>
-        {creationModalType && !clickToPickCoords && !definindoRaio && (
+        {creationModalType && !clickToPickCoords && !definindoRaio && !nomeandoRaio && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -13896,12 +14022,11 @@ export default function App() {
                         {/* Area specific inputs */}
                         <div>
                           <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                            Título da Equipe / Ação *
+                            Título da Equipe / Ação
                           </label>
                           <input
                             type="text"
-                            required
-                            placeholder="Ex: Equipe Laranja - Panfletagem"
+                            placeholder="Opcional — ex: Equipe Laranja"
                             value={areaTitle}
                             onChange={(e) => setAreaTitle(e.target.value)}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
