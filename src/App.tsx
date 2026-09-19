@@ -20,6 +20,7 @@ import {
 } from "./mediaUrls";
 import OperationTypeSelect from "./components/OperationTypeSelect";
 import FiltroCheckIns, { PessoaDoFiltro } from "./components/FiltroCheckIns";
+import LaserPointer from "./components/LaserPointer";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
 import { lerDispositivo } from "./services/dispositivo";
@@ -46,6 +47,7 @@ import {
   Flag,
   Megaphone,
   Star,
+  Crosshair,
   Home,
   Plus,
   Trash2,
@@ -846,6 +848,15 @@ export default function App() {
    * urgência e fazendo o quê. Ficam aqui em cima porque é daqui que sai a
    * lista que o mapa recebe.
    */
+  /**
+   * Ponteiro laser: vale para o painel inteiro, inclusive o mapa.
+   *
+   * Fica aqui em cima, e não dentro de uma tela, porque o estado precisa
+   * sobreviver à navegação — quem ligou o laser na lista de clientes espera
+   * encontrá-lo ligado ao abrir o mapa.
+   */
+  const [laserLigado, setLaserLigado] = useState(false);
+
   const [filtroCheckInsAberto, setFiltroCheckInsAberto] = useState(false);
   const [filtroPessoas, setFiltroPessoas] = useState<string[]>([]);
   const [filtroDe, setFiltroDe] = useState("");
@@ -1147,6 +1158,48 @@ export default function App() {
 
   const [isCheckInPageInitializing, setIsCheckInPageInitializing] =
     useState(true);
+
+  /**
+   * Atalhos do laser: L liga e desliga, Esc desliga.
+   *
+   * Só no painel do administrador — o app de campo e as telas públicas não
+   * têm apresentação para fazer. Digitar num campo nunca aciona o atalho,
+   * senão escrever "Laranja" no nome de uma área acenderia o laser.
+   */
+  useEffect(() => {
+    if (!adminUser || currentUrlView === "checkin") return;
+
+    const noTeclado = (e: KeyboardEvent) => {
+      const alvo = e.target as HTMLElement | null;
+      const digitando =
+        alvo &&
+        (alvo.tagName === "INPUT" ||
+          alvo.tagName === "TEXTAREA" ||
+          alvo.tagName === "SELECT" ||
+          alvo.isContentEditable);
+      if (digitando) return;
+
+      if (e.key === "Escape") {
+        setLaserLigado((ligado) => (ligado ? false : ligado));
+        return;
+      }
+      // Com Ctrl, Alt ou Meta a tecla é de outro atalho, do sistema ou do
+      // navegador: o laser não se mete.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        setLaserLigado((ligado) => !ligado);
+      }
+    };
+
+    window.addEventListener("keydown", noTeclado);
+    return () => window.removeEventListener("keydown", noTeclado);
+  }, [adminUser, currentUrlView]);
+
+  // Sessão encerrada ou saída do painel: o laser não fica ligado sozinho.
+  useEffect(() => {
+    if (!adminUser || currentUrlView === "checkin") setLaserLigado(false);
+  }, [adminUser, currentUrlView]);
 
   // Pre-emptively request exact physical GPS coordinates from browser as soon as accessing the check-in screen
   useEffect(() => {
@@ -6921,6 +6974,9 @@ export default function App() {
 
     return (
       <div className="min-h-screen w-screen bg-[#EBF1F6] text-slate-800 flex flex-col p-6 sm:p-10 font-sans selection:bg-blue-600 selection:text-white overflow-y-auto">
+        {/* Ponteiro laser: acompanha o painel inteiro, sem tapar nada */}
+        <LaserPointer ativo={laserLigado} />
+
         {/* Confirmação no meio da tela, com a cara do sistema */}
         <ConfirmDialog
           request={confirmRequest}
@@ -7576,6 +7632,30 @@ export default function App() {
                 </button>
               </>
             )}
+
+            {/* PONTEIRO LASER — para apresentar o painel numa tela grande */}
+            <button
+              onClick={() => setLaserLigado((ligado) => !ligado)}
+              aria-pressed={laserLigado}
+              title={
+                laserLigado
+                  ? "Laser Pointer ligado (L ou Esc para desligar)"
+                  : "Laser Pointer (atalho: L)"
+              }
+              className={`group relative p-3 rounded-2xl shadow-sm border transition-all cursor-pointer ${
+                laserLigado
+                  ? "bg-rose-600 border-rose-700 text-white ring-2 ring-rose-400/40"
+                  : "bg-white hover:bg-slate-50 border-slate-200 text-slate-400 hover:text-rose-500"
+              }`}
+            >
+              <Crosshair className="w-4 h-4" />
+              {laserLigado && (
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-400 border-2 border-white animate-pulse" />
+              )}
+              <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute top-full right-0 mt-2 px-2.5 py-1.5 bg-slate-900 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
+                Laser Pointer
+              </span>
+            </button>
 
             {/* CONFIGURAÇÕES DO SISTEMA */}
             {!inspectedCandidate && telaAdm !== "configuracoes" && (
@@ -11555,6 +11635,33 @@ export default function App() {
 
         <div className="w-8 h-[1px] bg-slate-800/50" />
 
+        {/* Laser: o mapa não tem o cabeçalho do painel, e desligar o laser
+            não pode depender de lembrar o atalho */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setLaserLigado((ligado) => !ligado);
+          }}
+          aria-pressed={laserLigado}
+          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
+            laserLigado
+              ? "bg-rose-600 border-rose-700 text-white ring-2 ring-rose-400/40"
+              : "bg-indigo-900/80 hover:bg-indigo-800 border-indigo-700 text-indigo-200"
+          }`}
+          title={
+            laserLigado
+              ? "Laser Pointer ligado (L ou Esc para desligar)"
+              : "Laser Pointer (atalho: L)"
+          }
+        >
+          <Crosshair className="w-5 h-5" />
+          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
+            Laser Pointer
+          </span>
+        </button>
+
+        <div className="w-8 h-[1px] bg-slate-800/50" />
+
         {/* Filtro dos check-ins: por pessoa, período, prioridade e tipo */}
         <button
           onClick={(e) => {
@@ -11871,6 +11978,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Ponteiro laser: segue ligado quando o painel abre o mapa */}
+      <LaserPointer ativo={laserLigado} />
 
       {/* PAINEL DE FILTRO DOS CHECK-INS */}
       <FiltroCheckIns

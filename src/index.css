@@ -202,3 +202,29 @@
     font-size: 16px;
   }
 }
+
+/* ---------------------------------------------------------------- laser ---
+   Ponteiro laser do painel. Com ele ligado a seta do sistema some da tela
+   inteira — inclusive de onde o cursor é definido por estilo inline, como o
+   crosshair do mapa, e por isso o !important. */
+.laser-ligado,
+.laser-ligado * {
+  cursor: none !important;
+}
+
+/* Pulso lento do halo: o ponto respira, sem virar pisca-pisca. */
+@keyframes laser-pulso {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.18); opacity: .82; }
+}
+
+.laser-halo {
+  animation: laser-pulso 1.6s ease-in-out infinite;
+}
+
+/* Quem pediu menos animação no sistema não leva pulso nenhum. */
+@media (prefers-reduced-motion: reduce) {
+  .laser-halo {
+    animation: none;
+  }
+}
