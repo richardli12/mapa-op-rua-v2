@@ -11593,16 +11593,7 @@ export default function App() {
 
             {nomeandoRaio === "pergunta" ? (
               <>
-                {/* A pessoa decide sabendo como a área vai ficar se disser não. */}
-                <p className="text-[11.5px] font-semibold text-slate-400 leading-snug pt-4">
-                  Salvando sem nome, ela entra na lista como{" "}
-                  <span className="text-slate-700 font-bold">
-                    {nomePadraoDaArea()}
-                  </span>
-                  .
-                </p>
-
-                <div className="flex flex-col gap-2 pt-4">
+                <div className="flex flex-col gap-2 pt-5">
                   <button
                     type="button"
                     autoFocus
@@ -11670,14 +11661,6 @@ export default function App() {
                       className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs resize-none"
                     />
                   </div>
-
-                  {/* Mudou de ideia no meio: a área ainda precisa de um nome. */}
-                  {!areaTitle.trim() && (
-                    <p className="text-[11px] font-semibold text-slate-400 leading-snug">
-                      Deixando o título em branco, ela entra na lista como{" "}
-                      <span className="text-slate-600">{nomePadraoDaArea()}</span>.
-                    </p>
-                  )}
                 </div>
 
                 <div className="flex items-center gap-2 pt-5">
