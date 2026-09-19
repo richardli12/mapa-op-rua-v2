@@ -1,8 +1,24 @@
 import React, { useRef, useState } from 'react';
-import { Camera, Video, Images, Trash2, RefreshCw, Play, Loader2, AlertCircle, X } from 'lucide-react';
+import { Camera, Video, Images, Trash2, RefreshCw, Play, Loader2, AlertCircle, X, ShieldCheck } from 'lucide-react';
 
 const AZUL = '#0C3556';
 const VERDE = '#08A47B';
+
+/**
+ * Lembrete do "sim" dado nesta tela, por aparelho.
+ *
+ * Quem já autorizou uma vez não precisa responder a cada foto: a partir daí o
+ * botão abre a câmera direto.
+ */
+const CHAVE_CAMERA = 'checkin_camera_autorizada';
+
+const cameraJaAutorizada = () => {
+  try {
+    return localStorage.getItem(CHAVE_CAMERA) === '1';
+  } catch {
+    return false;
+  }
+};
 
 export type MidiaTipo = 'image' | 'video';
 
@@ -56,6 +72,13 @@ export default function CheckInMidias({
   const trocaRef = useRef<HTMLInputElement>(null);
   const [trocando, setTrocando] = useState<string | null>(null);
   const [previa, setPrevia] = useState<MidiaItem | null>(null);
+  /**
+   * Qual captura está esperando o "sim".
+   *
+   * Quem pergunta é o sistema, com a nossa linguagem e o motivo na tela; o
+   * aparelho só entra depois, para abrir a câmera de fato.
+   */
+  const [pedindoCamera, setPedindoCamera] = useState<MidiaTipo | null>(null);
 
   const enviando = itens.some(i => i.estado === 'enviando');
   const prontos = itens.filter(i => i.estado === 'pronto');
@@ -70,6 +93,32 @@ export default function CheckInMidias({
     if (e.target.files?.length) onAdicionar(e.target.files, tipo);
     // Zera o campo: escolher o mesmo arquivo de novo precisa disparar o evento.
     if (ref.current) ref.current.value = '';
+  };
+
+  /** Abre a câmera do aparelho para o tipo pedido. */
+  const abrirCamera = (tipo: MidiaTipo) =>
+    (tipo === 'image' ? fotoRef : videoRef).current?.click();
+
+  /** Botão de foto/vídeo: primeiro o nosso pedido, depois a câmera. */
+  const pedirCamera = (tipo: MidiaTipo) => {
+    if (cameraJaAutorizada()) {
+      abrirCamera(tipo);
+      return;
+    }
+    setPedindoCamera(tipo);
+  };
+
+  const autorizarCamera = () => {
+    const tipo = pedindoCamera;
+    setPedindoCamera(null);
+    if (!tipo) return;
+    try {
+      localStorage.setItem(CHAVE_CAMERA, '1');
+    } catch {
+      // Sem localStorage a pergunta volta na próxima; nada mais quebra.
+    }
+    // Ainda dentro do toque da pessoa, então o aparelho aceita abrir a câmera.
+    abrirCamera(tipo);
   };
 
   const resumo = [
@@ -234,7 +283,7 @@ export default function CheckInMidias({
               <div className="flex flex-wrap justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => fotoRef.current?.click()}
+                  onClick={() => pedirCamera('image')}
                   className="px-3 py-2 bg-white border border-slate-200 text-slate-700 text-[12px] font-bold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
                 >
                   <Camera className="w-3.5 h-3.5" style={{ color: AZUL }} />
@@ -242,7 +291,7 @@ export default function CheckInMidias({
                 </button>
                 <button
                   type="button"
-                  onClick={() => videoRef.current?.click()}
+                  onClick={() => pedirCamera('video')}
                   className="px-3 py-2 bg-white border border-slate-200 text-slate-700 text-[12px] font-bold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
                 >
                   <Video className="w-3.5 h-3.5" style={{ color: AZUL }} />
@@ -274,6 +323,46 @@ export default function CheckInMidias({
                   ? 'Envie pelo menos uma foto ou vídeo.'
                   : 'Pode adicionar mais antes de confirmar.'}
               </p>
+          </div>
+        </div>
+      )}
+
+      {/* Pedido de câmera: quem pergunta é o sistema, não o navegador */}
+      {pedindoCamera && (
+        <div className="fixed inset-0 z-[3000] bg-slate-900/60 flex items-end sm:items-center justify-center p-3">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-4">
+            <span
+              className="w-11 h-11 rounded-2xl flex items-center justify-center text-white"
+              style={{ backgroundColor: AZUL }}
+            >
+              <ShieldCheck className="w-5 h-5" />
+            </span>
+
+            <h3 className="mt-3 text-[15px] font-black text-slate-800 leading-tight">
+              Podemos usar a câmera do seu aparelho?
+            </h3>
+            <p className="mt-2 text-[11px] font-semibold text-slate-400 leading-snug">
+              Ao liberar, o seu aparelho ainda pode pedir a confirmação dele uma
+              primeira vez.
+            </p>
+
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPedindoCamera(null)}
+                className="flex-1 py-2.5 text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 cursor-pointer transition-all active:scale-[0.99]"
+              >
+                Agora não
+              </button>
+              <button
+                type="button"
+                onClick={autorizarCamera}
+                className="flex-[1.4] py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99]"
+                style={{ backgroundColor: AZUL }}
+              >
+                Liberar câmera
+              </button>
+            </div>
           </div>
         </div>
       )}
