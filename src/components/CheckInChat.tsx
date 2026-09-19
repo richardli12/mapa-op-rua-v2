@@ -9,10 +9,13 @@ import {
   MessageSquare,
   Clock,
   Loader2,
-  Pencil
+  Pencil,
+  Plus,
+  Maximize2,
+  X
 } from 'lucide-react';
 import { reverseGeocode } from '../services/streetSources';
-import { DatabaseService } from '../databaseClient';
+import { DatabaseService, isDatabaseConfigured } from '../databaseClient';
 import {
   OperationType,
   CheckIn,
@@ -34,6 +37,15 @@ interface CheckInChatProps {
   clientId: string;
   clientName: string;
   operationTypes: OperationType[];
+  /**
+   * Rótulos já cadastrados no cliente, ligados ou desligados.
+   *
+   * A lista de cima só traz os ligados, então sem isto quem está na rua
+   * recriaria uma categoria que o administrador tinha acabado de desligar.
+   */
+  nomesReservados?: string[];
+  /** Avisa o painel quando uma categoria nasce em campo. */
+  onTipoCriado?: (tipo: OperationType) => void;
   onSaved: (checkIn: CheckIn) => void;
   onBack: () => void;
   notify: (texto: string, tipo?: 'success' | 'error' | 'info') => void;
@@ -99,6 +111,8 @@ export default function CheckInChat({
   clientId,
   clientName,
   operationTypes,
+  nomesReservados = [],
+  onTipoCriado,
   onSaved,
   onBack,
   notify
@@ -117,6 +131,8 @@ export default function CheckInChat({
   const [buscandoGps, setBuscandoGps] = useState(true);
   const [erroGps, setErroGps] = useState<string | null>(null);
   const [ajustando, setAjustando] = useState(false);
+  /** Mapa ocupando a tela toda, para posicionar o ponto com folga. */
+  const [mapaCheio, setMapaCheio] = useState(false);
   const [seguirGps, setSeguirGps] = useState(true);
   const [localConfirmado, setLocalConfirmado] = useState(false);
 
@@ -128,6 +144,18 @@ export default function CheckInChat({
 
   const [operacoes, setOperacoes] = useState<OperationType[]>([]);
   const [operacoesConfirmadas, setOperacoesConfirmadas] = useState(false);
+
+  /** Categorias criadas aqui na rua, já disponíveis sem recarregar a tela. */
+  const [tiposCriados, setTiposCriados] = useState<OperationType[]>([]);
+  /**
+   * Cadastro rápido de categoria: fechado, digitando o nome, ou conferindo o
+   * nome digitado antes de gravar.
+   */
+  const [passoCategoria, setPassoCategoria] = useState<
+    'fechado' | 'digitando' | 'conferindo'
+  >('fechado');
+  const [nomeCategoria, setNomeCategoria] = useState('');
+  const [salvandoCategoria, setSalvandoCategoria] = useState(false);
   /** Nível de prioridade escolhido, da lista que o administrador cadastrou. */
   const [prioridade, setPrioridade] = useState('');
   const [niveis, setNiveis] = useState<PriorityLevel[]>([]);
@@ -552,6 +580,87 @@ export default function CheckInChat({
   };
 
   // -------------------------------------------------------------- operações
+  /**
+   * Lista que aparece na etapa 1: os tipos do cliente mais os que nasceram
+   * aqui. O id manda na hora de juntar, porque o painel devolve pelas props a
+   * mesma categoria que acabou de ser criada — e ela não pode aparecer duas
+   * vezes.
+   */
+  const tiposDisponiveis = React.useMemo(() => {
+    const porId = new Map<string, OperationType>();
+    [...operationTypes, ...tiposCriados].forEach(t => porId.set(t.id, t));
+    return [...porId.values()];
+  }, [operationTypes, tiposCriados]);
+
+  /** Nome já usado no cliente, olhando também as categorias desligadas. */
+  const nomeJaExiste = (nome: string) =>
+    [...tiposDisponiveis.map(t => t.label), ...nomesReservados].some(
+      label => label.trim().toLowerCase() === nome.toLowerCase()
+    );
+
+  const abrirNovaCategoria = () => {
+    setNomeCategoria('');
+    setPassoCategoria('digitando');
+  };
+
+  /** Do nome digitado para a conferência: "é isso mesmo?". */
+  const conferirCategoria = () => {
+    const nome = nomeCategoria.trim().replace(/\s+/g, ' ');
+    if (nome.length < 2) {
+      notify('Escreva o nome da categoria.', 'error');
+      return;
+    }
+    if (nomeJaExiste(nome)) {
+      notify(`"${nome}" já existe na lista deste cliente.`, 'error');
+      return;
+    }
+    setNomeCategoria(nome);
+    setPassoCategoria('conferindo');
+  };
+
+  /**
+   * Grava a categoria conferida e já deixa ela marcada no check-in.
+   *
+   * Só o nome é pedido: ícone e cor ficam no padrão e o administrador ajusta
+   * depois, no painel. Quem está na rua não deve parar para escolher desenho.
+   */
+  const criarCategoria = async () => {
+    const nome = nomeCategoria.trim();
+    if (!nome || salvandoCategoria) return;
+
+    const tipo: OperationType = {
+      id: 'op_' + Math.random().toString(36).slice(2, 11),
+      label: nome,
+      icon: 'flag',
+      color: AZUL,
+      description: '',
+      active: true,
+      position: tiposDisponiveis.length,
+      candidateId: clientId,
+      createdAt: new Date().toISOString()
+    };
+
+    // Sem banco configurado (demonstração) a categoria vale só nesta tela.
+    if (isDatabaseConfigured) {
+      setSalvandoCategoria(true);
+      const res = await DatabaseService.upsertOperationType(tipo);
+      setSalvandoCategoria(false);
+
+      if (!res.success) {
+        notify('Não deu para salvar a categoria agora. Tente de novo.', 'error');
+        return;
+      }
+    }
+
+    setTiposCriados(prev => [...prev, tipo]);
+    // Quem cadastrou é porque vai usar: a categoria nova já entra marcada.
+    setOperacoes(prev => [...prev, tipo]);
+    onTipoCriado?.(tipo);
+    setNomeCategoria('');
+    setPassoCategoria('fechado');
+    notify(`Categoria "${nome}" criada e marcada.`, 'success');
+  };
+
   const alternarOperacao = (tipo: OperationType) =>
     setOperacoes(prev =>
       prev.some(o => o.id === tipo.id) ? prev.filter(o => o.id !== tipo.id) : [...prev, tipo]
@@ -743,89 +852,183 @@ export default function CheckInChat({
           <div className="flex items-end gap-2 flex-row-reverse">
             <span className="w-7 shrink-0" />
             <div className="max-w-[80%] w-full flex flex-col items-end gap-2">
-              {operationTypes.length === 0 ? (
+              {tiposDisponiveis.length === 0 ? (
                 <p className="text-[12px] text-slate-400 font-semibold text-right">
-                  Nenhuma operação cadastrada para {clientName}.
+                  Nenhuma operação cadastrada para {clientName}. Crie a sua
+                  abaixo.
                 </p>
               ) : (
-                <>
-                  <div className="w-full grid grid-cols-2 gap-2">
-                    {operationTypes.map(tipo => {
-                      const marcado = operacoes.some(o => o.id === tipo.id);
-                      return (
-                        <button
-                          key={tipo.id}
-                          onClick={() => alternarOperacao(tipo)}
-                          className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
-                            marcado
-                              ? 'text-white border-transparent'
-                              : 'bg-white text-slate-700 border-slate-200'
-                          }`}
-                          style={marcado ? { backgroundColor: AZUL } : undefined}
+                <div className="w-full grid grid-cols-2 gap-2">
+                  {tiposDisponiveis.map(tipo => {
+                    const marcado = operacoes.some(o => o.id === tipo.id);
+                    return (
+                      <button
+                        key={tipo.id}
+                        onClick={() => alternarOperacao(tipo)}
+                        className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
+                          marcado
+                            ? 'text-white border-transparent'
+                            : 'bg-white text-slate-700 border-slate-200'
+                        }`}
+                        style={marcado ? { backgroundColor: AZUL } : undefined}
+                      >
+                        <span
+                          className="w-4 h-4 rounded-full flex items-center justify-center text-white shrink-0"
+                          style={{ backgroundColor: tipo.color }}
                         >
-                          <span
-                            className="w-4 h-4 rounded-full flex items-center justify-center text-white shrink-0"
-                            style={{ backgroundColor: tipo.color }}
-                          >
-                            <OperationIcon icon={tipo.icon} size={10} />
-                          </span>
-                          {tipo.label}
-                          {marcado && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Nível de prioridade, da lista do administrador */}
-                  <p className="w-full text-[11px] font-extrabold uppercase tracking-wider text-slate-400 text-right mt-1">
-                    Prioridade
-                  </p>
-                  <div className="w-full grid grid-cols-2 gap-2">
-                    {opcoesPrioridade.map(nivel => {
-                      const marcado = prioridade === nivel.id;
-                      return (
-                        <button
-                          key={nivel.id}
-                          type="button"
-                          onClick={() => setPrioridade(nivel.id)}
-                          className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
-                            marcado
-                              ? 'text-white border-transparent'
-                              : 'bg-white text-slate-700 border-slate-200'
-                          }`}
-                          style={marcado ? { backgroundColor: nivel.color } : undefined}
-                        >
-                          <span
-                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: marcado ? '#ffffff' : nivel.color }}
-                          />
-                          <span className="truncate">{nivel.label}</span>
-                          {marcado && <Check className="w-3.5 h-3.5 stroke-[3] ml-auto shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={confirmarOperacoes}
-                    disabled={operacoes.length === 0 || !prioridade}
-                    className="w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
-                    style={{ backgroundColor: AZUL }}
-                  >
-                    Confirmar operações
-                  </button>
-                  <p className="text-[11px] text-slate-400 font-semibold text-right">
-                    {operacoes.length === 0
-                      ? 'Marque pelo menos um tipo de operação.'
-                      : !prioridade
-                        ? 'Escolha o nível de prioridade.'
-                        : `${contar(operacoes.length, 'tipo marcado', 'tipos marcados')} • ${
-                            nivelEscolhido?.label
-                          }.`}
-                  </p>
-                </>
+                          <OperationIcon icon={tipo.icon} size={10} />
+                        </span>
+                        {tipo.label}
+                        {marcado && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
+
+              {/* Categoria que falta: cadastro rápido, só o nome */}
+              {passoCategoria === 'fechado' && (
+                <button
+                  type="button"
+                  onClick={abrirNovaCategoria}
+                  className="px-3.5 py-2 text-[12.5px] font-bold rounded-full border border-dashed border-slate-300 bg-white text-slate-500 flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 hover:border-slate-400 hover:text-slate-700"
+                >
+                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                  Não achei minha categoria
+                </button>
+              )}
+
+              {passoCategoria === 'digitando' && (
+                <div className="w-full bg-white border border-slate-200 rounded-2xl p-3 shadow-sm space-y-2">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                    Nova categoria
+                  </p>
+                  <input
+                    autoFocus
+                    value={nomeCategoria}
+                    onChange={e => setNomeCategoria(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        conferirCategoria();
+                      }
+                    }}
+                    maxLength={40}
+                    placeholder="Ex.: Panfletagem na feira"
+                    className="w-full px-3 py-2.5 text-[13px] font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl outline-hidden focus:border-slate-400"
+                  />
+                  <p className="text-[11px] text-slate-400 font-semibold">
+                    Só o nome. O ícone e a cor o comitê ajusta depois.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPassoCategoria('fechado')}
+                      className="flex-1 py-2.5 text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 cursor-pointer transition-all active:scale-[0.99]"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={conferirCategoria}
+                      disabled={nomeCategoria.trim().length < 2}
+                      className="flex-1 py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                      style={{ backgroundColor: AZUL }}
+                    >
+                      Continuar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Conferência: o nome é lido de volta antes de virar categoria */}
+              {passoCategoria === 'conferindo' && (
+                <div className="w-full bg-white border border-slate-200 rounded-2xl p-3 shadow-sm space-y-2.5">
+                  <p className="text-[12.5px] font-semibold text-slate-600">
+                    O nome está certo?
+                  </p>
+                  <p
+                    className="text-[15px] font-black break-words"
+                    style={{ color: AZUL }}
+                  >
+                    {nomeCategoria}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPassoCategoria('digitando')}
+                      disabled={salvandoCategoria}
+                      className="flex-1 py-2.5 text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={criarCategoria}
+                      disabled={salvandoCategoria}
+                      className="flex-1 py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                      style={{ backgroundColor: VERDE }}
+                    >
+                      {salvandoCategoria ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      )}
+                      Está certo
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Nível de prioridade, da lista do administrador */}
+              <p className="w-full text-[11px] font-extrabold uppercase tracking-wider text-slate-400 text-right mt-1">
+                Prioridade
+              </p>
+              <div className="w-full grid grid-cols-2 gap-2">
+                {opcoesPrioridade.map(nivel => {
+                  const marcado = prioridade === nivel.id;
+                  return (
+                    <button
+                      key={nivel.id}
+                      type="button"
+                      onClick={() => setPrioridade(nivel.id)}
+                      className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
+                        marcado
+                          ? 'text-white border-transparent'
+                          : 'bg-white text-slate-700 border-slate-200'
+                      }`}
+                      style={marcado ? { backgroundColor: nivel.color } : undefined}
+                    >
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: marcado ? '#ffffff' : nivel.color }}
+                      />
+                      <span className="truncate">{nivel.label}</span>
+                      {marcado && <Check className="w-3.5 h-3.5 stroke-[3] ml-auto shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={confirmarOperacoes}
+                disabled={operacoes.length === 0 || !prioridade}
+                className="w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                style={{ backgroundColor: AZUL }}
+              >
+                Confirmar operações
+              </button>
+              <p className="text-[11px] text-slate-400 font-semibold text-right">
+                {operacoes.length === 0
+                  ? 'Marque pelo menos um tipo de operação.'
+                  : !prioridade
+                    ? 'Escolha o nível de prioridade.'
+                    : `${contar(operacoes.length, 'tipo marcado', 'tipos marcados')} • ${
+                        nivelEscolhido?.label
+                      }.`}
+              </p>
             </div>
           </div>
         )}
@@ -886,17 +1089,36 @@ export default function CheckInChat({
                 </div>
               ) : coords ? (
                 <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm overflow-hidden">
-                  <MapaAjuste
-                    gps={gps}
-                    centroInicial={coords}
-                    seguirGps={seguirGps}
-                    height={260}
-                    onReady={() => setMapaPronto(true)}
-                    onMoverInicio={() => setAjustando(true)}
-                    onArrastarInicio={() => definirSeguirGps(false)}
-                    onAjustado={aoAjustar}
-                    onVoltarAoGps={() => definirSeguirGps(true)}
-                  />
+                  {/* Um mapa de cada vez: em tela cheia este sai de cena. */}
+                  {mapaCheio ? (
+                    <div className="h-[260px] bg-slate-200 flex items-center justify-center text-[12px] font-bold text-slate-500">
+                      Ajustando em tela cheia...
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <MapaAjuste
+                        gps={gps}
+                        centroInicial={coords}
+                        seguirGps={seguirGps}
+                        height={260}
+                        onReady={() => setMapaPronto(true)}
+                        onMoverInicio={() => setAjustando(true)}
+                        onArrastarInicio={() => definirSeguirGps(false)}
+                        onAjustado={aoAjustar}
+                        onVoltarAoGps={() => definirSeguirGps(true)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setMapaCheio(true)}
+                        title="Abrir o mapa em tela cheia"
+                        aria-label="Abrir o mapa em tela cheia"
+                        className="absolute z-[600] top-2.5 right-2.5 h-9 px-3 rounded-full bg-white shadow-md border border-slate-200 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-slate-600 cursor-pointer active:scale-95 transition-transform"
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                        Tela cheia
+                      </button>
+                    </div>
+                  )}
 
                   <div className="p-3">
                     <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
@@ -1098,6 +1320,93 @@ export default function CheckInChat({
               'Confirmar check-in'
             )}
           </button>
+        </div>
+      )}
+
+      {/* MAPA EM TELA CHEIA: o mesmo ajuste, com a tela inteira para mirar */}
+      {mapaCheio && coords && (
+        <div className="fixed inset-0 z-[4000] bg-white flex flex-col">
+          <header
+            className="shrink-0 px-3 py-2.5 flex items-center gap-2 text-white"
+            style={{ backgroundColor: AZUL }}
+          >
+            <button
+              type="button"
+              onClick={() => setMapaCheio(false)}
+              aria-label="Sair da tela cheia"
+              className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 cursor-pointer active:scale-95 transition-all"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-[14px] font-bold tracking-tight">
+              Posicione o seu ponto
+            </h2>
+          </header>
+
+          <div className="flex-1 min-h-0 relative">
+            <MapaAjuste
+              gps={gps}
+              centroInicial={coords}
+              seguirGps={seguirGps}
+              height="100%"
+              onReady={() => setMapaPronto(true)}
+              onMoverInicio={() => setAjustando(true)}
+              onArrastarInicio={() => definirSeguirGps(false)}
+              onAjustado={aoAjustar}
+              onVoltarAoGps={() => definirSeguirGps(true)}
+            />
+          </div>
+
+          <div className="shrink-0 p-3 bg-white border-t border-slate-100">
+            <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: AZUL }} />
+              Arraste o mapa para ajustar o ponto.
+            </p>
+
+            {ajustando ? (
+              <p className="mt-1.5 text-[13px] font-bold text-slate-400 flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                Atualizando endereço...
+              </p>
+            ) : (
+              <>
+                <p className="mt-1.5 text-[13px] font-bold text-slate-800 leading-tight">
+                  {endereco?.rua || 'Localizando endereço...'}
+                </p>
+                <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+                  {endereco?.resto}
+                  {precisao !== null && (
+                    <span className="whitespace-nowrap">
+                      {endereco?.resto ? ' • ' : ''}Precisão {precisao} m
+                    </span>
+                  )}
+                </p>
+              </>
+            )}
+
+            <div className="mt-2.5 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMapaCheio(false)}
+                className="flex-1 py-3 text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 cursor-pointer transition-all active:scale-[0.99]"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // Confirmar daqui fecha a tela cheia e segue o fio normalmente.
+                  confirmarLocal();
+                  setMapaCheio(false);
+                }}
+                disabled={!mapaPronto || ajustando}
+                className="flex-[2] py-3 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                style={{ backgroundColor: AZUL }}
+              >
+                {mapaPronto ? 'Confirmar local' : 'Carregando mapa...'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

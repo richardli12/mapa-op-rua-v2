@@ -4777,6 +4777,15 @@ export default function App() {
                 (a.position ?? 0) - (b.position ?? 0) ||
                 a.label.localeCompare(b.label),
             )}
+          // Inclui os desligados: um nome já usado não pode voltar como novo.
+          nomesReservados={operationTypes
+            .filter((t) => t.candidateId === checkInCandidateId)
+            .map((t) => t.label)}
+          onTipoCriado={(tipo) =>
+            setOperationTypes((prev) =>
+              prev.some((t) => t.id === tipo.id) ? prev : [...prev, tipo],
+            )
+          }
           notify={triggerNotification}
           onBack={() => {
             setAuthenticatedSupporter(null);
@@ -9103,21 +9112,32 @@ export default function App() {
                                   </td>
                                   <td className="py-3.5 px-3">
                                     <button
+                                      role="switch"
+                                      aria-checked={tipo.active !== false}
                                       onClick={() => alternarTipoAtivo(tipo)}
                                       title={
                                         tipo.active !== false
                                           ? "Desligar: sai dos check-ins"
                                           : "Ligar: volta aos check-ins"
                                       }
-                                      className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-slate-600 whitespace-nowrap cursor-pointer hover:text-slate-800"
+                                      className="inline-flex items-center gap-2 text-[11.5px] font-bold text-slate-600 whitespace-nowrap cursor-pointer hover:text-slate-800"
                                     >
+                                      {/* Chavinha: um toque liga ou desliga o tipo */}
                                       <span
-                                        className={`w-2 h-2 rounded-full ${
+                                        className={`w-9 h-5 rounded-full p-0.5 flex items-center transition-colors ${
                                           tipo.active !== false
                                             ? "bg-emerald-500"
                                             : "bg-slate-300"
                                         }`}
-                                      />
+                                      >
+                                        <span
+                                          className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                                            tipo.active !== false
+                                              ? "translate-x-4"
+                                              : "translate-x-0"
+                                          }`}
+                                        />
+                                      </span>
                                       {tipo.active !== false ? "Ativo" : "Inativo"}
                                     </button>
                                   </td>
