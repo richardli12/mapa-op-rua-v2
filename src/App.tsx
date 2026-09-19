@@ -7932,6 +7932,45 @@ export default function App() {
                 total: 1,
               });
             });
+            // Ranking das prioridades: quantos check-ins caíram em cada nível
+            // da lista do administrador. Nível sem registro fica na lista
+            // zerado, porque "ninguém marcou urgente hoje" também é notícia.
+            const porPrioridade: {
+              chave: string;
+              rotulo: string;
+              cor: string;
+              total: number;
+            }[] = opcoesDePrioridade.map((o) => ({
+              chave: o.value,
+              rotulo: o.label,
+              cor: o.color || "#94A3B8",
+              total: 0,
+            }));
+            checkInsDoCliente.forEach((c: any) => {
+              if (!c.priority) return;
+              const atual = porPrioridade.find((i) => i.chave === c.priority);
+              if (atual) {
+                atual.total += 1;
+                return;
+              }
+              // Nível apagado da lista, mas já usado em campo, continua contando.
+              const nivel = resolverPrioridade(c.priority);
+              porPrioridade.push({
+                chave: c.priority,
+                rotulo: nivel?.label || c.priority,
+                cor: nivel?.color || "#94A3B8",
+                total: 1,
+              });
+            });
+            const rankingPrioridades = [...porPrioridade].sort(
+              (a, b) => b.total - a.total || a.rotulo.localeCompare(b.rotulo),
+            );
+            const maiorDasPrioridades = rankingPrioridades[0]?.total || 1;
+            const totalPriorizado = rankingPrioridades.reduce(
+              (soma, i) => soma + i.total,
+              0,
+            );
+
             const rankingProblemas = [...porProblema].sort(
               (a, b) => b.total - a.total || a.rotulo.localeCompare(b.rotulo),
             );
@@ -8299,6 +8338,78 @@ export default function App() {
                               </p>
                               <p className="text-[10px] text-slate-400 font-bold">
                                 {item.total === 1 ? "registro" : "registros"}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <Flag className="w-5 h-5 text-[#F58220]" />
+                      <div>
+                        <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                          Ranking de prioridades
+                        </h3>
+                        <p className="text-[11px] text-slate-400 font-semibold">
+                          Como a equipe classificou a urgência
+                        </p>
+                      </div>
+                    </div>
+
+                    {totalPriorizado === 0 ? (
+                      <div className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                        Nenhuma prioridade registrada ainda
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2.5 max-h-[320px] overflow-y-auto pr-1">
+                        {rankingPrioridades.map((item, posicao) => (
+                          <div
+                            key={item.chave}
+                            className="flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100"
+                          >
+                            <span
+                              className={`w-6 h-6 rounded-lg text-[11px] font-black flex items-center justify-center shrink-0 ${
+                                posicao === 0
+                                  ? "bg-amber-100 text-amber-700"
+                                  : posicao === 1
+                                    ? "bg-slate-200 text-slate-600"
+                                    : posicao === 2
+                                      ? "bg-orange-100 text-orange-700"
+                                      : "bg-slate-50 text-slate-400"
+                              }`}
+                            >
+                              {posicao + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[13px] font-black text-slate-800 truncate leading-tight flex items-center gap-1.5">
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                                  style={{ backgroundColor: item.cor }}
+                                />
+                                <span className="truncate">{item.rotulo}</span>
+                              </p>
+                              {/* A barra compara com o nível mais registrado. */}
+                              <span className="mt-1 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                <span
+                                  className="block h-full rounded-full"
+                                  style={{
+                                    width: `${(item.total / maiorDasPrioridades) * 100}%`,
+                                    backgroundColor: item.cor,
+                                  }}
+                                />
+                              </span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[15px] font-black text-[#0D233A] leading-none">
+                                {item.total}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-bold">
+                                {totalPriorizado > 0
+                                  ? `${Math.round((item.total / totalPriorizado) * 100)}%`
+                                  : "0%"}
                               </p>
                             </div>
                           </div>
