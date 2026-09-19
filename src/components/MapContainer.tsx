@@ -12,7 +12,7 @@ import {
   mergeStreetLists,
   StreetOption,
 } from '../services/streetSources';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2 } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, corDaDependencia, getCheckInPriority } from '../types';
 import { buildOperationIconSvg } from '../operationIcons';
 
@@ -299,8 +299,12 @@ interface MapContainerProps {
   } | null;
   selectedCandidateId?: string;
   candidates?: Candidate[];
-  mapFilter?: 'all' | 'checkins' | 'markers';
-  onMapFilterChange?: (filter: 'all' | 'checkins' | 'markers') => void;
+  mapFilter?: 'all' | 'checkins' | 'markers' | 'favoritos';
+  onMapFilterChange?: (filter: 'all' | 'checkins' | 'markers' | 'favoritos') => void;
+  /** Liga ou desliga a estrela de um check-in, direto do mapa. */
+  onToggleCheckInFavorite?: (checkIn: CheckIn) => void;
+  /** Exclusão do check-in pelo administrador, direto do mapa. */
+  onDeleteCheckIn?: (checkIn: CheckIn) => void;
   /** Tipos de Operação cadastrados, usados para achar o ícone de cada ponto. */
   operationTypes?: OperationType[];
   /** Níveis de prioridade criados pelo administrador. */
@@ -408,6 +412,8 @@ export default function MapContainer({
   candidates,
   mapFilter: propMapFilter,
   onMapFilterChange,
+  onToggleCheckInFavorite,
+  onDeleteCheckIn,
   operationTypes = [],
   priorityLevels = [],
   rulerActive = false,
@@ -446,7 +452,7 @@ export default function MapContainer({
   const delimitationGroupRef = useRef<L.LayerGroup | null>(null);
 
   const [mouseCoords, setMouseCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [localMapFilter, setLocalMapFilter] = useState<'all' | 'checkins' | 'markers'>('all');
+  const [localMapFilter, setLocalMapFilter] = useState<'all' | 'checkins' | 'markers' | 'favoritos'>('all');
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
@@ -1362,7 +1368,7 @@ export default function MapContainer({
 
     circlesGroup.clearLayers();
 
-    if (mapFilter === 'checkins') {
+    if (mapFilter === 'checkins' || mapFilter === 'favoritos') {
       return;
     }
 
@@ -1431,7 +1437,7 @@ export default function MapContainer({
 
     pinsGroup.clearLayers();
 
-    if (mapFilter === 'checkins') {
+    if (mapFilter === 'checkins' || mapFilter === 'favoritos') {
       return;
     }
 
@@ -1486,7 +1492,10 @@ export default function MapContainer({
 
     if (!checkIns) return;
 
-    checkIns.forEach(checkIn => {
+    const visiveis =
+      mapFilter === 'favoritos' ? checkIns.filter(c => c.favorite) : checkIns;
+
+    visiveis.forEach(checkIn => {
       // Check-in por missão usa o bonequinho verde de sempre. O check-in livre
       // vira um alerta pintado com a cor do grau de prioridade informado.
       const isFree = checkIn.mode === 'livre';
@@ -1524,11 +1533,21 @@ export default function MapContainer({
         </div>
       `;
 
+      // Estrela no canto: o favorito se acha no meio dos outros marcadores.
+      const estrelaHtml = checkIn.favorite
+        ? `<span style="position:absolute;top:-2px;right:-2px;width:18px;height:18px;border-radius:50%;
+             background:#F59E0B;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);
+             display:flex;align-items:center;justify-content:center;">
+             <svg viewBox="0 0 24 24" width="10" height="10" fill="#fff"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+           </span>`
+        : '';
+
       const checkInIcon = L.divIcon({
         className: 'custom-div-icon drop-shadow-md',
         html: `
           <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;">
             ${avatarHtml}
+            ${estrelaHtml}
           </div>
         `,
         iconSize: [44, 44],
@@ -2236,14 +2255,58 @@ export default function MapContainer({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setSelectedCheckInForModal(null)}
-                className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
-                title="Fechar"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1">
+                {onToggleCheckInFavorite && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggleCheckInFavorite(selectedCheckInForModal);
+                      // O modal guarda uma cópia: sem isto a estrela só mudaria
+                      // no mapa atrás dele.
+                      setSelectedCheckInForModal({
+                        ...selectedCheckInForModal,
+                        favorite: !selectedCheckInForModal.favorite
+                      });
+                    }}
+                    className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                    title={
+                      selectedCheckInForModal.favorite
+                        ? 'Tirar dos favoritos'
+                        : 'Favoritar este check-in'
+                    }
+                    aria-label="Favoritar check-in"
+                  >
+                    <Star
+                      className="w-5 h-5"
+                      fill={selectedCheckInForModal.favorite ? '#FCD34D' : 'none'}
+                      color={selectedCheckInForModal.favorite ? '#FCD34D' : 'currentColor'}
+                    />
+                  </button>
+                )}
+                {onDeleteCheckIn && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const alvo = selectedCheckInForModal;
+                      setSelectedCheckInForModal(null);
+                      onDeleteCheckIn(alvo);
+                    }}
+                    className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                    title="Excluir check-in"
+                    aria-label="Excluir check-in"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCheckInForModal(null)}
+                  className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                  title="Fechar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Conteúdo rolável */}

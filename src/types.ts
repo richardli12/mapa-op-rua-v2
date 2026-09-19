@@ -219,6 +219,7 @@ export interface CheckIn {
   status?: 'rascunho' | 'confirmado'; // rascunho enquanto o fluxo não terminou
   notes?: CheckInNote[]; // observações digitadas e áudios gravados
   operations?: CheckInOperationRef[]; // todos os tipos de operação escolhidos
+  favorite?: boolean; // marcado como favorito pelo administrador
 }
 
 export interface BairroData {

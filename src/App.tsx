@@ -838,7 +838,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
-  const [mapFilter, setMapFilter] = useState<"all" | "checkins" | "markers">(
+  const [mapFilter, setMapFilter] = useState<"all" | "checkins" | "markers" | "favoritos">(
     "all",
   );
 
@@ -3351,6 +3351,53 @@ export default function App() {
     if (editingOperationTypeId === pinIconType) setPinColor(saved.color);
 
     resetOperationTypeForm();
+  };
+
+  /**
+   * Estrela do check-in: destaca o registro na lista e no mapa.
+   *
+   * O painel muda na hora e o banco recebe a mesma marca em seguida; se o
+   * banco recusar, a estrela volta para onde estava.
+   */
+  const alternarFavoritoCheckIn = (registro: any) => {
+    const favorito = !registro.favorite;
+    setCheckIns((prev: any) =>
+      prev.map((c: any) => (c.id === registro.id ? { ...c, favorite: favorito } : c)),
+    );
+    if (isDatabaseConfigured) {
+      DatabaseService.definirFavoritoCheckIn(registro.id, favorito).then((res) => {
+        if (!res.success) {
+          setCheckIns((prev: any) =>
+            prev.map((c: any) =>
+              c.id === registro.id ? { ...c, favorite: !favorito } : c,
+            ),
+          );
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+        }
+      });
+    }
+  };
+
+  /** Apaga um check-in de vez, com as mídias e observações dele. */
+  const excluirCheckIn = (registro: any) => {
+    const quem = registro.name || "este check-in";
+    askConfirmation({
+      title: "Excluir check-in",
+      message: `O check-in de ${quem} sai da lista e do mapa.`,
+      details: "As fotos, vídeos e observações do registro vão junto. Não dá para desfazer.",
+      confirmLabel: "Excluir check-in",
+      onConfirm: () => {
+        setCheckIns((prev: any) => prev.filter((c: any) => c.id !== registro.id));
+        if (checkInAberto === registro.id) setCheckInAberto(null);
+        if (isDatabaseConfigured) {
+          DatabaseService.excluirCheckIn(registro.id).then((res) => {
+            if (!res.success)
+              triggerNotification(`Banco de dados: ${res.error}`, "error");
+          });
+        }
+        triggerNotification("Check-in excluído.", "success");
+      },
+    });
   };
 
   /** Liga ou desliga um tipo: desligado some dos check-ins, histórico fica. */
@@ -9696,15 +9743,50 @@ export default function App() {
                                     </span>
                                   </td>
                                   <td className="py-3.5 px-2.5 text-right">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setCheckInAberto(registro.id);
-                                      }}
-                                      className="h-8 px-4 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all"
-                                    >
-                                      Ver
-                                    </button>
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          alternarFavoritoCheckIn(registro);
+                                        }}
+                                        title={
+                                          registro.favorite
+                                            ? "Tirar dos favoritos"
+                                            : "Favoritar: ganha estrela no mapa"
+                                        }
+                                        aria-label="Favoritar check-in"
+                                        className={`w-8 h-8 border rounded-xl flex items-center justify-center cursor-pointer transition-all ${
+                                          registro.favorite
+                                            ? "border-amber-300 bg-amber-50 text-amber-500"
+                                            : "border-slate-200 text-slate-400 hover:text-amber-500 hover:border-amber-300"
+                                        }`}
+                                      >
+                                        <Star
+                                          className="w-4 h-4"
+                                          fill={registro.favorite ? "currentColor" : "none"}
+                                        />
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setCheckInAberto(registro.id);
+                                        }}
+                                        className="h-8 px-4 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all"
+                                      >
+                                        Ver
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          excluirCheckIn(registro);
+                                        }}
+                                        title="Excluir check-in"
+                                        aria-label="Excluir check-in"
+                                        className="w-8 h-8 border border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-300 rounded-xl flex items-center justify-center cursor-pointer transition-all"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               ))
@@ -11112,7 +11194,31 @@ export default function App() {
                   )}
                 </button>
 
-                {/* Option 3: Marcações */}
+                {/* Option 3: Favoritos */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMapFilter("favoritos");
+                    setIsFilterDropdownOpen(false);
+                    triggerNotification(
+                      "Filtrado para exibir apenas os check-ins favoritos.",
+                      "info",
+                    );
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
+                    mapFilter === "favoritos"
+                      ? "bg-amber-500 text-white shadow-md"
+                      : "text-slate-300 hover:bg-slate-800/65 hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Star className="w-3.5 h-3.5" />
+                    <span>Favoritos</span>
+                  </div>
+                  {mapFilter === "favoritos" && <Check className="w-3.5 h-3.5" />}
+                </button>
+
+                {/* Option 4: Marcações */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -12562,6 +12668,8 @@ export default function App() {
           candidates={candidates}
           mapFilter={mapFilter}
           onMapFilterChange={setMapFilter}
+          onToggleCheckInFavorite={alternarFavoritoCheckIn}
+          onDeleteCheckIn={excluirCheckIn}
           onSelectItem={(id, type) => {
             setSelectedId(id);
             if (type === "area") {

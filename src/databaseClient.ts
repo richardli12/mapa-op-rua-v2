@@ -121,7 +121,17 @@ function normalizeFields<T>(obj: any): T {
 const somenteColunasDoCheckIn = (checkIn: any) => {
   // status, confirmedAt e updatedAt saem daqui e voltam na primeira tentativa:
   // assim a tentativa seguinte, para bancos sem a migração, fica sem eles.
-  const { notes, operations, status, confirmedAt, updatedAt, ...colunas } = checkIn || {};
+  // favorite fica de fora: quem grava a estrela é definirFavoritoCheckIn, e
+  // num banco sem a migração a coluna derrubaria o upsert inteiro.
+  const {
+    notes,
+    operations,
+    status,
+    confirmedAt,
+    updatedAt,
+    favorite,
+    ...colunas
+  } = checkIn || {};
   return colunas;
 };
 
@@ -1039,6 +1049,40 @@ export const DatabaseService = {
       return { success: true };
     } catch (err: any) {
       console.error('Erro ao salvar operações do check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Liga ou desliga a estrela de um check-in. */
+  async definirFavoritoCheckIn(id: string, favorito: boolean) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('check_ins')
+        .update({ favorite: favorito })
+        .eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao favoritar check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Apaga um check-in de vez.
+   *
+   * Mídias, observações e operações saem junto pela cascata das tabelas
+   * filhas; os arquivos no Storage continuam lá, sem ninguém apontando.
+   */
+  async excluirCheckIn(id: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('check_ins').delete().eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao excluir check-in:', err);
       return { success: false, error: err.message };
     }
   },
