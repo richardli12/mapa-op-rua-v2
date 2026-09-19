@@ -24,7 +24,8 @@ interface MapaAjusteProps {
   onAjustado: (lat: number, lng: number, distanciaDoGps: number) => void;
   /** Pediu para voltar ao ponto do GPS pelo botão de mira. */
   onVoltarAoGps: () => void;
-  height?: number;
+  /** Altura da caixa do mapa. Em tela cheia vale '100%'. */
+  height?: number | string;
 }
 
 /**

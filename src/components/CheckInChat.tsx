@@ -10,7 +10,9 @@ import {
   Clock,
   Loader2,
   Pencil,
-  Plus
+  Plus,
+  Maximize2,
+  X
 } from 'lucide-react';
 import { reverseGeocode } from '../services/streetSources';
 import { DatabaseService, isDatabaseConfigured } from '../databaseClient';
@@ -129,6 +131,8 @@ export default function CheckInChat({
   const [buscandoGps, setBuscandoGps] = useState(true);
   const [erroGps, setErroGps] = useState<string | null>(null);
   const [ajustando, setAjustando] = useState(false);
+  /** Mapa ocupando a tela toda, para posicionar o ponto com folga. */
+  const [mapaCheio, setMapaCheio] = useState(false);
   const [seguirGps, setSeguirGps] = useState(true);
   const [localConfirmado, setLocalConfirmado] = useState(false);
 
@@ -1085,17 +1089,36 @@ export default function CheckInChat({
                 </div>
               ) : coords ? (
                 <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm overflow-hidden">
-                  <MapaAjuste
-                    gps={gps}
-                    centroInicial={coords}
-                    seguirGps={seguirGps}
-                    height={260}
-                    onReady={() => setMapaPronto(true)}
-                    onMoverInicio={() => setAjustando(true)}
-                    onArrastarInicio={() => definirSeguirGps(false)}
-                    onAjustado={aoAjustar}
-                    onVoltarAoGps={() => definirSeguirGps(true)}
-                  />
+                  {/* Um mapa de cada vez: em tela cheia este sai de cena. */}
+                  {mapaCheio ? (
+                    <div className="h-[260px] bg-slate-200 flex items-center justify-center text-[12px] font-bold text-slate-500">
+                      Ajustando em tela cheia...
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <MapaAjuste
+                        gps={gps}
+                        centroInicial={coords}
+                        seguirGps={seguirGps}
+                        height={260}
+                        onReady={() => setMapaPronto(true)}
+                        onMoverInicio={() => setAjustando(true)}
+                        onArrastarInicio={() => definirSeguirGps(false)}
+                        onAjustado={aoAjustar}
+                        onVoltarAoGps={() => definirSeguirGps(true)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setMapaCheio(true)}
+                        title="Abrir o mapa em tela cheia"
+                        aria-label="Abrir o mapa em tela cheia"
+                        className="absolute z-[600] top-2.5 right-2.5 h-9 px-3 rounded-full bg-white shadow-md border border-slate-200 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-slate-600 cursor-pointer active:scale-95 transition-transform"
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                        Tela cheia
+                      </button>
+                    </div>
+                  )}
 
                   <div className="p-3">
                     <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
@@ -1297,6 +1320,93 @@ export default function CheckInChat({
               'Confirmar check-in'
             )}
           </button>
+        </div>
+      )}
+
+      {/* MAPA EM TELA CHEIA: o mesmo ajuste, com a tela inteira para mirar */}
+      {mapaCheio && coords && (
+        <div className="fixed inset-0 z-[4000] bg-white flex flex-col">
+          <header
+            className="shrink-0 px-3 py-2.5 flex items-center gap-2 text-white"
+            style={{ backgroundColor: AZUL }}
+          >
+            <button
+              type="button"
+              onClick={() => setMapaCheio(false)}
+              aria-label="Sair da tela cheia"
+              className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 cursor-pointer active:scale-95 transition-all"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-[14px] font-bold tracking-tight">
+              Posicione o seu ponto
+            </h2>
+          </header>
+
+          <div className="flex-1 min-h-0 relative">
+            <MapaAjuste
+              gps={gps}
+              centroInicial={coords}
+              seguirGps={seguirGps}
+              height="100%"
+              onReady={() => setMapaPronto(true)}
+              onMoverInicio={() => setAjustando(true)}
+              onArrastarInicio={() => definirSeguirGps(false)}
+              onAjustado={aoAjustar}
+              onVoltarAoGps={() => definirSeguirGps(true)}
+            />
+          </div>
+
+          <div className="shrink-0 p-3 bg-white border-t border-slate-100">
+            <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: AZUL }} />
+              Arraste o mapa para ajustar o ponto.
+            </p>
+
+            {ajustando ? (
+              <p className="mt-1.5 text-[13px] font-bold text-slate-400 flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                Atualizando endereço...
+              </p>
+            ) : (
+              <>
+                <p className="mt-1.5 text-[13px] font-bold text-slate-800 leading-tight">
+                  {endereco?.rua || 'Localizando endereço...'}
+                </p>
+                <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+                  {endereco?.resto}
+                  {precisao !== null && (
+                    <span className="whitespace-nowrap">
+                      {endereco?.resto ? ' • ' : ''}Precisão {precisao} m
+                    </span>
+                  )}
+                </p>
+              </>
+            )}
+
+            <div className="mt-2.5 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMapaCheio(false)}
+                className="flex-1 py-3 text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 cursor-pointer transition-all active:scale-[0.99]"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // Confirmar daqui fecha a tela cheia e segue o fio normalmente.
+                  confirmarLocal();
+                  setMapaCheio(false);
+                }}
+                disabled={!mapaPronto || ajustando}
+                className="flex-[2] py-3 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                style={{ backgroundColor: AZUL }}
+              >
+                {mapaPronto ? 'Confirmar local' : 'Carregando mapa...'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
