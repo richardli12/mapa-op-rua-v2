@@ -212,7 +212,13 @@ create table if not exists public.check_ins (
   "operationTypeLabel" text,
   accuracy             numeric,   -- precisao do GPS, em metros
   "memberId"           text,
-  "memberPhoto"        text
+  "memberPhoto"        text,
+
+  -- Estrela do administrador: destaca o registro na lista e no mapa
+  favorite             boolean default false,
+
+  -- Na lixeira: sai das telas e do mapa, e da para restaurar
+  trashed              boolean default false
 );
 
 
