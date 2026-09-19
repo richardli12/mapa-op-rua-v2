@@ -2292,8 +2292,8 @@ export default function MapContainer({
                       onDeleteCheckIn(alvo);
                     }}
                     className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
-                    title="Excluir check-in"
-                    aria-label="Excluir check-in"
+                    title="Mover para a lixeira"
+                    aria-label="Mover o check-in para a lixeira"
                   >
                     <Trash2 className="w-5 h-5" />
                   </button>

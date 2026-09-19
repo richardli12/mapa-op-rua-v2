@@ -576,6 +576,8 @@ export default function App() {
   >("todos");
   const [paginaCheckIns, setPaginaCheckIns] = useState(1);
   const [checkInAberto, setCheckInAberto] = useState<string | null>(null);
+  /** Lixeira dos check-ins aberta na aba do cliente. */
+  const [lixeiraAberta, setLixeiraAberta] = useState(false);
   const [fichaDoCheckIn, setFichaDoCheckIn] = useState<any>(null);
   const [carregandoFicha, setCarregandoFicha] = useState(false);
   /** Operações e contagem de arquivos de cada linha da lista. */
@@ -3378,24 +3380,65 @@ export default function App() {
     }
   };
 
-  /** Apaga um check-in de vez, com as mídias e observações dele. */
+  /** Move o check-in para a lixeira, de onde ele ainda pode voltar. */
   const excluirCheckIn = (registro: any) => {
     const quem = registro.name || "este check-in";
     askConfirmation({
-      title: "Excluir check-in",
+      title: "Mover para a lixeira",
       message: `O check-in de ${quem} sai da lista e do mapa.`,
-      details: "As fotos, vídeos e observações do registro vão junto. Não dá para desfazer.",
-      confirmLabel: "Excluir check-in",
+      details:
+        "Nada é apagado: o registro fica na lixeira e você pode restaurar quando quiser.",
+      confirmLabel: "Mover para a lixeira",
+      onConfirm: () => {
+        setCheckIns((prev: any) =>
+          prev.map((c: any) =>
+            c.id === registro.id ? { ...c, trashed: true } : c,
+          ),
+        );
+        if (checkInAberto === registro.id) setCheckInAberto(null);
+        if (isDatabaseConfigured) {
+          DatabaseService.definirLixeiraCheckIn(registro.id, true).then((res) => {
+            if (!res.success)
+              triggerNotification(`Banco de dados: ${res.error}`, "error");
+          });
+        }
+        triggerNotification("Check-in na lixeira.", "success");
+      },
+    });
+  };
+
+  /** Tira o check-in da lixeira e devolve ele para a lista e o mapa. */
+  const restaurarCheckIn = (registro: any) => {
+    setCheckIns((prev: any) =>
+      prev.map((c: any) => (c.id === registro.id ? { ...c, trashed: false } : c)),
+    );
+    if (isDatabaseConfigured) {
+      DatabaseService.definirLixeiraCheckIn(registro.id, false).then((res) => {
+        if (!res.success)
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+      });
+    }
+    triggerNotification("Check-in restaurado.", "success");
+  };
+
+  /** Apaga de vez o que está na lixeira: daqui não volta. */
+  const excluirCheckInDeVez = (registro: any) => {
+    const quem = registro.name || "este check-in";
+    askConfirmation({
+      title: "Excluir definitivamente",
+      message: `O check-in de ${quem} sai do sistema.`,
+      details:
+        "As fotos, vídeos e observações do registro vão junto. Não dá para desfazer.",
+      confirmLabel: "Excluir para sempre",
       onConfirm: () => {
         setCheckIns((prev: any) => prev.filter((c: any) => c.id !== registro.id));
-        if (checkInAberto === registro.id) setCheckInAberto(null);
         if (isDatabaseConfigured) {
           DatabaseService.excluirCheckIn(registro.id).then((res) => {
             if (!res.success)
               triggerNotification(`Banco de dados: ${res.error}`, "error");
           });
         }
-        triggerNotification("Check-in excluído.", "success");
+        triggerNotification("Check-in excluído definitivamente.", "success");
       },
     });
   };
@@ -3772,6 +3815,8 @@ export default function App() {
   });
 
   const filteredCheckIns = checkIns.filter((c) => {
+    // Registro na lixeira não aparece no mapa nem nas contas.
+    if (c.trashed) return false;
     const activeCandidate =
       currentUrlView === "checkin"
         ? checkInCandidateId
@@ -7760,8 +7805,16 @@ export default function App() {
             );
             const checkInsDoCliente = checkIns.filter(
               (c: any) =>
-                c.candidateId === inspectedCandidate.id ||
-                c.candidate_id === inspectedCandidate.id,
+                (c.candidateId === inspectedCandidate.id ||
+                  c.candidate_id === inspectedCandidate.id) &&
+                // A lixeira tem a lista dela; aqui só entra o que está em uso.
+                !c.trashed,
+            );
+            const checkInsNaLixeira = checkIns.filter(
+              (c: any) =>
+                (c.candidateId === inspectedCandidate.id ||
+                  c.candidate_id === inspectedCandidate.id) &&
+                c.trashed,
             );
             const hoje = new Date().toDateString();
             const checkInsDeHoje = checkInsDoCliente.filter(
@@ -9526,14 +9579,103 @@ export default function App() {
                       </div>
                     </div>
 
-                    <button
-                      onClick={exportarDados}
-                      className="h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
-                    >
-                      <Download className="w-4 h-4 text-[#015FC9]" />
-                      Exportar dados
-                    </button>
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      <button
+                        onClick={() => setLixeiraAberta((v) => !v)}
+                        className={`h-11 px-4 border font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95 transition-all ${
+                          lixeiraAberta
+                            ? "bg-slate-800 border-slate-800 text-white"
+                            : "bg-white border-slate-200 hover:bg-slate-50 text-slate-700"
+                        }`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Lixeira
+                        {checkInsNaLixeira.length > 0 && (
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                              lixeiraAberta
+                                ? "bg-white/20 text-white"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {checkInsNaLixeira.length}
+                          </span>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={exportarDados}
+                        className="h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer active:scale-95"
+                      >
+                        <Download className="w-4 h-4 text-[#015FC9]" />
+                        Exportar dados
+                      </button>
+                    </div>
                   </div>
+
+                  {/* LIXEIRA: o que saiu das telas, guardado para voltar */}
+                  {lixeiraAberta && (
+                    <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+                      <div className="px-6 pt-5 pb-4">
+                        <h4 className="text-[15px] font-black text-[#0D233A] leading-tight flex items-center gap-2">
+                          <Trash2 className="w-4 h-4 text-slate-400" />
+                          Lixeira
+                        </h4>
+                        <p className="text-[11px] text-slate-400 font-semibold">
+                          Check-ins fora das telas e do mapa. Nada foi apagado.
+                        </p>
+                      </div>
+
+                      <div className="divide-y divide-slate-100 border-t border-slate-100">
+                        {checkInsNaLixeira.length === 0 ? (
+                          <p className="py-12 text-center text-slate-400 font-bold text-[11px] uppercase tracking-widest">
+                            A lixeira está vazia
+                          </p>
+                        ) : (
+                          checkInsNaLixeira
+                            .slice()
+                            .sort(
+                              (a: any, b: any) =>
+                                new Date(b.createdAt).getTime() -
+                                new Date(a.createdAt).getTime(),
+                            )
+                            .map((registro: any) => (
+                              <div
+                                key={registro.id}
+                                className="px-6 py-3.5 flex items-center justify-between gap-3"
+                              >
+                                <div className="min-w-0">
+                                  <p className="font-black text-slate-700 text-[12.5px] truncate">
+                                    {registro.name}
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 font-semibold truncate">
+                                    {[registro.rua, registro.bairro]
+                                      .filter(Boolean)
+                                      .join(", ") || "Sem endereço"}{" "}
+                                    • {quandoFoi(registro.createdAt)}
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button
+                                    onClick={() => restaurarCheckIn(registro)}
+                                    className="h-8 px-3.5 border border-slate-200 hover:border-emerald-400 hover:text-emerald-600 text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all whitespace-nowrap"
+                                  >
+                                    Restaurar
+                                  </button>
+                                  <button
+                                    onClick={() => excluirCheckInDeVez(registro)}
+                                    className="h-8 px-3.5 border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 text-[11px] font-bold rounded-xl cursor-pointer transition-all whitespace-nowrap"
+                                  >
+                                    Excluir de vez
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
                     {/* LISTA DE CHECK-INS */}
@@ -9780,8 +9922,8 @@ export default function App() {
                                           e.stopPropagation();
                                           excluirCheckIn(registro);
                                         }}
-                                        title="Excluir check-in"
-                                        aria-label="Excluir check-in"
+                                        title="Mover para a lixeira"
+                                        aria-label="Mover o check-in para a lixeira"
                                         className="w-8 h-8 border border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-300 rounded-xl flex items-center justify-center cursor-pointer transition-all"
                                       >
                                         <Trash2 className="w-4 h-4" />

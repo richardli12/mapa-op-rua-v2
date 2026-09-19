@@ -220,6 +220,7 @@ export interface CheckIn {
   notes?: CheckInNote[]; // observações digitadas e áudios gravados
   operations?: CheckInOperationRef[]; // todos os tipos de operação escolhidos
   favorite?: boolean; // marcado como favorito pelo administrador
+  trashed?: boolean; // na lixeira: some das telas, mas dá para restaurar
 }
 
 export interface BairroData {

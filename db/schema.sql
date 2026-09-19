@@ -215,7 +215,10 @@ create table if not exists public.check_ins (
   "memberPhoto"        text,
 
   -- Estrela do administrador: destaca o registro na lista e no mapa
-  favorite             boolean default false
+  favorite             boolean default false,
+
+  -- Na lixeira: sai das telas e do mapa, e da para restaurar
+  trashed              boolean default false
 );
 
 

@@ -130,6 +130,7 @@ const somenteColunasDoCheckIn = (checkIn: any) => {
     confirmedAt,
     updatedAt,
     favorite,
+    trashed,
     ...colunas
   } = checkIn || {};
   return colunas;
@@ -1065,6 +1066,22 @@ export const DatabaseService = {
       return { success: true };
     } catch (err: any) {
       console.error('Erro ao favoritar check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Manda o check-in para a lixeira, ou tira ele de lá. */
+  async definirLixeiraCheckIn(id: string, naLixeira: boolean) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('check_ins')
+        .update({ trashed: naLixeira })
+        .eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao mover check-in para a lixeira:', err);
       return { success: false, error: err.message };
     }
   },
