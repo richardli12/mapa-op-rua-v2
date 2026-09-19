@@ -3722,6 +3722,14 @@ export default function App() {
     );
   };
 
+  /**
+   * Raio: a ferramenta cai direto no mapa.
+   *
+   * Perguntar "como definir o local?" antes do desenho era um passo a mais
+   * para responder sempre a mesma coisa: quem pegou a ferramenta do raio já
+   * está com o lugar na tela. O formulário (nome, equipe, cor) só aparece
+   * depois que o círculo está desenhado.
+   */
   const triggerCreateArea = () => {
     resetAreaForm();
     if (selectedCandidateFilter !== "all") {
@@ -3732,11 +3740,19 @@ export default function App() {
     setCreationRuaName(null);
     setPickedCoords(null);
     setActiveTab("areas");
-    setIsSidebarOpen(false); // Do not open right sidebar
-    setClickToPickCoords(false); // Do not start map clicking
+    setIsSidebarOpen(false);
     setCoordsPickingMode("area");
-    setCreationLocationMode("ask");
-    setCreationModalType("area"); // Open modal in the center of the screen
+    setCreationLocationMode("map");
+    setCreationModalType("area");
+    // Mapa armado: o próximo gesto na tela é o centro e o raio.
+    setClickToPickCoords(true);
+  };
+
+  /** Larga a criação do raio inteira: nada fica desenhado nem pela metade. */
+  const cancelarRaio = () => {
+    setClickToPickCoords(false);
+    resetAreaForm();
+    triggerNotification("Criação da área cancelada.", "info");
   };
 
   const triggerCreatePin = () => {
@@ -11535,7 +11551,12 @@ export default function App() {
             {coordsPickingMode === "area" ? (
               <>
                 <Circle className="w-4 h-4 text-indigo-400" />
-                <span>Clique no mapa para marcar o centro do raio</span>
+                <span>
+                  Segure e arraste no mapa para desenhar o raio
+                  <span className="normal-case tracking-normal font-semibold text-white/50 ml-2">
+                    (botão direito arrasta o mapa)
+                  </span>
+                </span>
               </>
             ) : (
               <>
@@ -11546,6 +11567,12 @@ export default function App() {
           </span>
           <button
             onClick={() => {
+              // No raio não há pergunta anterior para voltar: cancelar aqui é
+              // largar a criação inteira, sem deixar meia área pendurada.
+              if (coordsPickingMode === "area" && creationModalType === "area") {
+                cancelarRaio();
+                return;
+              }
               setClickToPickCoords(false);
               setDefinindoRaio(false);
               // Com o formulário aberto, cancelar devolve à pergunta inicial em
@@ -11776,7 +11803,9 @@ export default function App() {
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2001] bg-[#0c1322]/95 backdrop-blur-md border border-indigo-500/50 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 pointer-events-auto">
           <Circle className="w-4 h-4 text-indigo-400" />
           <span className="text-xs font-bold uppercase tracking-wider">
-            Arraste a alça para abrir o raio
+            {areaRadius === ""
+              ? "Arraste a partir da borda para abrir o raio"
+              : "Arraste a borda para ajustar, o centro para mover"}
           </span>
           <span className="text-xs font-black bg-white/10 border border-white/20 px-3 py-1 rounded-full">
             {areaRadius === "" ? "sem raio" : `${areaRadius} m`}
@@ -11791,6 +11820,12 @@ export default function App() {
             className="px-3 py-1 bg-white/10 hover:bg-white/20 text-[10px] text-white rounded-full font-bold border border-white/20 cursor-pointer transition-all"
           >
             Refazer
+          </button>
+          <button
+            onClick={cancelarRaio}
+            className="px-3 py-1 bg-transparent hover:bg-rose-500/20 text-[10px] text-rose-300 hover:text-rose-200 rounded-full font-bold border border-rose-400/40 cursor-pointer transition-all"
+          >
+            Cancelar
           </button>
           <button
             onClick={() => {
@@ -12967,6 +13002,8 @@ export default function App() {
             }
           }}
           clickToPickCoords={clickToPickCoords}
+          // Colocando um ponto: a busca por bairro e rua sai da frente do mapa.
+          esconderBusca={clickToPickCoords || definindoRaio}
           onCoordsPicked={(coords) => {
             setPickedCoords(coords);
           }}

@@ -272,6 +272,8 @@ interface MapContainerProps {
   selectedId: string | null;
   onSelectItem: (id: string, type: 'area' | 'pin') => void;
   clickToPickCoords: boolean;
+  /** Esconde o painel de busca enquanto um ponto está sendo colocado. */
+  esconderBusca?: boolean;
   onCoordsPicked: (coords: { lat: number; lng: number }) => void;
   tempPlacementCoords: { lat: number; lng: number } | null;
   tempPlacementColor: string;
@@ -389,6 +391,7 @@ export default function MapContainer({
   selectedId,
   onSelectItem,
   clickToPickCoords,
+  esconderBusca = false,
   onCoordsPicked,
   tempPlacementCoords,
   tempPlacementColor,
@@ -438,8 +441,12 @@ export default function MapContainer({
   const tempCircleRef = useRef<any>(null);
   const tempHandleRef = useRef<any>(null);
   const arrastandoRaioRef = useRef(false);
-  /** Desfaz o aviso de zoom do puxador quando a camada é refeita. */
+  /** Escreve a medida no miolo do círculo temporário, quando ele existe. */
+  const tempMedidaRef = useRef<((metros: number) => void) | null>(null);
+  /** Desfaz o aviso de zoom do círculo fantasma quando a camada é refeita. */
   const limparZoomRef = useRef<(() => void) | null>(null);
+  /** Tamanho do círculo fantasma, em metros, no zoom de agora. */
+  const tempFantasmaRef = useRef<(() => number) | null>(null);
   /**
    * Espelhos lidos de dentro do mapa.
    *
@@ -451,6 +458,8 @@ export default function MapContainer({
   pegandoCoordenadaRef.current = clickToPickCoords;
   const aoEscolherCoordenadaRef = useRef(onCoordsPicked);
   aoEscolherCoordenadaRef.current = onCoordsPicked;
+  const aoMudarRaioRef = useRef(onTempRadiusChange);
+  aoMudarRaioRef.current = onTempRadiusChange;
   /** Último ponto para onde o mapa já andou sozinho. */
   const ultimoPanRef = useRef<string>('');
   /** Cliente cujo conteúdo o mapa já enquadrou; não se enquadra duas vezes. */
@@ -1711,6 +1720,169 @@ export default function MapContainer({
     camadaEscolasLigadaRef.current = escolasVisiveis;
   }, [escolas, escolasVisiveis]);
 
+  /**
+   * Colocar uma área é um gesto só: aperta no centro, arrasta, solta.
+   *
+   * O modelo antigo pedia um clique para fixar o centro e depois caçar uma
+   * bolinha na lateral para abrir o raio — dois movimentos para uma coisa só,
+   * e a bolinha some do olho em zoom baixo. Aqui o círculo cresce debaixo do
+   * dedo desde o primeiro toque, como qualquer ferramenta de desenho.
+   *
+   * Um clique seco, sem arrastar, marca só o centro: o raio se abre depois,
+   * puxando a borda.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !clickToPickCoords || tempPlacementType !== 'area') return;
+    const container = map.getContainer();
+
+    let centro: any = null;
+    let previa: any = null;
+    let etiqueta: any = null;
+    let arrastou = false;
+
+    /** Cliques nos controles do mapa não desenham nada. */
+    const noMapaMesmo = (alvo: any) =>
+      !(alvo instanceof Element) ||
+      !alvo.closest('.leaflet-control, .leaflet-marker-icon, button, input, select, a');
+
+    const limparPrevia = () => {
+      if (previa) map.removeLayer(previa);
+      if (etiqueta) map.removeLayer(etiqueta);
+      previa = null;
+      etiqueta = null;
+    };
+
+    /**
+     * Com a ferramenta armada, o botão esquerdo desenha — então o mapa
+     * precisa de outra forma de ser arrastado, ou quem errou o enquadramento
+     * fica preso. O botão direito (ou o do meio) passa a arrastar a vista.
+     */
+    let panDe: { x: number; y: number } | null = null;
+
+    const arrastarMapa = (ev: PointerEvent) => {
+      if (!panDe) return;
+      map.panBy([panDe.x - ev.clientX, panDe.y - ev.clientY], { animate: false });
+      panDe = { x: ev.clientX, y: ev.clientY };
+    };
+
+    const semMenu = (ev: Event) => ev.preventDefault();
+
+    const comecar = (ev: PointerEvent) => {
+      if (ev.button === 2 || ev.button === 1) {
+        panDe = { x: ev.clientX, y: ev.clientY };
+        try {
+          container.setPointerCapture(ev.pointerId);
+        } catch {
+          // Sem captura o arrasto ainda funciona pelos avisos da janela.
+        }
+        return;
+      }
+      if (ev.button !== 0 || reguaAtivaRef.current || !noMapaMesmo(ev.target)) return;
+      centro = map.mouseEventToLatLng(ev as any);
+      arrastou = false;
+      arrastandoRaioRef.current = true;
+      map.dragging.disable();
+
+      previa = L.circle(centro, {
+        radius: 0,
+        color: tempPlacementColor,
+        weight: 2,
+        opacity: 0.9,
+        dashArray: '5, 5',
+        fillColor: tempPlacementColor,
+        fillOpacity: 0.15,
+        interactive: false
+      }).addTo(map);
+
+      etiqueta = L.marker(centro, {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({
+          className: '',
+          html:
+            '<span style="display:block;width:12px;height:12px;border-radius:50%;' +
+            `background:${tempPlacementColor};border:2px solid #fff;` +
+            'box-shadow:0 1px 4px rgba(0,0,0,.4)"></span>',
+          iconSize: [12, 12],
+          iconAnchor: [6, 6]
+        })
+      }).addTo(map);
+      etiqueta.bindTooltip('0 m', {
+        permanent: true,
+        direction: 'top',
+        offset: [0, -10],
+        className: 'medida-raio'
+      });
+
+      try {
+        container.setPointerCapture(ev.pointerId);
+      } catch {
+        // Sem captura o gesto ainda funciona pelos avisos da janela.
+      }
+    };
+
+    const seguir = (ev: PointerEvent) => {
+      if (panDe) {
+        arrastarMapa(ev);
+        return;
+      }
+      if (!centro || !previa) return;
+      const ponto = map.mouseEventToLatLng(ev as any);
+      const metros = map.distance(centro, ponto);
+      // Tremida de dedo não é arrasto: abaixo de 4 metros ainda é um clique.
+      if (metros > 4) arrastou = true;
+      previa.setRadius(metros);
+      etiqueta?.setTooltipContent(`${Math.round(metros)} m`);
+    };
+
+    const soltar = (ev: PointerEvent) => {
+      if (panDe) {
+        panDe = null;
+        return;
+      }
+      if (!centro) return;
+      const ponto = map.mouseEventToLatLng(ev as any);
+      const metros = Math.round(map.distance(centro, ponto));
+      const destino = centro;
+
+      centro = null;
+      limparPrevia();
+      map.dragging.enable();
+      // O clique que vem logo depois do gesto é resto dele, não escolha nova.
+      setTimeout(() => {
+        arrastandoRaioRef.current = false;
+      }, 0);
+
+      aoEscolherCoordenadaRef.current({ lat: destino.lat, lng: destino.lng });
+      if (arrastou && metros > 0) aoMudarRaioRef.current?.(metros);
+    };
+
+    const desistir = () => {
+      panDe = null;
+      if (!centro) return;
+      centro = null;
+      limparPrevia();
+      map.dragging.enable();
+      arrastandoRaioRef.current = false;
+    };
+
+    container.addEventListener('pointerdown', comecar);
+    container.addEventListener('contextmenu', semMenu);
+    window.addEventListener('pointermove', seguir);
+    window.addEventListener('pointerup', soltar);
+    window.addEventListener('pointercancel', desistir);
+
+    return () => {
+      container.removeEventListener('pointerdown', comecar);
+      container.removeEventListener('contextmenu', semMenu);
+      window.removeEventListener('pointermove', seguir);
+      window.removeEventListener('pointerup', soltar);
+      window.removeEventListener('pointercancel', desistir);
+      desistir();
+    };
+  }, [clickToPickCoords, tempPlacementType, tempPlacementColor]);
+
   // Render Temporary Placement Marker (when placing or picking coords)
   useEffect(() => {
     const tempGroup = tempGroupRef.current;
@@ -1718,8 +1890,8 @@ export default function MapContainer({
     if (!tempGroup || !map) return;
 
     tempGroup.clearLayers();
-    // A camada vai ser refeita: o aviso de zoom da anterior morre aqui, senão
-    // sobrariam vários apontando para puxadores que não existem mais.
+    tempMedidaRef.current = null;
+    tempFantasmaRef.current = null;
     limparZoomRef.current?.();
     limparZoomRef.current = null;
 
@@ -1735,175 +1907,184 @@ export default function MapContainer({
       if (tempPlacementType === 'area') {
         const centro = L.latLng(tempPlacementCoords.lat, tempPlacementCoords.lng);
 
-        // Raio ainda em branco: o circulo nasce sem tamanho e quem define e o
-        // arrasto. O puxador, porem, precisa aparecer em algum lugar visivel,
-        // entao fica a uns 60 pixels do centro ate o primeiro arrasto.
-        const metrosDe = (pixels: number) => {
-          const p = map.latLngToContainerPoint(centro);
-          return map.distance(centro, map.containerPointToLatLng(L.point(p.x + pixels, p.y)));
-        };
-        const naBorda = (metros: number) => {
-          const graus = metros / (111320 * Math.cos((centro.lat * Math.PI) / 180));
-          return L.latLng(centro.lat, centro.lng + graus);
-        };
-
+        /**
+         * O círculo do raio se comanda sozinho, sem alça pendurada na lateral.
+         *
+         * Pegar perto da borda muda o tamanho; pegar por dentro leva o ponto
+         * inteiro para outro lugar. É a mesma regra de qualquer editor de
+         * formas, e dispensa caçar uma bolinha que some em zoom baixo.
+         */
         const raioInicial = raioRef.current > 0 ? raioRef.current : 0;
+
+        /**
+         * Círculo fantasma do raio zero.
+         *
+         * Um clique seco marca o centro sem raio, e um círculo de raio zero
+         * não tem borda para pegar — a pessoa ficaria com um ponto e nenhum
+         * jeito de abrir a área. Então, enquanto o raio é zero, desenhamos um
+         * círculo de mentira do tamanho de uns 45 pixels: ele existe só para
+         * ser puxado, e o primeiro arrasto grava a medida de verdade.
+         */
+        const metrosDe = (pixels: number) => {
+          const atual = tempCircleRef.current?.getLatLng() || centro;
+          const p = map.latLngToContainerPoint(atual);
+          return map.distance(atual, map.containerPointToLatLng(L.point(p.x + pixels, p.y)));
+        };
+        const raioDesenhado = raioInicial > 0 ? raioInicial : metrosDe(45);
 
         // bubblingMouseEvents: false é o que impede o gesto no círculo de
         // virar um clique no mapa — que, no modo de escolha, jogaria o centro
-        // para debaixo do dedo no meio do arrasto do raio.
+        // para debaixo do dedo no meio do arrasto.
         const tempCircle = L.circle(centro, {
-          radius: raioInicial,
+          radius: raioDesenhado,
           color: tempPlacementColor,
           weight: 2,
-          opacity: 0.8,
+          opacity: 0.85,
           dashArray: '5, 5',
           fillColor: tempPlacementColor,
           fillOpacity: 0.15,
           bubblingMouseEvents: false
         });
 
-        /**
-         * Miolo do círculo, e a alça para mover o ponto inteiro.
-         *
-         * É um marcador, não um circleMarker, justamente para ser arrastável:
-         * arrastar o centro leva o círculo junto, que é o que se espera ao
-         * pegar um ponto no mapa e levar para outro lugar.
-         */
+        /** Miolo do círculo: mostra a medida e marca o centro exato. */
         const tempCenter = L.marker(centro, {
-          draggable: true,
+          interactive: false,
           keyboard: false,
           icon: L.divIcon({
             className: '',
             html:
-              '<span style="display:block;width:14px;height:14px;border-radius:50%;cursor:move;' +
+              '<span style="display:block;width:14px;height:14px;border-radius:50%;' +
               `background:${tempPlacementColor};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></span>`,
             iconSize: [14, 14],
             iconAnchor: [7, 7]
           })
         });
-        tempCenter.bindTooltip('Arraste para mover o ponto', {
-          direction: 'bottom',
-          offset: [0, 10]
-        });
-
-        /** Leva círculo e puxador junto com o centro, sem mudar o raio. */
-        const moverTudo = (novoCentro: any) => {
-          const raio = tempCircle.getRadius();
-          tempCircle.setLatLng(novoCentro);
-          const graus =
-            (raio > 0 ? raio : metrosDe(60)) /
-            (111320 * Math.cos((novoCentro.lat * Math.PI) / 180));
-          puxador.setLatLng(L.latLng(novoCentro.lat, novoCentro.lng + graus));
-        };
-
-        tempCenter.on('dragstart', () => {
-          arrastandoRaioRef.current = true;
-        });
-        tempCenter.on('drag', () => moverTudo(tempCenter.getLatLng()));
-        tempCenter.on('dragend', () => {
-          const destino = tempCenter.getLatLng();
-          moverTudo(destino);
-          setTimeout(() => {
-            arrastandoRaioRef.current = false;
-          }, 0);
-          // Só agora o ponto muda de verdade lá em cima: durante o arrasto
-          // quem se mexe são as camadas, sem refazer nada a cada quadro.
-          aoEscolherCoordenadaRef.current({ lat: destino.lat, lng: destino.lng });
-        });
-
-        const puxador = L.marker(
-          naBorda(raioInicial > 0 ? raioInicial : metrosDe(60)),
-          {
-            draggable: true,
-            keyboard: false,
-            icon: L.divIcon({
-              className: '',
-              html:
-                '<span style="display:flex;align-items:center;justify-content:center;' +
-                'width:26px;height:26px;border-radius:50%;background:#fff;cursor:ew-resize;' +
-                `border:3px solid ${tempPlacementColor};box-shadow:0 2px 6px rgba(0,0,0,.35)">` +
-                `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${tempPlacementColor}" ` +
-                'stroke-width="3" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">' +
-                '<path d="m9 6-6 6 6 6"/><path d="m15 6 6 6-6 6"/></svg>' +
-                '</span>',
-              iconSize: [26, 26],
-              iconAnchor: [13, 13]
-            })
-          }
+        tempCenter.bindTooltip(
+          raioInicial > 0
+            ? `${Math.round(raioInicial)} m`
+            : 'Arraste da borda para abrir o raio',
+          { permanent: true, direction: 'top', offset: [0, -12], className: 'medida-raio' }
         );
-        puxador.bindTooltip(
-          raioInicial > 0 ? `${Math.round(raioInicial)} m` : 'Arraste para abrir o raio',
-          { direction: 'top', offset: [0, -16], permanent: true, className: 'medida-raio' }
-        );
+
+        /** Escreve a medida do momento embaixo do centro. */
+        const mostrarMedida = (metros: number) =>
+          tempCenter.setTooltipContent(
+            metros > 0 ? `${Math.round(metros)} m` : 'Arraste da borda para abrir o raio'
+          );
 
         /** Aplica o raio que o gesto acabou de desenhar. */
         const aplicarRaio = (ponto: any) => {
-          const metros = Math.max(1, Math.round(map.distance(centro, ponto)));
+          const metros = Math.max(1, Math.round(map.distance(tempCircle.getLatLng(), ponto)));
           tempCircle.setRadius(metros);
-          puxador.setTooltipContent(`${metros} m`);
-          onTempRadiusChange?.(metros);
+          mostrarMedida(metros);
+          aoMudarRaioRef.current?.(metros);
         };
 
-        puxador.on('dragstart', () => {
-          arrastandoRaioRef.current = true;
-        });
-        puxador.on('drag', () => aplicarRaio(puxador.getLatLng()));
-        puxador.on('dragend', () => {
-          arrastandoRaioRef.current = false;
-          aplicarRaio(puxador.getLatLng());
-        });
+        /** Leva o círculo e o miolo juntos, sem mexer no tamanho. */
+        const moverTudo = (novoCentro: any) => {
+          tempCircle.setLatLng(novoCentro);
+          tempCenter.setLatLng(novoCentro);
+        };
 
-        // Pegar a borda do circulo tambem cresce o raio.
-        const puxarPelaBorda = (evento: any) => {
+        /**
+         * Um gesto, duas leituras: perto da borda é redimensionar, por dentro
+         * é mover. A faixa da borda é medida em pixels da tela, então vale o
+         * mesmo em qualquer zoom.
+         */
+        const pegarNoCirculo = (evento: any) => {
           L.DomEvent.stop(evento);
+
+          const centroAtual = tempCircle.getLatLng();
+          const raioAtual = tempCircle.getRadius();
+          const pxDoCentro = map.latLngToContainerPoint(centroAtual);
+          const pxDoToque = map.latLngToContainerPoint(evento.latlng);
+          const raioEmPx = raioAtual > 0
+            ? pxDoCentro.distanceTo(
+                map.latLngToContainerPoint(
+                  L.latLng(
+                    centroAtual.lat,
+                    centroAtual.lng +
+                      raioAtual / (111320 * Math.cos((centroAtual.lat * Math.PI) / 180))
+                  )
+                )
+              )
+            : 0;
+          // Sem raio gravado, o círculo em tela é só o fantasma: qualquer
+          // pegada nele quer dizer "abrir o raio".
+          // 22 px de folga: o suficiente para pegar a linha sem mira de sniper.
+          const naBorda =
+            raioRef.current <= 0 ||
+            raioEmPx === 0 ||
+            Math.abs(pxDoToque.distanceTo(pxDoCentro) - raioEmPx) <= 22;
+
           arrastandoRaioRef.current = true;
           map.dragging.disable();
 
+          // Sem raio ainda, o arrasto abre o círculo a partir do toque; com
+          // raio, o que muda é a borda ou a posição, conforme onde se pegou.
+          const deslocamento = naBorda
+            ? null
+            : {
+                lat: centroAtual.lat - evento.latlng.lat,
+                lng: centroAtual.lng - evento.latlng.lng
+              };
+
           const seguir = (mov: any) => {
-            puxador.setLatLng(mov.latlng);
-            aplicarRaio(mov.latlng);
+            if (naBorda) {
+              aplicarRaio(mov.latlng);
+              return;
+            }
+            moverTudo(
+              L.latLng(
+                mov.latlng.lat + (deslocamento?.lat || 0),
+                mov.latlng.lng + (deslocamento?.lng || 0)
+              )
+            );
           };
-          const soltar = () => {
+
+          const soltar = (mov?: any) => {
             map.off('mousemove', seguir);
             map.off('mouseup', soltar);
-            window.removeEventListener('mouseup', soltar);
-            window.removeEventListener('touchend', soltar);
+            window.removeEventListener('mouseup', soltar as any);
+            window.removeEventListener('touchend', soltar as any);
             map.dragging.enable();
+            if (mov?.latlng) seguir(mov);
             // O clique que o navegador dispara depois do arrasto ainda está a
             // caminho: a trava só cai no quadro seguinte.
             setTimeout(() => {
               arrastandoRaioRef.current = false;
             }, 0);
+            // Ponto movido: só agora o valor sobe, uma vez, no fim do gesto.
+            if (!naBorda) {
+              const destino = tempCircle.getLatLng();
+              aoEscolherCoordenadaRef.current({ lat: destino.lat, lng: destino.lng });
+            }
           };
 
           map.on('mousemove', seguir);
           map.on('mouseup', soltar);
           // Soltar o botão fora do mapa não pode deixar o arrasto preso nem o
           // mapa travado sem poder ser arrastado.
-          window.addEventListener('mouseup', soltar);
-          window.addEventListener('touchend', soltar);
+          window.addEventListener('mouseup', soltar as any);
+          window.addEventListener('touchend', soltar as any);
         };
-        tempCircle.on('mousedown', puxarPelaBorda);
+        tempCircle.on('mousedown', pegarNoCirculo);
 
-        /**
-         * Enquanto o raio é zero o puxador mora a 60 pixels do centro — uma
-         * distância da tela, não do terreno. Sem recalcular no zoom ele ia
-         * parar longe demais ou em cima do centro, e era esse deslocamento
-         * que parecia o círculo "voltando ao normal" a cada zoom.
-         */
-        const recolocarPuxadorNoZoom = () => {
+        // O fantasma é medido em pixels, então precisa ser refeito a cada
+        // zoom: senão ele engorda ou some conforme a escala.
+        const refazerFantasma = () => {
           if (raioRef.current > 0 || arrastandoRaioRef.current) return;
-          puxador.setLatLng(naBorda(metrosDe(60)));
+          tempCircle.setRadius(metrosDe(45));
         };
-        map.on('zoomend', recolocarPuxadorNoZoom);
-        limparZoomRef.current = () => map.off('zoomend', recolocarPuxadorNoZoom);
+        map.on('zoomend', refazerFantasma);
+        limparZoomRef.current = () => map.off('zoomend', refazerFantasma);
 
         tempGroup.addLayer(tempCircle);
         tempGroup.addLayer(tempCenter);
-        tempGroup.addLayer(puxador);
         tempCircleRef.current = tempCircle;
-        tempHandleRef.current = puxador;
+        tempHandleRef.current = null;
+        tempMedidaRef.current = mostrarMedida;
+        tempFantasmaRef.current = () => metrosDe(45);
       } else {
         // Draw temp pin marker
         const tempIcon = getCustomPinIcon(tempPlacementColor, 'flag', true);
@@ -1941,29 +2122,16 @@ export default function MapContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tempPlacementCoords, tempPlacementColor, tempPlacementType]);
 
-  // Raio mudado por fora (campo do formulario): acompanha o circulo e o puxador.
+  // Raio mudado por fora (campo do formulario): o circulo acompanha.
   useEffect(() => {
     if (arrastandoRaioRef.current) return;
     const circulo = tempCircleRef.current;
-    const puxador = tempHandleRef.current;
-    const map = mapRef.current;
-    if (!circulo || !map) return;
+    if (!circulo) return;
     const metros = tempPlacementRadius > 0 ? tempPlacementRadius : 0;
-    circulo.setRadius(metros);
-    if (puxador) {
-      const centro = circulo.getLatLng();
-      const visivel = metros > 0
-        ? metros
-        : map.distance(
-            centro,
-            map.containerPointToLatLng(
-              L.point(map.latLngToContainerPoint(centro).x + 60, map.latLngToContainerPoint(centro).y)
-            )
-          );
-      const graus = visivel / (111320 * Math.cos((centro.lat * Math.PI) / 180));
-      puxador.setLatLng(L.latLng(centro.lat, centro.lng + graus));
-      puxador.setTooltipContent(metros > 0 ? `${Math.round(metros)} m` : 'Arraste para abrir o raio');
-    }
+    // Raio zerado volta ao círculo fantasma, que continua tendo borda para
+    // pegar; a medida escrita no miolo é a de verdade.
+    circulo.setRadius(metros > 0 ? metros : tempFantasmaRef.current?.() || 0);
+    tempMedidaRef.current?.(metros);
   }, [tempPlacementRadius]);
 
   return (
@@ -2024,7 +2192,11 @@ export default function MapContainer({
 
       {/* PAINEL DE NAVEGAÇÃO CASCATA (TOP SQUIRCLE) */}
       {/* Ao lado do botão Voltar, que ocupa o canto esquerdo do topo. */}
-      <div className="absolute top-4 left-[10.5rem] z-[1000] w-76 sm:w-80 font-sans">
+      <div
+        className={`absolute top-4 left-[10.5rem] z-[1000] w-76 sm:w-80 font-sans ${
+          esconderBusca ? 'hidden' : ''
+        }`}
+      >
         {!isPanelOpen ? (
           <button
             type="button"
