@@ -3757,7 +3757,14 @@ export default function App() {
   };
 
   // Search filtered actions
-  const filteredAreas = areas.filter((a) => {
+  /**
+   * As três listas abaixo são memorizadas de propósito.
+   *
+   * Elas descem para o mapa como props, e um array novo a cada render fazia o
+   * Leaflet apagar e redesenhar as camadas — e reenquadrar a vista — a cada
+   * tecla digitada ou aviso na tela.
+   */
+  const filteredAreas = React.useMemo(() => areas.filter((a) => {
     const activeCandidate =
       currentUrlView === "checkin"
         ? checkInCandidateId
@@ -3784,9 +3791,16 @@ export default function App() {
       a.bairro.toLowerCase().includes(searchQuery.toLowerCase()) ||
       a.description.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  });
+  }), [
+    areas,
+    currentUrlView,
+    checkInCandidateId,
+    selectedCandidateFilter,
+    authenticatedSupporter,
+    searchQuery,
+  ]);
 
-  const filteredPins = pins.filter((p) => {
+  const filteredPins = React.useMemo(() => pins.filter((p) => {
     const activeCandidate =
       currentUrlView === "checkin"
         ? checkInCandidateId
@@ -3812,9 +3826,16 @@ export default function App() {
       p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.description.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  });
+  }), [
+    pins,
+    currentUrlView,
+    checkInCandidateId,
+    selectedCandidateFilter,
+    authenticatedSupporter,
+    searchQuery,
+  ]);
 
-  const filteredCheckIns = checkIns.filter((c) => {
+  const filteredCheckIns = React.useMemo(() => checkIns.filter((c) => {
     // Registro na lixeira não aparece no mapa nem nas contas.
     if (c.trashed) return false;
     const activeCandidate =
@@ -3833,7 +3854,13 @@ export default function App() {
       (c.bairro || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (c.rua || "").toLowerCase().includes(searchQuery.toLowerCase())
     );
-  });
+  }), [
+    checkIns,
+    currentUrlView,
+    checkInCandidateId,
+    selectedCandidateFilter,
+    searchQuery,
+  ]);
 
   // Statistics Computations
   const totalVolunteers = filteredAreas.reduce(

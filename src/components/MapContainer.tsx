@@ -438,6 +438,23 @@ export default function MapContainer({
   const tempCircleRef = useRef<any>(null);
   const tempHandleRef = useRef<any>(null);
   const arrastandoRaioRef = useRef(false);
+  /** Desfaz o aviso de zoom do puxador quando a camada é refeita. */
+  const limparZoomRef = useRef<(() => void) | null>(null);
+  /**
+   * Espelhos lidos de dentro do mapa.
+   *
+   * Os avisos do Leaflet são registrados uma vez só, na criação do mapa, e
+   * enxergariam para sempre o primeiro valor de cada prop. Guardados em ref,
+   * eles leem o valor de agora.
+   */
+  const pegandoCoordenadaRef = useRef(clickToPickCoords);
+  pegandoCoordenadaRef.current = clickToPickCoords;
+  const aoEscolherCoordenadaRef = useRef(onCoordsPicked);
+  aoEscolherCoordenadaRef.current = onCoordsPicked;
+  /** Último ponto para onde o mapa já andou sozinho. */
+  const ultimoPanRef = useRef<string>('');
+  /** Cliente cujo conteúdo o mapa já enquadrou; não se enquadra duas vezes. */
+  const ultimoEnquadradoRef = useRef<string>('');
   const raioRef = useRef(tempPlacementRadius);
   raioRef.current = tempPlacementRadius;
   const checkInsGroupRef = useRef<L.LayerGroup | null>(null);
@@ -1102,7 +1119,15 @@ export default function MapContainer({
         onRulerPointRef.current?.({ lat: e.latlng.lat, lng: e.latlng.lng });
         return;
       }
-      onCoordsPicked({ lat: e.latlng.lat, lng: e.latlng.lng });
+      // Fora do modo de escolha, clicar no mapa não move nada. Sem esta
+      // guarda qualquer clique — o fim de um arrasto, o par de cliques de um
+      // duplo-clique de zoom, um toque na borda do círculo — reposicionava o
+      // ponto que estava sendo criado e ainda arrastava o mapa atrás dele.
+      if (!pegandoCoordenadaRef.current) return;
+      // Um arrasto de raio acabou de acontecer: o clique que o navegador
+      // dispara em seguida é resto do gesto, não uma escolha nova.
+      if (arrastandoRaioRef.current) return;
+      aoEscolherCoordenadaRef.current({ lat: e.latlng.lat, lng: e.latlng.lng });
     });
 
     map.on('mousemove', (e: L.LeafletMouseEvent) => {
@@ -1236,6 +1261,21 @@ export default function MapContainer({
       setIsMapLoading(false);
       return;
     }
+
+    /**
+     * O enquadramento automático acontece uma vez por cliente.
+     *
+     * Este efeito também observa áreas, pontos e check-ins, e essas listas
+     * chegam recriadas a cada render da tela de cima. Sem esta trava, digitar
+     * um raio, mexer o mouse ou receber um aviso refazia o fitBounds e
+     * devolvia o mapa ao enquadramento inicial — era isso que desfazia o zoom
+     * de quem estava trabalhando.
+     */
+    if (ultimoEnquadradoRef.current === selectedCandidateId) {
+      setIsMapLoading(false);
+      return;
+    }
+    ultimoEnquadradoRef.current = selectedCandidateId;
 
     let active = true;
 
@@ -1678,6 +1718,10 @@ export default function MapContainer({
     if (!tempGroup || !map) return;
 
     tempGroup.clearLayers();
+    // A camada vai ser refeita: o aviso de zoom da anterior morre aqui, senão
+    // sobrariam vários apontando para puxadores que não existem mais.
+    limparZoomRef.current?.();
+    limparZoomRef.current = null;
 
     // O ponto que está sendo criado sempre aparece. Antes ele era escondido
     // quando havia bairro ou rua em foco, mas clicar no mapa descobre o
@@ -1705,6 +1749,9 @@ export default function MapContainer({
 
         const raioInicial = raioRef.current > 0 ? raioRef.current : 0;
 
+        // bubblingMouseEvents: false é o que impede o gesto no círculo de
+        // virar um clique no mapa — que, no modo de escolha, jogaria o centro
+        // para debaixo do dedo no meio do arrasto do raio.
         const tempCircle = L.circle(centro, {
           radius: raioInicial,
           color: tempPlacementColor,
@@ -1712,16 +1759,57 @@ export default function MapContainer({
           opacity: 0.8,
           dashArray: '5, 5',
           fillColor: tempPlacementColor,
-          fillOpacity: 0.15
+          fillOpacity: 0.15,
+          bubblingMouseEvents: false
         });
 
-        const tempCenter = L.circleMarker(centro, {
-          radius: 6,
-          color: '#ffffff',
-          weight: 2,
-          opacity: 1,
-          fillColor: tempPlacementColor,
-          fillOpacity: 1
+        /**
+         * Miolo do círculo, e a alça para mover o ponto inteiro.
+         *
+         * É um marcador, não um circleMarker, justamente para ser arrastável:
+         * arrastar o centro leva o círculo junto, que é o que se espera ao
+         * pegar um ponto no mapa e levar para outro lugar.
+         */
+        const tempCenter = L.marker(centro, {
+          draggable: true,
+          keyboard: false,
+          icon: L.divIcon({
+            className: '',
+            html:
+              '<span style="display:block;width:14px;height:14px;border-radius:50%;cursor:move;' +
+              `background:${tempPlacementColor};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></span>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
+          })
+        });
+        tempCenter.bindTooltip('Arraste para mover o ponto', {
+          direction: 'bottom',
+          offset: [0, 10]
+        });
+
+        /** Leva círculo e puxador junto com o centro, sem mudar o raio. */
+        const moverTudo = (novoCentro: any) => {
+          const raio = tempCircle.getRadius();
+          tempCircle.setLatLng(novoCentro);
+          const graus =
+            (raio > 0 ? raio : metrosDe(60)) /
+            (111320 * Math.cos((novoCentro.lat * Math.PI) / 180));
+          puxador.setLatLng(L.latLng(novoCentro.lat, novoCentro.lng + graus));
+        };
+
+        tempCenter.on('dragstart', () => {
+          arrastandoRaioRef.current = true;
+        });
+        tempCenter.on('drag', () => moverTudo(tempCenter.getLatLng()));
+        tempCenter.on('dragend', () => {
+          const destino = tempCenter.getLatLng();
+          moverTudo(destino);
+          setTimeout(() => {
+            arrastandoRaioRef.current = false;
+          }, 0);
+          // Só agora o ponto muda de verdade lá em cima: durante o arrasto
+          // quem se mexe são as camadas, sem refazer nada a cada quadro.
+          aoEscolherCoordenadaRef.current({ lat: destino.lat, lng: destino.lng });
         });
 
         const puxador = L.marker(
@@ -1766,11 +1854,12 @@ export default function MapContainer({
           aplicarRaio(puxador.getLatLng());
         });
 
-        // Pegar a borda do proprio circulo tambem cresce o raio.
-        tempCircle.on('mousedown', (evento: any) => {
+        // Pegar a borda do circulo tambem cresce o raio.
+        const puxarPelaBorda = (evento: any) => {
           L.DomEvent.stop(evento);
           arrastandoRaioRef.current = true;
           map.dragging.disable();
+
           const seguir = (mov: any) => {
             puxador.setLatLng(mov.latlng);
             aplicarRaio(mov.latlng);
@@ -1778,12 +1867,37 @@ export default function MapContainer({
           const soltar = () => {
             map.off('mousemove', seguir);
             map.off('mouseup', soltar);
+            window.removeEventListener('mouseup', soltar);
+            window.removeEventListener('touchend', soltar);
             map.dragging.enable();
-            arrastandoRaioRef.current = false;
+            // O clique que o navegador dispara depois do arrasto ainda está a
+            // caminho: a trava só cai no quadro seguinte.
+            setTimeout(() => {
+              arrastandoRaioRef.current = false;
+            }, 0);
           };
+
           map.on('mousemove', seguir);
           map.on('mouseup', soltar);
-        });
+          // Soltar o botão fora do mapa não pode deixar o arrasto preso nem o
+          // mapa travado sem poder ser arrastado.
+          window.addEventListener('mouseup', soltar);
+          window.addEventListener('touchend', soltar);
+        };
+        tempCircle.on('mousedown', puxarPelaBorda);
+
+        /**
+         * Enquanto o raio é zero o puxador mora a 60 pixels do centro — uma
+         * distância da tela, não do terreno. Sem recalcular no zoom ele ia
+         * parar longe demais ou em cima do centro, e era esse deslocamento
+         * que parecia o círculo "voltando ao normal" a cada zoom.
+         */
+        const recolocarPuxadorNoZoom = () => {
+          if (raioRef.current > 0 || arrastandoRaioRef.current) return;
+          puxador.setLatLng(naBorda(metrosDe(60)));
+        };
+        map.on('zoomend', recolocarPuxadorNoZoom);
+        limparZoomRef.current = () => map.off('zoomend', recolocarPuxadorNoZoom);
 
         tempGroup.addLayer(tempCircle);
         tempGroup.addLayer(tempCenter);
@@ -1800,8 +1914,27 @@ export default function MapContainer({
         tempGroup.addLayer(tempMarker);
       }
 
-      // Smooth pan to placement
-      map.panTo([tempPlacementCoords.lat, tempPlacementCoords.lng]);
+      /**
+       * O mapa só anda quando precisa.
+       *
+       * Antes ele era centralizado toda vez que esta camada era redesenhada,
+       * então trocar a cor, mudar o tipo ou qualquer clique jogava a vista de
+       * volta para o ponto e desfazia o enquadramento de quem estava olhando.
+       * Agora só há movimento quando o ponto está fora da tela, e só uma vez
+       * por ponto.
+       */
+      const alvo = L.latLng(tempPlacementCoords.lat, tempPlacementCoords.lng);
+      const assinatura = `${tempPlacementCoords.lat},${tempPlacementCoords.lng}`;
+      if (ultimoPanRef.current !== assinatura) {
+        ultimoPanRef.current = assinatura;
+        // pad(-0.15) exige uma folga da borda: um ponto colado no canto conta
+        // como fora da tela e merece o passeio.
+        if (!map.getBounds().pad(-0.15).contains(alvo)) {
+          map.panTo(alvo);
+        }
+      }
+    } else {
+      ultimoPanRef.current = '';
     }
     // O raio fica de fora das dependencias de proposito: quem o atualiza
     // durante o arrasto e o efeito seguinte, sem refazer as camadas.
