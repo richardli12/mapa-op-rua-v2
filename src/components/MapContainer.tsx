@@ -3,8 +3,9 @@ import L from 'leaflet';
 import { candidateLocationText } from '../services/candidateLocation';
 import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, Download, CircleDot } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2 } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, corDaDependencia, getCheckInPriority } from '../types';
+import { VisorDoMaterial } from './MaterialDaMissao';
 import { buildOperationIconSvg } from '../operationIcons';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
@@ -632,6 +633,17 @@ export default function MapContainer({
     id: string;
     tipo: 'pin' | 'area';
   } | null>(null);
+  /** Índice do material aberto em tela cheia, por cima da ficha. */
+  const [materialAberto, setMaterialAberto] = useState<number | null>(null);
+  /**
+   * As fotos e vídeos do check-in aberto, já no formato do visor.
+   *
+   * Numa ref porque quem as monta é a própria ficha, ao desenhar: elas saem
+   * de três lugares diferentes (tabela nova, jsonb e a foto única antiga) e
+   * repetir essa escolha aqui seria manter duas contas que precisam bater.
+   */
+  const midiasDoCheckInRef = useRef<MaterialDeApoio[]>([]);
+  const [midiaDoCheckInAberta, setMidiaDoCheckInAberta] = useState<number | null>(null);
   /**
    * Observações, operações e mídias do check-in aberto.
    *
@@ -645,8 +657,10 @@ export default function MapContainer({
   }>({ notas: [], operacoes: [], midias: [] });
 
   useEffect(() => {
+    setMidiaDoCheckInAberta(null);
     if (!selectedCheckInForModal?.id) {
       setDetalhesCheckIn({ notas: [], operacoes: [], midias: [] });
+      midiasDoCheckInRef.current = [];
       return;
     }
     let vivo = true;
@@ -1294,6 +1308,7 @@ export default function MapContainer({
     if (!missaoAberta) {
       setEnderecoDaMissao(null);
       setBuscandoEnderecoDaMissao(false);
+      setMaterialAberto(null);
       return;
     }
     const { lat, lng } = missaoAberta.coords;
@@ -1464,10 +1479,9 @@ export default function MapContainer({
           etiqueta: operationType?.label || 'Ponto estratégico',
           titulo: pin.title,
           descricao: pin.description,
-          linhas: [
-            pin.date ? `🗓️ Prazo ${dataCurta(pin.date)}` : '',
-            `📍 ${pin.position.lat.toFixed(5)}, ${pin.position.lng.toFixed(5)}`
-          ],
+          // Coordenada não diz nada a quem olha o mapa: o lugar já está
+          // debaixo do pino. O que falta saber é quando e para quem.
+          linhas: [pin.date ? `🗓️ Prazo ${dataCurta(pin.date)}` : ''],
           pessoas,
           anexos: material.length,
           capa
@@ -2866,72 +2880,74 @@ export default function MapContainer({
                 )}
               </div>
 
-              {/* Material que foi junto com a ordem */}
+              {/*
+                Material que foi junto com a ordem.
+
+                Cada arquivo abre no meio da tela, por cima de tudo, no mesmo
+                visor que a equipe usa no check-in. Tocar o vídeo espremido
+                dentro da ficha não serve para conferir a arte do panfleto nem
+                para ler a planilha das ruas.
+              */}
               {missaoAberta.material.length > 0 && (
                 <div>
                   <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
                     Material de apoio ({missaoAberta.material.length})
                   </p>
-                  <div className="space-y-2.5">
-                    {missaoAberta.material.map(item => {
-                      if (item.tipo === 'imagem') {
-                        return (
-                          <div
-                            key={item.id}
-                            className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-50"
-                          >
-                            <img
-                              src={item.url}
-                              alt={item.nome}
-                              referrerPolicy="no-referrer"
-                              className="w-full object-cover max-h-64"
-                            />
-                          </div>
-                        );
-                      }
-                      if (item.tipo === 'video') {
-                        return (
-                          <div
-                            key={item.id}
-                            className="rounded-2xl overflow-hidden border border-slate-200 bg-black"
-                          >
-                            <video
-                              src={item.url}
-                              controls
-                              playsInline
-                              preload="metadata"
-                              className="w-full max-h-64"
-                            />
-                          </div>
-                        );
-                      }
-                      if (item.tipo === 'audio') {
-                        return (
-                          <div
-                            key={item.id}
-                            className="border border-slate-200 rounded-xl p-3 bg-slate-50/60 flex items-center gap-2.5"
-                          >
-                            <Mic className="w-4 h-4 shrink-0" style={{ color: missaoAberta.cor }} />
-                            <audio src={item.url} controls preload="metadata" className="w-full h-9" />
-                          </div>
-                        );
-                      }
-                      return (
-                        <a
-                          key={item.id}
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="border border-slate-200 rounded-xl p-3 bg-slate-50/60 flex items-center gap-2.5 hover:bg-slate-100 transition-colors no-underline"
-                        >
-                          <FileText className="w-4 h-4 shrink-0" style={{ color: missaoAberta.cor }} />
-                          <span className="text-[11.5px] font-bold text-slate-700 truncate flex-1">
-                            {item.nome}
+                  <div className="grid grid-cols-3 gap-2.5">
+                    {missaoAberta.material.map((item, indice) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setMaterialAberto(indice)}
+                        title={`Abrir ${item.nome}`}
+                        className="group relative aspect-square rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 cursor-pointer transition-all hover:border-slate-300 hover:shadow-md active:scale-95"
+                      >
+                        {item.tipo === 'imagem' ? (
+                          <img
+                            src={item.url}
+                            alt={item.nome}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : item.tipo === 'video' ? (
+                          <video
+                            src={item.url}
+                            preload="metadata"
+                            muted
+                            className="w-full h-full object-cover bg-black"
+                          />
+                        ) : (
+                          <span className="w-full h-full flex flex-col items-center justify-center gap-1.5 px-2">
+                            {item.tipo === 'audio' ? (
+                              <Mic className="w-6 h-6" style={{ color: missaoAberta.cor }} />
+                            ) : (
+                              <FileText className="w-6 h-6" style={{ color: missaoAberta.cor }} />
+                            )}
+                            <span className="text-[9.5px] font-bold text-slate-500 leading-tight text-center line-clamp-2 break-all">
+                              {item.nome}
+                            </span>
                           </span>
-                          <Download className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        </a>
-                      );
-                    })}
+                        )}
+
+                        {/* Véu de "abre aqui": no vídeo ele é o play, no
+                            resto só aparece quando o cursor chega. */}
+                        <span
+                          className={`absolute inset-0 flex items-center justify-center transition-opacity ${
+                            item.tipo === 'video'
+                              ? 'bg-black/35'
+                              : 'bg-slate-900/35 opacity-0 group-hover:opacity-100'
+                          }`}
+                        >
+                          <span className="w-8 h-8 rounded-full bg-white/95 flex items-center justify-center shadow-md">
+                            {item.tipo === 'video' ? (
+                              <Play className="w-3.5 h-3.5 text-slate-800 fill-slate-800" />
+                            ) : (
+                              <Maximize2 className="w-3.5 h-3.5 text-slate-800" />
+                            )}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
@@ -2963,29 +2979,19 @@ export default function MapContainer({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5 pt-2.5 border-t border-slate-200/70">
-                    <div>
-                      <span className="text-[9px] font-black text-slate-400 uppercase block mb-0.5">
-                        Coordenada
-                      </span>
-                      <span className="text-[11px] font-extrabold text-slate-700 font-mono">
-                        {missaoAberta.coords.lat.toFixed(5)}, {missaoAberta.coords.lng.toFixed(5)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] font-black text-slate-400 uppercase block mb-0.5">
-                        Criada em
-                      </span>
-                      <span className="text-[11px] font-extrabold text-slate-700">
-                        {missaoAberta.criadaEm
-                          ? new Date(missaoAberta.criadaEm).toLocaleDateString('pt-BR', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              year: 'numeric'
-                            })
-                          : '—'}
-                      </span>
-                    </div>
+                  <div className="pt-2.5 border-t border-slate-200/70">
+                    <span className="text-[9px] font-black text-slate-400 uppercase block mb-0.5">
+                      Criada em
+                    </span>
+                    <span className="text-[11px] font-extrabold text-slate-700">
+                      {missaoAberta.criadaEm
+                        ? new Date(missaoAberta.criadaEm).toLocaleDateString('pt-BR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric'
+                          })
+                        : '—'}
+                    </span>
                   </div>
 
                   <a
@@ -3027,6 +3033,50 @@ export default function MapContainer({
           </div>
         </div>
       )}
+
+      {/* O material aberto em tela cheia, por cima da ficha. */}
+      {missaoAberta && materialAberto !== null && missaoAberta.material[materialAberto] && (
+        <VisorDoMaterial
+          item={missaoAberta.material[materialAberto]}
+          aoFechar={() => setMaterialAberto(null)}
+          posicao={{ atual: materialAberto + 1, total: missaoAberta.material.length }}
+          aoAnterior={() =>
+            setMaterialAberto(
+              atual =>
+                ((atual ?? 0) - 1 + missaoAberta.material.length) % missaoAberta.material.length
+            )
+          }
+          aoProximo={() =>
+            setMaterialAberto(atual => ((atual ?? 0) + 1) % missaoAberta.material.length)
+          }
+        />
+      )}
+
+      {/* A foto do check-in em tela cheia, no mesmo visor da missão. */}
+      {selectedCheckInForModal &&
+        midiaDoCheckInAberta !== null &&
+        midiasDoCheckInRef.current[midiaDoCheckInAberta] && (
+          <VisorDoMaterial
+            item={midiasDoCheckInRef.current[midiaDoCheckInAberta]}
+            aoFechar={() => setMidiaDoCheckInAberta(null)}
+            posicao={{
+              atual: midiaDoCheckInAberta + 1,
+              total: midiasDoCheckInRef.current.length
+            }}
+            aoAnterior={() =>
+              setMidiaDoCheckInAberta(atual => {
+                const total = midiasDoCheckInRef.current.length;
+                return ((atual ?? 0) - 1 + total) % total;
+              })
+            }
+            aoProximo={() =>
+              setMidiaDoCheckInAberta(atual => {
+                const total = midiasDoCheckInRef.current.length;
+                return ((atual ?? 0) + 1) % total;
+              })
+            }
+          />
+        )}
 
       {/* CHECK-IN DETALHES MODAL (CENTRALIZADO) */}
       {selectedCheckInForModal && (
@@ -3265,6 +3315,16 @@ export default function MapContainer({
                       ? [{ url: selectedCheckInForModal.photo, type: 'image' as const }]
                       : [];
 
+                // O mesmo visor da missão: clicar abre no meio da tela, por
+                // cima de tudo, em vez de espremer a foto do buraco na rua
+                // num quadradinho da ficha.
+                midiasDoCheckInRef.current = media.map((item, index) => ({
+                  id: `checkin-midia-${index}`,
+                  tipo: item.type === 'video' ? ('video' as const) : ('imagem' as const),
+                  url: item.url,
+                  nome: `${item.type === 'video' ? 'Vídeo' : 'Foto'} ${index + 1} do check-in`
+                }));
+
                 return (
                   <div>
                     <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
@@ -3273,15 +3333,18 @@ export default function MapContainer({
                     {media.length > 0 ? (
                       <div className={media.length > 1 ? 'grid grid-cols-2 gap-2.5' : ''}>
                         {media.map((item, index) => (
-                          <div
+                          <button
                             key={`${item.url}-${index}`}
-                            className="shadow-inner border border-slate-150 rounded-2xl overflow-hidden bg-slate-50 flex items-center justify-center relative"
+                            type="button"
+                            onClick={() => setMidiaDoCheckInAberta(index)}
+                            title="Abrir em tela cheia"
+                            className="group shadow-inner border border-slate-200 rounded-2xl overflow-hidden bg-slate-50 flex items-center justify-center relative cursor-pointer transition-all hover:border-slate-300 hover:shadow-md active:scale-[0.98]"
                           >
                             {item.type === 'video' ? (
                               <video
                                 src={item.url}
-                                controls
                                 playsInline
+                                muted
                                 preload="metadata"
                                 className="w-full h-full object-cover max-h-64 sm:max-h-80 bg-black"
                               />
@@ -3293,7 +3356,22 @@ export default function MapContainer({
                                 className="w-full h-full object-cover max-h-64 sm:max-h-80 animate-in fade-in zoom-in-95 duration-500"
                               />
                             )}
-                          </div>
+                            <span
+                              className={`absolute inset-0 flex items-center justify-center transition-opacity ${
+                                item.type === 'video'
+                                  ? 'bg-black/30'
+                                  : 'bg-slate-900/30 opacity-0 group-hover:opacity-100'
+                              }`}
+                            >
+                              <span className="w-10 h-10 rounded-full bg-white/95 flex items-center justify-center shadow-md">
+                                {item.type === 'video' ? (
+                                  <Play className="w-4 h-4 text-slate-800 fill-slate-800" />
+                                ) : (
+                                  <Maximize2 className="w-4 h-4 text-slate-800" />
+                                )}
+                              </span>
+                            </span>
+                          </button>
                         ))}
                       </div>
                     ) : (
