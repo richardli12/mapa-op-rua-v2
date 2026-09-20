@@ -1640,7 +1640,7 @@ export default function App() {
    * "map" tira o formulário da frente para ele clicar direto no mapa.
    */
   const [creationLocationMode, setCreationLocationMode] = useState<
-    "ask" | "search" | "map" | null
+    "ask" | "search" | "map" | "sem" | null
   >(null);
   const [isResolvingPickedAddress, setIsResolvingPickedAddress] =
     useState(false);
@@ -1834,7 +1834,8 @@ export default function App() {
       ? !!pickedCoords
       : creationLocationMode === "search"
         ? !!(creationBairroName && creationRuaName)
-        : false;
+        : // Missão sem local não tem o que esperar: o passo do endereço não existe.
+          creationLocationMode === "sem";
 
   /**
    * Cliente do link de check-in compartilhado pelo mapa.
@@ -3667,6 +3668,20 @@ export default function App() {
     }
 
     const targetCoords = pickedCoords || { lat: -9.66, lng: -35.72 };
+    /**
+     * Missão sem lugar no mapa.
+     *
+     * A marca vai dentro de `position`, que já é jsonb livre — assim a função
+     * nasce funcionando em todo banco que já está no ar, sem esperar migração.
+     * A coordenada continua preenchida só para a coluna `not null` do banco;
+     * quem lê é `position.semLocal`, nunca a lat/lng deste caso.
+     */
+    const semLocal = creationLocationMode === "sem";
+    const posicao = {
+      ...targetCoords,
+      assignedDeltas: selectedDeltas,
+      ...(semLocal ? { semLocal: true } : {}),
+    };
 
     if (editingPinId) {
       // Edit existing
@@ -3675,7 +3690,7 @@ export default function App() {
         id: editingPinId,
         title: pinTitle,
         description: pinDescription,
-        position: { ...targetCoords, assignedDeltas: selectedDeltas },
+        position: posicao,
         color: pinColor,
         iconType: pinIconType,
         active: existingPin ? existingPin.active : true,
@@ -3703,7 +3718,7 @@ export default function App() {
         id: "pin_" + Math.random().toString(36).substr(2, 9),
         title: pinTitle,
         description: pinDescription || "",
-        position: { ...targetCoords, assignedDeltas: selectedDeltas },
+        position: posicao,
         color: pinColor,
         iconType: pinIconType,
         active: true,
@@ -3720,7 +3735,9 @@ export default function App() {
         });
       }
       triggerNotification(
-        "Novo ponto estratégico (Pin) adicionado ao mapa!",
+        semLocal
+          ? "Missão enviada. Ela aparece no check-in de quem você marcou."
+          : "Novo ponto estratégico (Pin) adicionado ao mapa!",
         "success",
       );
     }
@@ -3866,6 +3883,7 @@ export default function App() {
     setPinIconType(pin.iconType);
     setPinDate(pin.date || "");
     setPickedCoords(pin.position);
+    setCreationLocationMode(pin.position?.semLocal ? "sem" : "map");
     setPinCandidateId(pin.candidateId || "");
     setSelectedDeltas(pin.assignedDeltas || pin.position?.assignedDeltas || []);
     triggerNotification(
@@ -4039,6 +4057,18 @@ export default function App() {
     authenticatedSupporter,
     searchQuery,
   ]);
+
+  /**
+   * O que de fato vai para o mapa.
+   *
+   * Missão sem local tem coordenada só para a coluna do banco: desenhá-la
+   * poria um ponto falso na rua errada. Ela vive na lista e na conversa do
+   * check-in. Memorizada porque desce como prop do Leaflet.
+   */
+  const pinsNoMapa = React.useMemo(
+    () => filteredPins.filter((p) => !p.position?.semLocal),
+    [filteredPins],
+  );
 
   /** Id do cliente cujo mapa está aberto agora. */
   const clienteEmFoco =
@@ -4353,6 +4383,7 @@ export default function App() {
         lat: p.position?.lat ?? 0,
         lng: p.position?.lng ?? 0,
         tipoLabel: rotuloDoTipo(p.iconType),
+        semLocal: p.position?.semLocal === true,
         createdAt: p.createdAt,
       }));
 
@@ -13663,6 +13694,12 @@ export default function App() {
                                 <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide font-semibold">
                                   {operationTypeLabel(pin.iconType)}
                                 </p>
+                                {pin.position?.semLocal && (
+                                  <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-[9px] font-black uppercase tracking-wider text-amber-700">
+                                    <ClipboardList className="w-2.5 h-2.5" />
+                                    Sem local
+                                  </span>
+                                )}
                               </div>
                             </div>
 
@@ -13917,7 +13954,7 @@ export default function App() {
       <div className="flex-1 h-full relative order-1">
         <MapContainer
           areas={filteredAreas}
-          pins={filteredPins}
+          pins={pinsNoMapa}
           checkIns={filteredCheckIns}
           selectedId={selectedId}
           defaultLocation={mapDefaultLocation}
@@ -14281,14 +14318,18 @@ export default function App() {
                   <h3 className="font-extrabold text-indigo-950 text-base leading-tight">
                     {creationModalType === "area"
                       ? "Criar Área de Trabalho (Raio)"
-                      : "Criar Ponto Estratégico (PIN)"}
+                      : creationLocationMode === "sem"
+                        ? "Criar Missão (sem local)"
+                        : "Criar Ponto Estratégico (PIN)"}
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
                     {creationLocationMode === "map"
                       ? "Local definido pelo ponto clicado no mapa."
                       : creationLocationMode === "search"
                         ? "Planeje a localização ideal selecionando o bairro e rua."
-                        : "Primeiro, escolha como quer definir o local."}
+                        : creationLocationMode === "sem"
+                          ? "Sem lugar no mapa: a missão vai direto para quem você marcar."
+                          : "Primeiro, escolha como quer definir o local."}
                   </p>
                 </div>
                 <button
@@ -14364,6 +14405,60 @@ export default function App() {
                         </p>
                       </div>
                     </button>
+
+                    {/* Nem toda missão é um lugar: "ligar para o presidente do
+                        bairro" não tem onde ser desenhada no mapa. */}
+                    {creationModalType === "pin" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCreationLocationMode("sem");
+                          setPickedCoords(null);
+                        }}
+                        className="w-full text-left p-4 bg-white border border-slate-200 rounded-2xl hover:border-amber-400 hover:bg-amber-50/40 transition-all cursor-pointer flex items-start gap-3 shadow-2xs"
+                      >
+                        <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center shrink-0">
+                          <ClipboardList className="w-4 h-4 text-amber-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-sm text-indigo-950 leading-tight">
+                            Sem local — só a missão
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1 leading-snug">
+                            Vai direto para a conversa de quem você marcar. Nada
+                            é desenhado no mapa.
+                          </p>
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* 1C. MISSÃO SEM LOCAL */}
+                {creationLocationMode === "sem" && (
+                  <div className="space-y-2 p-4 bg-amber-50/40 border border-amber-100 rounded-2xl animate-in fade-in slide-in-from-top-1.5 duration-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-5 h-5 rounded-full bg-amber-100 border border-amber-200 flex items-center justify-center font-extrabold text-[10px] text-amber-700 shrink-0">
+                          1
+                        </div>
+                        <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none truncate">
+                          Missão sem local
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCreationLocationMode("ask")}
+                        className="text-[10px] uppercase font-bold tracking-wider text-slate-400 hover:text-slate-600 transition-colors cursor-pointer shrink-0"
+                      >
+                        Trocar
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-snug">
+                      Ela não entra no mapa. Aparece na conversa do check-in de
+                      quem você marcar em "Equipe", e o check-in é feito onde a
+                      pessoa estiver.
+                    </p>
                   </div>
                 )}
 
@@ -15141,12 +15236,18 @@ export default function App() {
                         {/* Pin specific inputs */}
                         <div>
                           <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                            Título do Ponto Estratégico *
+                            {creationLocationMode === "sem"
+                              ? "Título da missão *"
+                              : "Título do Ponto Estratégico *"}
                           </label>
                           <input
                             type="text"
                             required
-                            placeholder="Ex: Comitê Setorial Jatiúca"
+                            placeholder={
+                              creationLocationMode === "sem"
+                                ? "Ex: Ligar para o presidente do bairro"
+                                : "Ex: Comitê Setorial Jatiúca"
+                            }
                             value={pinTitle}
                             onChange={(e) => setPinTitle(e.target.value)}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
@@ -15212,7 +15313,11 @@ export default function App() {
                             Anotações / Descrição do Marcador
                           </label>
                           <textarea
-                            placeholder="Ex: Reunião às 19h com a liderança no comitê..."
+                            placeholder={
+                              creationLocationMode === "sem"
+                                ? "Ex: Confirmar presença dele na reunião de sábado..."
+                                : "Ex: Reunião às 19h com a liderança no comitê..."
+                            }
                             value={pinDescription}
                             onChange={(e) => setPinDescription(e.target.value)}
                             rows={2}

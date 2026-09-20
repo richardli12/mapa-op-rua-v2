@@ -14,6 +14,7 @@ import {
   Maximize2,
   ArrowUp,
   BellRing,
+  ClipboardList,
   Target,
   TriangleAlert,
   X
@@ -56,6 +57,8 @@ export interface MissaoDoCampo {
   raio?: number;
   /** Rótulo do tipo de operação, quando o comitê escolheu um. */
   tipoLabel?: string;
+  /** Missão sem lugar no mapa: a tarefa é a missão, e o local é onde ela estiver. */
+  semLocal?: boolean;
   createdAt?: string;
 }
 
@@ -1135,7 +1138,7 @@ export default function CheckInChat({
                    * número é o que decide se dá para ir a pé.
                    */
                   const ondeEstou =
-                    longe === null
+                    missaoDaLista.semLocal || longe === null
                       ? null
                       : missaoDaLista.raio && longe <= missaoDaLista.raio
                         ? 'você já está dentro'
@@ -1143,7 +1146,11 @@ export default function CheckInChat({
                           ? 'você está no ponto'
                           : `a ${distanciaCurta(longe)} de você`;
                   const detalhes = [
-                    missaoDaLista.tipo === 'area' ? 'Área de trabalho' : 'Ponto no mapa',
+                    missaoDaLista.semLocal
+                      ? 'Sem local marcado · faça o check-in onde você estiver'
+                      : missaoDaLista.tipo === 'area'
+                        ? 'Área de trabalho'
+                        : 'Ponto no mapa',
                     missaoDaLista.bairro,
                     missaoDaLista.tipoLabel,
                     missaoDaLista.raio
@@ -1175,7 +1182,9 @@ export default function CheckInChat({
                           className="w-8 h-8 rounded-xl shrink-0 flex items-center justify-center"
                           style={{ backgroundColor: `${cor}1A`, color: cor }}
                         >
-                          {missaoDaLista.tipo === 'area' ? (
+                          {missaoDaLista.semLocal ? (
+                            <ClipboardList className="w-4 h-4" />
+                          ) : missaoDaLista.tipo === 'area' ? (
                             <Target className="w-4 h-4" />
                           ) : (
                             <MapPin className="w-4 h-4" />

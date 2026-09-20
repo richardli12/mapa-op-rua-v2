@@ -18,7 +18,20 @@ export interface CampaignPin {
   id: string;
   title: string;
   description: string;
-  position: { lat: number; lng: number; assignedDeltas?: string[] };
+  /**
+   * Onde o ponto fica.
+   *
+   * `semLocal` marca a missão que não tem lugar no mapa -- "ligar para o
+   * presidente do bairro" nao se desenha na rua. A lat/lng continua
+   * preenchida porque a coluna do banco é `not null`, mas ela não vale nada
+   * nesse caso: quem manda é a marca, e o mapa deixa esse ponto de fora.
+   */
+  position: {
+    lat: number;
+    lng: number;
+    assignedDeltas?: string[];
+    semLocal?: boolean;
+  };
   color: string;
   /** Id do Tipo de Operação (ver OperationType). Fica solto de propósito: os tipos são cadastrados pelo próprio usuário. */
   iconType: string;
