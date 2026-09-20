@@ -1,43 +1,34 @@
-import { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlarmClock,
-  AlertTriangle,
   Camera,
-  Clock,
-  ExternalLink,
+  Check,
+  DatabaseZap,
   Flag,
   Loader2,
-  Plus,
   RotateCcw,
   Save,
+  Search,
   ShieldCheck,
-  Trash2,
-  Pencil,
   X
 } from 'lucide-react';
-import { DatabaseService } from '../databaseClient';
+import { DatabaseService, isDatabaseConfigured } from '../databaseClient';
 import { PriorityLevel } from '../types';
-import { IconeDoTurno } from './TurnoEPrioridade';
 import {
   CHAVE_TURNOS,
-  COR_DO_TURNO,
   JanelaDeTurno,
-  LARGURA_DO_DIA,
   NOME_DO_TURNO,
   TURNOS_PADRAO,
-  TurnoId,
   conferirTurnos,
-  duracao,
-  emHora,
-  emMinutos,
-  fatiasDoDia,
   gravarTurnos,
   lerTurnos,
-  minutosAgora,
-  tempoCurto,
-  turnoDeAgora,
-  viraODia
+  turnoDeAgora
 } from '../turnos';
+import SecaoAcesso from './configuracoes/SecaoAcesso';
+import SecaoMidias from './configuracoes/SecaoMidias';
+import SecaoTurnos from './configuracoes/SecaoTurnos';
+import SecaoPrioridades from './configuracoes/SecaoPrioridades';
+import { EstadoDoCartao } from './configuracoes/pecas';
 
 interface Props {
   /** Endereço de saída usado quando nada foi configurado. */
@@ -60,12 +51,62 @@ export const CHAVE_REDIRECIONAMENTO = 'redirect_sem_link';
 /** Liberar o envio de foto e vídeo da galeria no check-in. */
 export const CHAVE_GALERIA = 'midia_galeria';
 
+/** As seções da página, na ordem em que aparecem e são buscadas. */
+const SECOES = [
+  {
+    id: 'acesso',
+    titulo: 'Acesso aos domínios',
+    Icone: ShieldCheck,
+    termos: 'acesso dominio dominios link redirecionamento saida endereco url porta entrada qr code'
+  },
+  {
+    id: 'midias',
+    titulo: 'Mídias do check-in',
+    Icone: Camera,
+    termos: 'midia midias foto video galeria camera evidencia check-in anexo rolo celular'
+  },
+  {
+    id: 'turnos',
+    titulo: 'Turnos de trabalho',
+    Icone: AlarmClock,
+    termos: 'turno turnos horario hora manha tarde noite janela relogio missao agenda periodo'
+  },
+  {
+    id: 'prioridades',
+    titulo: 'Níveis de prioridade',
+    Icone: Flag,
+    termos: 'prioridade prioridades nivel niveis grave urgente gravidade cor classificacao missao'
+  }
+];
+
+/** Tira acento e caixa, para a busca achar "prioridade" digitando "prioridade". */
+const semAcento = (texto: string) =>
+  texto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+
 /**
- * Configurações do sistema — tela do administrador.
+ * Configurações do sistema — a mesa de controle do administrador.
  *
- * Ajustes que valem para todo mundo, guardados no banco e não no navegador de
- * quem mexeu. É o lugar de tudo que muda o comportamento do sistema como um
- * todo; hoje, para onde vai quem abre um domínio de acesso sem link.
+ * Ajustes que valem para todo mundo e ficam no banco, não no navegador de
+ * quem mexeu. A página é feita para crescer: seção nova entra na lista
+ * `SECOES`, ganha âncora na navegação lateral e entra na busca sem que nada
+ * mais precise saber dela.
+ *
+ * Três decisões sustentam a estrutura:
+ *
+ * 1. CHAVE GRAVA SOZINHA, CAMPO PRECISA DE SALVAR. Botão de salvar para um
+ *    liga-desliga é cerimônia que ninguém cumpre; texto e horário, ao
+ *    contrário, precisam de um momento de confirmar. Cada cartão diz em que
+ *    regime está, e o que está pendente aparece numa barra só, no rodapé.
+ *
+ * 2. NADA SE PERDE SEM AVISO. Sair da página, fechar a aba ou recarregar com
+ *    alteração pendente dispara aviso; Ctrl+S salva tudo de uma vez.
+ *
+ * 3. O ESTADO DO SISTEMA FICA À VISTA. A faixa de cima responde, sem clique,
+ *    o que costuma ser descoberto tarde e da pior maneira: o banco está
+ *    ligado? o dia está todo coberto por turnos? existem níveis cadastrados?
  */
 export default function ConfiguracoesAdmin({
   padraoRedirecionamento,
@@ -73,121 +114,337 @@ export default function ConfiguracoesAdmin({
   notify,
   onTurnosMudarem
 }: Props) {
+  /* ------------------------------------------------------------ estado --- */
+  const [redirecionamento, setRedirecionamento] = useState('');
+  const [redirecionamentoSalvo, setRedirecionamentoSalvo] = useState('');
+  const [galeria, setGaleria] = useState(false);
+  const [galeriaOcupada, setGaleriaOcupada] = useState(false);
   const [turnos, setTurnos] = useState<JanelaDeTurno[]>(TURNOS_PADRAO);
   const [turnosSalvos, setTurnosSalvos] = useState<JanelaDeTurno[]>(TURNOS_PADRAO);
-  const [salvandoTurnos, setSalvandoTurnos] = useState(false);
-  const [redirecionamento, setRedirecionamento] = useState('');
-  const [galeria, setGaleria] = useState(false);
   const [niveis, setNiveis] = useState<PriorityLevel[]>([]);
-  const [editandoNivel, setEditandoNivel] = useState<string | null>(null);
-  const [rotuloNivel, setRotuloNivel] = useState('');
-  const [descricaoNivel, setDescricaoNivel] = useState('');
-  const [corNivel, setCorNivel] = useState('#f59e0b');
-  const [salvandoNivel, setSalvandoNivel] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [busca, setBusca] = useState('');
+  const [secaoAtiva, setSecaoAtiva] = useState('acesso');
+  const buscaRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     (async () => {
-      const [saida, midia, janelas] = await Promise.all([
+      const [saida, midia, janelas, listaDeNiveis] = await Promise.all([
         DatabaseService.lerConfiguracao(CHAVE_REDIRECIONAMENTO),
         DatabaseService.lerConfiguracao(CHAVE_GALERIA),
-        DatabaseService.lerConfiguracao(CHAVE_TURNOS)
+        DatabaseService.lerConfiguracao(CHAVE_TURNOS),
+        DatabaseService.fetchPriorityLevels()
       ]);
       setRedirecionamento(saida.value || '');
+      setRedirecionamentoSalvo(saida.value || '');
       setGaleria(midia.value === 'sim');
       const lidos = lerTurnos(janelas.value);
       setTurnos(lidos);
       setTurnosSalvos(lidos);
+      setNiveis(listaDeNiveis.data);
       setCarregando(false);
-      carregarNiveis();
     })();
   }, []);
 
-  const carregarNiveis = async () => {
+  /* --------------------------------------------------------- pendências --- */
+  const redirecionamentoInvalido =
+    redirecionamento.trim().length > 0 && !/^https?:\/\//i.test(redirecionamento.trim());
+  const conferenciaDeTurnos = conferirTurnos(turnos);
+
+  const redirecionamentoPendente = redirecionamento.trim() !== redirecionamentoSalvo.trim();
+  const turnosPendentes = JSON.stringify(turnos) !== JSON.stringify(turnosSalvos);
+
+  const pendencias = useMemo(() => {
+    const lista: { id: string; rotulo: string; impedido?: string }[] = [];
+    if (redirecionamentoPendente) {
+      lista.push({
+        id: 'acesso',
+        rotulo: 'Saída de quem chega sem link',
+        impedido: redirecionamentoInvalido
+          ? 'O endereço precisa começar com http:// ou https://.'
+          : undefined
+      });
+    }
+    if (turnosPendentes) {
+      lista.push({
+        id: 'turnos',
+        rotulo: 'Horários dos turnos',
+        impedido: conferenciaDeTurnos.erros[0]
+      });
+    }
+    return lista;
+  }, [
+    redirecionamentoPendente,
+    redirecionamentoInvalido,
+    turnosPendentes,
+    conferenciaDeTurnos.erros
+  ]);
+
+  const impedimento = pendencias.find(p => p.impedido)?.impedido;
+
+  /* ------------------------------------------------------------ gravar --- */
+  const salvarTudo = useCallback(async () => {
+    if (pendencias.length === 0 || salvando) return;
+    const travado = pendencias.find(p => p.impedido);
+    if (travado) {
+      notify(travado.impedido!, 'error');
+      document.getElementById(travado.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (!isDatabaseConfigured) {
+      notify('Sem banco configurado neste ambiente, nada é guardado.', 'error');
+      return;
+    }
+
+    setSalvando(true);
+    const tarefas: Promise<boolean>[] = [];
+    const destino = redirecionamento.trim();
+    if (redirecionamentoPendente) {
+      tarefas.push(
+        DatabaseService.gravarConfiguracao(CHAVE_REDIRECIONAMENTO, destino).then(r => !!r.success)
+      );
+    }
+    if (turnosPendentes) {
+      tarefas.push(
+        DatabaseService.gravarConfiguracao(CHAVE_TURNOS, gravarTurnos(turnos)).then(
+          r => !!r.success
+        )
+      );
+    }
+    const resultados = await Promise.all(tarefas);
+    setSalvando(false);
+
+    if (resultados.some(ok => !ok)) {
+      notify('Nem tudo foi salvo. Confira a conexão com o banco.', 'error');
+      return;
+    }
+    if (redirecionamentoPendente) setRedirecionamentoSalvo(destino);
+    if (turnosPendentes) {
+      setTurnosSalvos(turnos);
+      onTurnosMudarem?.(turnos);
+    }
+    notify(
+      pendencias.length === 1
+        ? `${pendencias[0].rotulo}: salvo!`
+        : `${pendencias.length} alterações salvas!`,
+      'success'
+    );
+  }, [
+    pendencias,
+    salvando,
+    redirecionamento,
+    redirecionamentoPendente,
+    turnos,
+    turnosPendentes,
+    notify,
+    onTurnosMudarem
+  ]);
+
+  const descartar = () => {
+    setRedirecionamento(redirecionamentoSalvo);
+    setTurnos(turnosSalvos.map(j => ({ ...j })));
+    notify('Alterações descartadas.', 'info');
+  };
+
+  /* -------------------------------------------------------- o teclado --- */
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        salvarTudo();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        buscaRef.current?.focus();
+        return;
+      }
+      if (e.key === 'Escape' && document.activeElement === buscaRef.current) {
+        setBusca('');
+        buscaRef.current?.blur();
+      }
+    };
+    window.addEventListener('keydown', tecla);
+    return () => window.removeEventListener('keydown', tecla);
+  }, [salvarTudo]);
+
+  /** Fechar a aba com alteração pendente é perder trabalho em silêncio. */
+  useEffect(() => {
+    if (pendencias.length === 0) return;
+    const aviso = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', aviso);
+    return () => window.removeEventListener('beforeunload', aviso);
+  }, [pendencias.length]);
+
+  /* ------------------------------------------------------- a navegação --- */
+  const termoDaBusca = semAcento(busca.trim());
+  const secoesVisiveis = SECOES.filter(
+    s => !termoDaBusca || semAcento(`${s.titulo} ${s.termos}`).includes(termoDaBusca)
+  );
+  const visivel = (id: string) => secoesVisiveis.some(s => s.id === id);
+
+  /**
+   * Qual seção está sob os olhos — para a navegação acender sozinha.
+   *
+   * A regra é a do sumário de livro: vale a última seção cujo topo já passou
+   * pela linha de leitura. Com uma exceção que todo sumário precisa ter — no
+   * fim da rolagem vale sempre a última seção, porque ela nunca chega a
+   * encostar no topo da tela e, sem isso, ficaria para sempre apagada.
+   */
+  useEffect(() => {
+    const rolagemDe = (el: HTMLElement | null): HTMLElement | null => {
+      let n = el?.parentElement || null;
+      while (n) {
+        const estilo = window.getComputedStyle(n);
+        if (/(auto|scroll)/.test(estilo.overflowY) && n.scrollHeight > n.clientHeight + 4) {
+          return n;
+        }
+        n = n.parentElement;
+      }
+      return null;
+    };
+
+    const calcular = () => {
+      const alvos = secoesVisiveis
+        .map(s => document.getElementById(s.id))
+        .filter((e): e is HTMLElement => !!e);
+      if (alvos.length === 0) return;
+
+      const caixa = rolagemDe(alvos[0]);
+      const noFim = caixa
+        ? caixa.scrollTop + caixa.clientHeight >= caixa.scrollHeight - 4
+        : window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      if (noFim) {
+        setSecaoAtiva(alvos[alvos.length - 1].id);
+        return;
+      }
+
+      let ativa = alvos[0].id;
+      alvos.forEach(el => {
+        if (el.getBoundingClientRect().top <= 140) ativa = el.id;
+      });
+      setSecaoAtiva(ativa);
+    };
+
+    calcular();
+    // Captura na fase de descida: a rolagem acontece num contêiner interno,
+    // e um ouvinte na janela não receberia esse evento.
+    document.addEventListener('scroll', calcular, true);
+    window.addEventListener('resize', calcular);
+    return () => {
+      document.removeEventListener('scroll', calcular, true);
+      window.removeEventListener('resize', calcular);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secoesVisiveis.map(s => s.id).join(','), carregando]);
+
+  const irPara = (id: string) => {
+    setSecaoAtiva(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  /* --------------------------------------------------- painel de saúde --- */
+  const agora = turnoDeAgora(turnos);
+  const cobertura = Math.round(conferenciaDeTurnos.cobertura * 100);
+  const saude = [
+    {
+      id: 'acesso',
+      rotulo: 'Banco de dados',
+      valor: isDatabaseConfigured ? 'Conectado' : 'Offline',
+      detalhe: isDatabaseConfigured
+        ? 'ajustes são guardados'
+        : 'nada será guardado aqui',
+      tom: isDatabaseConfigured ? ('bom' as const) : ('ruim' as const),
+      Icone: DatabaseZap
+    },
+    {
+      id: 'turnos',
+      rotulo: 'Dia coberto',
+      valor: `${cobertura}%`,
+      detalhe: agora ? `agora é ${NOME_DO_TURNO[agora].toLowerCase()}` : 'fora de turno agora',
+      tom: cobertura >= 75 ? ('bom' as const) : ('atencao' as const),
+      Icone: AlarmClock
+    },
+    {
+      id: 'prioridades',
+      rotulo: 'Prioridades',
+      valor: String(niveis.length),
+      detalhe: niveis.length === 0 ? 'nenhuma cadastrada' : 'níveis na régua',
+      tom: niveis.length === 0 ? ('ruim' as const) : ('bom' as const),
+      Icone: Flag
+    },
+    {
+      id: 'midias',
+      rotulo: 'Galeria',
+      valor: galeria ? 'Liberada' : 'Bloqueada',
+      detalhe: galeria ? 'aceita imagem antiga' : 'só foto feita na hora',
+      tom: galeria ? ('atencao' as const) : ('bom' as const),
+      Icone: Camera
+    }
+  ];
+
+  const corDoTom = {
+    bom: 'text-emerald-600',
+    atencao: 'text-amber-600',
+    ruim: 'text-rose-600'
+  };
+
+  /* -------------------------------------------- ações dos níveis (CRUD) --- */
+  const recarregarNiveis = async () => {
     const res = await DatabaseService.fetchPriorityLevels();
     setNiveis(res.data);
   };
 
-  const limparFormularioNivel = () => {
-    setEditandoNivel(null);
-    setRotuloNivel('');
-    setDescricaoNivel('');
-    setCorNivel('#f59e0b');
-  };
-
-  /** Id legível e estável, derivado do nome — é ele que fica no check-in. */
-  const idDoRotulo = (texto: string) =>
-    texto
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_|_$/g, '')
-      .slice(0, 40);
-
-  const salvarNivel = async () => {
-    const rotulo = rotuloNivel.trim();
-    if (!rotulo) {
-      notify('Dê um nome ao nível de prioridade.', 'error');
-      return;
-    }
-    const id = editandoNivel || idDoRotulo(rotulo) || `nivel_${Date.now()}`;
-    if (!editandoNivel && niveis.some(n => n.id === id)) {
+  const salvarNivel = async (nivel: PriorityLevel) => {
+    const novo = !niveis.some(n => n.id === nivel.id);
+    /*
+     * O id sai do nome, então dois níveis com o mesmo nome viram o mesmo id —
+     * e salvar o segundo sobrescreveria o primeiro sem avisar, junto com todo
+     * check-in que já aponta para ele.
+     */
+    if (novo && niveis.some(n => n.id === nivel.id)) {
       notify('Já existe um nível com esse nome.', 'error');
-      return;
+      return false;
     }
-
-    setSalvandoNivel(true);
-    const res = await DatabaseService.upsertPriorityLevel({
-      id,
-      label: rotulo,
-      description: descricaoNivel.trim(),
-      color: corNivel,
-      position: editandoNivel
-        ? niveis.find(n => n.id === editandoNivel)?.position ?? niveis.length
-        : niveis.length
-    });
-    setSalvandoNivel(false);
-
+    const res = await DatabaseService.upsertPriorityLevel(nivel);
     if (!res.success) {
       notify('Não foi possível salvar o nível.', 'error');
-      return;
+      return false;
     }
-    limparFormularioNivel();
-    carregarNiveis();
-    notify(editandoNivel ? 'Nível atualizado!' : 'Nível criado!', 'success');
+    await recarregarNiveis();
+    notify(novo ? 'Nível criado!' : 'Nível atualizado!', 'success');
+    return true;
   };
 
   const removerNivel = async (nivel: PriorityLevel) => {
     const res = await DatabaseService.deletePriorityLevel(nivel.id);
     if (!res.success) {
       notify('Não foi possível remover o nível.', 'error');
-      return;
+      return false;
     }
-    if (editandoNivel === nivel.id) limparFormularioNivel();
-    carregarNiveis();
-    notify('Nível removido.', 'info');
+    await recarregarNiveis();
+    notify(`Nível "${nivel.label}" removido.`, 'info');
+    return true;
   };
 
-  /** Troca a posição com o vizinho, para o administrador ordenar a lista. */
-  const moverNivel = async (indice: number, direcao: -1 | 1) => {
-    const destino = indice + direcao;
-    if (destino < 0 || destino >= niveis.length) return;
-    const lista = [...niveis];
-    [lista[indice], lista[destino]] = [lista[destino], lista[indice]];
-    setNiveis(lista);
+  const reordenarNiveis = async (lista: PriorityLevel[]) => {
+    setNiveis(lista.map((n, i) => ({ ...n, position: i })));
     await Promise.all(
       lista.map((n, i) => DatabaseService.upsertPriorityLevel({ ...n, position: i }))
     );
-    carregarNiveis();
+    await recarregarNiveis();
   };
 
-  /** A chave é gravada na hora em que o botão muda: nada de "esqueci de salvar". */
   const alternarGaleria = async () => {
     const novo = !galeria;
     setGaleria(novo);
+    setGaleriaOcupada(true);
     const res = await DatabaseService.gravarConfiguracao(CHAVE_GALERIA, novo ? 'sim' : 'nao');
+    setGaleriaOcupada(false);
     if (!res.success) {
       setGaleria(!novo);
       notify('Não foi possível salvar a configuração.', 'error');
@@ -196,488 +453,258 @@ export default function ConfiguracoesAdmin({
     notify(novo ? 'Galeria liberada no check-in.' : 'Galeria bloqueada no check-in.', 'success');
   };
 
-  /* ----------------------------------------------------------- turnos --- */
+  const estadoDo = (pendente: boolean): EstadoDoCartao =>
+    salvando && pendente ? 'salvando' : pendente ? 'pendente' : 'salvo';
 
-  const mudarHora = (id: TurnoId, campo: 'inicio' | 'fim', valor: string) =>
-    setTurnos(prev => prev.map(j => (j.id === id ? { ...j, [campo]: valor } : j)));
-
-  const conferencia = conferirTurnos(turnos);
-  const turnosMudaram =
-    JSON.stringify(turnos) !== JSON.stringify(turnosSalvos);
-  const agoraNoRelogio = turnoDeAgora(turnos);
-
-  const salvarTurnos = async () => {
-    if (conferencia.erros.length > 0) {
-      notify(conferencia.erros[0], 'error');
-      return;
-    }
-    setSalvandoTurnos(true);
-    const res = await DatabaseService.gravarConfiguracao(CHAVE_TURNOS, gravarTurnos(turnos));
-    setSalvandoTurnos(false);
-    if (!res.success) {
-      notify('Não foi possível salvar os turnos.', 'error');
-      return;
-    }
-    setTurnosSalvos(turnos);
-    onTurnosMudarem?.(turnos);
-    notify('Horários dos turnos salvos!', 'success');
-  };
-
-  const salvar = async () => {
-    const destino = redirecionamento.trim();
-    if (destino && !/^https?:\/\//i.test(destino)) {
-      notify('O endereço precisa começar com http:// ou https://.', 'error');
-      return;
-    }
-    setSalvando(true);
-    const res = await DatabaseService.gravarConfiguracao(CHAVE_REDIRECIONAMENTO, destino);
-    setSalvando(false);
-    notify(
-      res.success ? 'Configuração salva!' : 'Não foi possível salvar a configuração.',
-      res.success ? 'success' : 'error'
+  /* ------------------------------------------------------------- tela --- */
+  if (carregando) {
+    return (
+      <div className="flex-1 flex items-center justify-center py-20">
+        <span className="flex items-center gap-2.5 text-slate-400 font-bold text-xs uppercase tracking-widest">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Lendo as configurações do sistema
+        </span>
+      </div>
     );
-  };
+  }
 
   return (
-    <div className="flex flex-col gap-5 flex-1 min-h-0">
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-6 max-w-2xl">
-        <div className="flex items-start gap-3 pb-4 border-b border-slate-100">
-          <div className="w-10 h-10 rounded-2xl bg-slate-100 text-[#0C3556] flex items-center justify-center shrink-0">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider leading-tight">
-              Acesso aos domínios
-            </h3>
-            <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
-              Quem chega sem link não vê o sistema.
-            </p>
-          </div>
-        </div>
-
-        <div className="pt-4 space-y-2">
-          <label className="block text-[10px] uppercase font-black tracking-widest text-[#8492A6]">
-            Quem abrir o domínio sem link vai para
-          </label>
-
-          <div className="flex gap-2">
-            <div className="flex-1 bg-white border border-slate-200 rounded-xl flex items-center px-3.5 focus-within:ring-2 focus-within:ring-blue-500/20">
-              <ExternalLink className="w-4 h-4 text-slate-400 mr-2.5 shrink-0" />
-              <input
-                type="url"
-                value={redirecionamento}
-                disabled={carregando}
-                onChange={e => setRedirecionamento(e.target.value)}
-                placeholder={padraoRedirecionamento}
-                className="w-full py-2.5 bg-transparent border-none text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-hidden"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={salvar}
-              disabled={salvando || carregando}
-              className="px-5 bg-[#015FC9] hover:bg-blue-600 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
-            >
-              {salvando ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              Salvar
-            </button>
-          </div>
-
-          <p className="text-[11px] text-slate-400 font-semibold leading-relaxed">
-            Os domínios de acesso existem para receber quem veio de um QR Code ou do
-            link da equipe. Quem digita o endereço na barra, sem link, é mandado para
-            fora em vez de ver a porta de entrada do sistema. Em branco, vai para{' '}
-            <span className="font-bold text-slate-600">{padraoRedirecionamento}</span>.
-          </p>
-
-          {dominiosDeAcesso.length > 0 && (
-            <div className="pt-1 flex flex-wrap gap-1.5">
-              {dominiosDeAcesso.map(dominio => (
-                <span
-                  key={dominio}
-                  className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg font-mono text-[10px] text-slate-500"
-                >
-                  {dominio}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-6 max-w-2xl">
-        <div className="flex items-start gap-3 pb-4 border-b border-slate-100">
-          <div className="w-10 h-10 rounded-2xl bg-slate-100 text-[#0C3556] flex items-center justify-center shrink-0">
-            <Camera className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider leading-tight">
-              Mídias do check-in
-            </h3>
-            <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
-              De onde pode vir a evidência de campo.
-            </p>
-          </div>
-        </div>
-
-        <div className="pt-4 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-[12.5px] font-bold text-slate-700">
-              Permitir enviar da galeria
-            </p>
-            <p className="text-[11px] text-slate-400 font-semibold leading-relaxed mt-0.5">
-              Desligado, o integrante só anexa o que ele fotografar ou filmar na
-              hora, pela câmera — é o que garante que a evidência é daquele
-              momento, e não uma imagem antiga do rolo do celular.
-            </p>
-          </div>
+    <div className="flex flex-col gap-5 flex-1 min-h-0 pb-24">
+      {/* ------------------------------------------- PAINEL DE SAÚDE --- */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {saude.map(item => (
           <button
+            key={item.rotulo}
             type="button"
-            role="switch"
-            aria-checked={galeria}
-            disabled={carregando}
-            onClick={alternarGaleria}
-            className={`w-14 h-8 rounded-full shrink-0 transition-colors cursor-pointer disabled:opacity-50 ${
-              galeria ? 'bg-emerald-500' : 'bg-slate-300'
-            }`}
+            onClick={() => irPara(item.id)}
+            className="text-left bg-white border border-slate-200 rounded-2xl px-4 py-3 hover:border-slate-300 hover:shadow-sm transition-all cursor-pointer group"
           >
+            <span className="flex items-center gap-1.5 text-[9.5px] font-black uppercase tracking-widest text-slate-400">
+              <item.Icone className="w-3 h-3" />
+              {item.rotulo}
+            </span>
             <span
-              className={`block w-6 h-6 bg-white rounded-full shadow transition-transform ${
-                galeria ? 'translate-x-7' : 'translate-x-1'
-              }`}
-            />
+              className={`block text-[19px] font-black leading-none mt-1.5 ${corDoTom[item.tom]}`}
+            >
+              {item.valor}
+            </span>
+            <span className="block text-[10px] font-bold text-slate-400 leading-none mt-1.5 truncate">
+              {item.detalhe}
+            </span>
           </button>
-        </div>
+        ))}
       </div>
 
-      {/* ------------------------------------------------------- TURNOS --- */}
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-6 max-w-2xl">
-        <div className="flex items-start gap-3 pb-4 border-b border-slate-100">
-          <div className="w-10 h-10 rounded-2xl bg-slate-100 text-[#0C3556] flex items-center justify-center shrink-0">
-            <AlarmClock className="w-5 h-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider leading-tight">
-              Turnos de trabalho
-            </h3>
-            <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
-              A que horas, nesta campanha, começa a manhã.
-            </p>
-          </div>
-          {agoraNoRelogio && (
-            <span className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <Clock className="w-3 h-3" />
-              agora: {NOME_DO_TURNO[agoraNoRelogio]}
-            </span>
-          )}
-        </div>
-
-        {/*
-          A régua de 24 horas.
-
-          Três pares de horário digitados não se conferem de cabeça: ninguém
-          percebe que deixou das 12h às 13h30 fora de todos os turnos olhando
-          para seis campos. Desenhado, o buraco salta aos olhos — e o risco
-          dele é concreto, porque missão marcada num horário sem turno nunca
-          é "a de agora" para quem está na rua.
-        */}
-        <div className="pt-5">
-          <div className="relative h-8 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 flex">
-            {fatiasDoDia(turnos).map((fatia, i) => {
-              const largura = ((fatia.ate - fatia.de + 1) / LARGURA_DO_DIA) * 100;
-              const vazia = fatia.id === 'vazio';
-              return (
-                <span
-                  key={`${fatia.id}-${fatia.de}-${i}`}
-                  title={
-                    vazia
-                      ? `Sem turno: ${emHora(fatia.de)} às ${emHora(fatia.ate)}`
-                      : `${NOME_DO_TURNO[fatia.id as TurnoId]}: ${emHora(fatia.de)} às ${emHora(fatia.ate)}`
-                  }
-                  className={`h-full flex items-center justify-center overflow-hidden ${
-                    vazia ? 'bg-[repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0_4px,#f1f5f9_4px,#f1f5f9_8px)]' : ''
-                  }`}
-                  style={{
-                    width: `${largura}%`,
-                    backgroundColor: vazia ? undefined : COR_DO_TURNO[fatia.id as TurnoId]
-                  }}
-                >
-                  {!vazia && largura > 11 && (
-                    <span className="text-[9px] font-black uppercase tracking-wider text-white/90 truncate px-1">
-                      {NOME_DO_TURNO[fatia.id as TurnoId]}
-                    </span>
-                  )}
-                </span>
-              );
-            })}
-
-            {/* Onde o relógio está agora, na régua. */}
-            <span
-              className="absolute top-0 bottom-0 w-0.5 bg-slate-900 pointer-events-none"
-              style={{ left: `${(minutosAgora() / LARGURA_DO_DIA) * 100}%` }}
-              title={`Agora: ${emHora(minutosAgora())}`}
-            >
-              <span className="absolute -top-0.5 -left-[3px] w-2 h-2 rounded-full bg-slate-900" />
-            </span>
-          </div>
-          <div className="flex justify-between mt-1 text-[9px] font-black text-slate-400 tabular-nums">
-            <span>00h</span>
-            <span>06h</span>
-            <span>12h</span>
-            <span>18h</span>
-            <span>24h</span>
-          </div>
-        </div>
-
-        <div className="pt-4 space-y-2">
-          {turnos.map(janela => {
-            const minutos = duracao(janela);
-            const quebrado = emMinutos(janela.inicio) < 0 || emMinutos(janela.fim) < 0;
-            return (
-              <div
-                key={janela.id}
-                className="flex items-center gap-2.5 border border-slate-200 rounded-2xl px-3 py-2.5"
-              >
-                <span
-                  className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0"
-                  style={{ backgroundColor: COR_DO_TURNO[janela.id] }}
-                >
-                  <IconeDoTurno turno={janela.id} className="w-4 h-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-black text-slate-800 leading-tight">
-                    {NOME_DO_TURNO[janela.id]}
-                  </p>
-                  <p className="text-[10.5px] text-slate-400 font-bold">
-                    {quebrado
-                      ? 'horário incompleto'
-                      : `${tempoCurto(minutos)} de janela${viraODia(janela) ? ' · vira o dia' : ''}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <input
-                    type="time"
-                    value={janela.inicio}
-                    onChange={e => mudarHora(janela.id, 'inicio', e.target.value)}
-                    aria-label={`Início da ${NOME_DO_TURNO[janela.id].toLowerCase()}`}
-                    className="w-[118px] bg-white border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 cursor-pointer tabular-nums"
-                  />
-                  <span className="text-[10px] font-black text-slate-300 uppercase">até</span>
-                  <input
-                    type="time"
-                    value={janela.fim}
-                    onChange={e => mudarHora(janela.id, 'fim', e.target.value)}
-                    aria-label={`Fim da ${NOME_DO_TURNO[janela.id].toLowerCase()}`}
-                    className="w-[118px] bg-white border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 cursor-pointer tabular-nums"
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {(conferencia.erros.length > 0 || conferencia.avisos.length > 0) && (
-          <div className="mt-3 space-y-1.5">
-            {conferencia.erros.map(texto => (
-              <p
-                key={texto}
-                className="flex items-start gap-1.5 text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"
-              >
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-                {texto}
-              </p>
-            ))}
-            {conferencia.avisos.map(texto => (
-              <p
-                key={texto}
-                className="flex items-start gap-1.5 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2"
-              >
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-                {texto}
-              </p>
-            ))}
-          </div>
-        )}
-
-        <div className="mt-4 flex items-center justify-between gap-2">
-          <p className="text-[11px] text-slate-400 font-semibold leading-snug min-w-0">
-            O fim entra no turno: <strong className="text-slate-600">11:59</strong> ainda
-            é manhã. Turno que termina antes de começar atravessa a meia-noite.
+      {!isDatabaseConfigured && (
+        <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+          <DatabaseZap className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-[11.5px] font-bold text-amber-800 leading-snug">
+            Este ambiente está sem as credenciais do banco. A tela funciona, mas
+            nada do que você mudar aqui é guardado — e os valores mostrados são
+            os de fábrica, não os da campanha.
           </p>
-          <div className="flex gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setTurnos(TURNOS_PADRAO.map(j => ({ ...j })))}
-              className="px-3 py-2.5 bg-white border border-slate-200 text-slate-500 hover:text-slate-700 font-bold text-xs rounded-xl cursor-pointer flex items-center gap-1.5"
-              title="Voltar aos horários de fábrica"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Padrão
-            </button>
-            <button
-              type="button"
-              onClick={salvarTurnos}
-              disabled={salvandoTurnos || !turnosMudaram || conferencia.erros.length > 0}
-              className="px-5 py-2.5 bg-[#015FC9] hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer active:scale-95 whitespace-nowrap"
-            >
-              {salvandoTurnos ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              Salvar horários
-            </button>
-          </div>
         </div>
-      </div>
+      )}
 
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-6 max-w-2xl">
-        <div className="flex items-start gap-3 pb-4 border-b border-slate-100">
-          <div className="w-10 h-10 rounded-2xl bg-slate-100 text-[#0C3556] flex items-center justify-center shrink-0">
-            <Flag className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider leading-tight">
-              Níveis de prioridade
-            </h3>
-            <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
-              A lista é sua: crie, edite, ordene e remova.
-            </p>
-          </div>
-        </div>
-
-        {/* Lista */}
-        <div className="pt-4 space-y-2">
-          {niveis.length === 0 ? (
-            <p className="text-[11px] text-slate-400 font-semibold py-4 text-center border border-dashed border-slate-200 rounded-2xl">
-              Nenhum nível criado ainda.
-            </p>
-          ) : (
-            niveis.map((nivel, i) => (
-              <div
-                key={nivel.id}
-                className="flex items-center gap-2.5 border border-slate-200 rounded-2xl px-3 py-2.5"
-              >
-                <span className="flex flex-col text-slate-300">
-                  <button
-                    type="button"
-                    onClick={() => moverNivel(i, -1)}
-                    disabled={i === 0}
-                    aria-label="Subir"
-                    className="leading-none text-[9px] hover:text-slate-500 disabled:opacity-30 cursor-pointer"
-                  >
-                    ▲
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moverNivel(i, 1)}
-                    disabled={i === niveis.length - 1}
-                    aria-label="Descer"
-                    className="leading-none text-[9px] hover:text-slate-500 disabled:opacity-30 cursor-pointer"
-                  >
-                    ▼
-                  </button>
-                </span>
-                <span
-                  className="w-8 h-8 rounded-xl flex items-center justify-center text-white shrink-0"
-                  style={{ backgroundColor: nivel.color }}
-                >
-                  <Flag className="w-3.5 h-3.5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-black text-slate-800 leading-tight">
-                    {nivel.label}
-                  </p>
-                  {nivel.description && (
-                    <p className="text-[11px] text-slate-400 font-semibold truncate">
-                      {nivel.description}
-                    </p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditandoNivel(nivel.id);
-                    setRotuloNivel(nivel.label);
-                    setDescricaoNivel(nivel.description || '');
-                    setCorNivel(nivel.color);
-                  }}
-                  aria-label="Editar"
-                  className="p-1.5 h-8 w-8 rounded-lg text-slate-400 hover:text-[#015FC9] hover:bg-slate-50 flex items-center justify-center cursor-pointer"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removerNivel(nivel)}
-                  aria-label="Remover"
-                  className="p-1.5 h-8 w-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Formulário */}
-        <div className="mt-4 p-4 bg-slate-50/70 border border-slate-100 rounded-2xl space-y-3">
-          <div className="flex items-center gap-2">
+      {/* ---------------------------------------- NAVEGAÇÃO + SEÇÕES --- */}
+      <div className="grid lg:grid-cols-[232px_minmax(0,1fr)] gap-5 items-start">
+        <nav className="lg:sticky lg:top-6 space-y-3">
+          <div className="bg-white border border-slate-200 rounded-2xl flex items-center px-3.5 h-11 focus-within:ring-2 focus-within:ring-blue-500/20">
+            <Search className="w-3.5 h-3.5 text-slate-400 mr-2 shrink-0" />
             <input
-              type="color"
-              value={corNivel}
-              onChange={e => setCorNivel(e.target.value)}
-              aria-label="Cor do nível"
-              className="w-10 h-10 rounded-xl border border-slate-200 bg-white cursor-pointer shrink-0"
-            />
-            <input
+              ref={buscaRef}
               type="text"
-              value={rotuloNivel}
-              onChange={e => setRotuloNivel(e.target.value)}
-              placeholder="Nome do nível (ex.: Urgente)"
-              className="flex-1 bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+              value={busca}
+              onChange={e => setBusca(e.target.value)}
+              placeholder="Buscar ajuste..."
+              className="w-full bg-transparent border-none text-[11.5px] font-bold text-slate-800 placeholder-slate-400 focus:outline-hidden"
             />
-          </div>
-          <input
-            type="text"
-            value={descricaoNivel}
-            onChange={e => setDescricaoNivel(e.target.value)}
-            placeholder="Quando usar este nível (opcional)"
-            className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
-          />
-          <div className="flex gap-2 justify-end">
-            {editandoNivel && (
+            {busca ? (
               <button
                 type="button"
-                onClick={limparFormularioNivel}
-                className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 font-bold text-xs rounded-xl cursor-pointer flex items-center gap-1.5"
+                onClick={() => setBusca('')}
+                aria-label="Limpar busca"
+                className="shrink-0 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
-                Cancelar
               </button>
+            ) : (
+              <span className="text-[8.5px] font-black text-slate-400 bg-slate-100 border border-slate-200 rounded-md px-1.5 py-1 leading-none shrink-0 select-none">
+                Ctrl F
+              </span>
             )}
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-2 space-y-0.5">
+            {secoesVisiveis.length === 0 ? (
+              <p className="text-[11px] font-semibold text-slate-400 px-2 py-3 leading-snug">
+                Nenhum ajuste com esse nome.
+              </p>
+            ) : (
+              secoesVisiveis.map(secao => {
+                const ativa = secaoAtiva === secao.id;
+                const pendente = pendencias.some(p => p.id === secao.id);
+                return (
+                  <button
+                    key={secao.id}
+                    type="button"
+                    onClick={() => irPara(secao.id)}
+                    aria-current={ativa ? 'true' : undefined}
+                    className={`w-full text-left px-2.5 py-2 rounded-xl flex items-center gap-2 cursor-pointer transition-colors ${
+                      ativa
+                        ? 'bg-[#015FC9] text-white'
+                        : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <secao.Icone
+                      className={`w-3.5 h-3.5 shrink-0 ${ativa ? 'text-white' : 'text-slate-400'}`}
+                    />
+                    <span className="text-[11.5px] font-bold truncate flex-1">
+                      {secao.titulo}
+                    </span>
+                    {pendente && (
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          ativa ? 'bg-white' : 'bg-amber-500'
+                        }`}
+                        title="Alteração não salva nesta seção"
+                      />
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <p className="text-[10px] font-semibold text-slate-400 leading-snug px-1">
+            As chaves gravam sozinhas. O que se digita fica pendente até você
+            salvar — <strong className="text-slate-500">Ctrl S</strong> salva tudo.
+          </p>
+        </nav>
+
+        <div className="space-y-5 min-w-0">
+          {visivel('acesso') && (
+            <SecaoAcesso
+              valor={redirecionamento}
+              onMudar={setRedirecionamento}
+              padrao={padraoRedirecionamento}
+              dominios={dominiosDeAcesso}
+              estado={estadoDo(redirecionamentoPendente)}
+            />
+          )}
+
+          {visivel('midias') && (
+            <SecaoMidias
+              galeria={galeria}
+              onAlternar={alternarGaleria}
+              ocupado={galeriaOcupada}
+              ligado={isDatabaseConfigured}
+            />
+          )}
+
+          {visivel('turnos') && (
+            <SecaoTurnos
+              turnos={turnos}
+              onMudar={setTurnos}
+              estado={estadoDo(turnosPendentes)}
+            />
+          )}
+
+          {visivel('prioridades') && (
+            <SecaoPrioridades
+              niveis={niveis}
+              onSalvar={salvarNivel}
+              onRemover={removerNivel}
+              onReordenar={reordenarNiveis}
+              ligado={isDatabaseConfigured}
+            />
+          )}
+
+          {secoesVisiveis.length === 0 && (
+            <div className="bg-white border border-dashed border-slate-200 rounded-3xl px-6 py-12 text-center">
+              <p className="text-[13px] font-black text-slate-500">
+                Nada encontrado para "{busca}".
+              </p>
+              <button
+                type="button"
+                onClick={() => setBusca('')}
+                className="mt-3 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-black uppercase tracking-wider cursor-pointer"
+              >
+                Ver todos os ajustes
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* --------------------------------------- BARRA DE PENDÊNCIAS ---
+          Uma barra só, para a página inteira. Botão de salvar por cartão
+          multiplica a chance de sair da tela com metade das mudanças pelo
+          caminho — e ninguém confere cartão por cartão antes de sair. */}
+      {pendencias.length > 0 && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[3000] w-[min(680px,calc(100vw-2.5rem))] animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700/60 px-4 py-3 flex items-center gap-3">
+            <span className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+              <Save className="w-4 h-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] font-black leading-tight">
+                {pendencias.length === 1
+                  ? '1 alteração não salva'
+                  : `${pendencias.length} alterações não salvas`}
+              </p>
+              {impedimento ? (
+                <p className="text-[10.5px] font-bold text-amber-400 leading-tight mt-0.5 truncate">
+                  {impedimento}
+                </p>
+              ) : (
+                <p className="text-[10.5px] font-semibold text-slate-400 leading-tight mt-0.5 truncate">
+                  {pendencias.map((p, i) => (
+                    <React.Fragment key={p.id}>
+                      {i > 0 && ' · '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Busca ligada pode ter escondido justamente a seção
+                          // que está pendente: mostrar de volta é parte de levar.
+                          setBusca('');
+                          window.setTimeout(() => irPara(p.id), 0);
+                        }}
+                        className="underline decoration-slate-600 underline-offset-2 hover:text-white cursor-pointer"
+                      >
+                        {p.rotulo}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </p>
+              )}
+            </div>
             <button
               type="button"
-              onClick={salvarNivel}
-              disabled={salvandoNivel}
-              className="px-5 py-2.5 bg-[#015FC9] hover:bg-blue-600 disabled:opacity-60 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer active:scale-95"
+              onClick={descartar}
+              disabled={salvando}
+              className="shrink-0 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10.5px] font-black uppercase tracking-wider cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
             >
-              {salvandoNivel ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : editandoNivel ? (
-                <Save className="w-4 h-4" />
+              <RotateCcw className="w-3 h-3" />
+              Descartar
+            </button>
+            <button
+              type="button"
+              onClick={salvarTudo}
+              disabled={salvando || !!impedimento}
+              title={impedimento || 'Ctrl S'}
+              className="shrink-0 px-4 py-2 rounded-xl bg-[#015FC9] hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[10.5px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
+            >
+              {salvando ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <Plus className="w-4 h-4" />
+                <Check className="w-3.5 h-3.5" />
               )}
-              {editandoNivel ? 'Salvar nível' : 'Criar nível'}
+              Salvar tudo
             </button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
