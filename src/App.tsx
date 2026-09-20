@@ -24,8 +24,8 @@ import FiltroDePeriodo, {
   EstadoDoPeriodo,
   diaDaMissao,
   passaNoPrazo,
+  rotuloDoPeriodo,
 } from "./components/FiltroDePeriodo";
-import FiltroCheckIns, { PessoaDoFiltro } from "./components/FiltroCheckIns";
 import LaserPointer from "./components/LaserPointer";
 import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
 import FichaEstabelecimento from "./components/FichaEstabelecimento";
@@ -122,6 +122,7 @@ import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
 import OperationIcon from "./components/OperationIcon";
 import ConfirmDialog, { ConfirmRequest } from "./components/ConfirmDialog";
 import MindMapPanel from "./components/MindMapPanel";
+import PainelDeCheckIns from "./components/PainelDeCheckIns";
 import MiniMapa from "./components/MiniMapa";
 import BarrasDaEscola from "./components/BarrasDaEscola";
 import {
@@ -652,6 +653,16 @@ export default function App() {
   const [isMindMapOpen, setIsMindMapOpen] = useState(false);
   const [isMindMapFullscreen, setIsMindMapFullscreen] = useState(false);
 
+  /**
+   * A sala de situação dos check-ins, na mesma metade de tela do mapa mental.
+   *
+   * Um painel lateral estreito cabia um filtro; não cabe o que um gestor
+   * pergunta antes da reunião das oito. Meia tela cabe — e o mapa continua
+   * na outra metade, que é onde as respostas aparecem quando se clica aqui.
+   */
+  const [salaDeSituacaoAberta, setSalaDeSituacaoAberta] = useState(false);
+  const [salaEmTelaCheia, setSalaEmTelaCheia] = useState(false);
+
   const [adminTab, setAdminTab] = useState<"candidates" | "map">("candidates");
   const [selectedCandidateFilter, setSelectedCandidateFilter] =
     useState<string>("all");
@@ -952,7 +963,6 @@ export default function App() {
     [],
   );
 
-  const [filtroCheckInsAberto, setFiltroCheckInsAberto] = useState(false);
   const [filtroPessoas, setFiltroPessoas] = useState<string[]>([]);
   /**
    * O recorte de tempo do mapa inteiro.
@@ -3028,6 +3038,11 @@ export default function App() {
     setIsMindMapFullscreen(false);
   };
 
+  const fecharSalaDeSituacao = () => {
+    setSalaDeSituacaoAberta(false);
+    setSalaEmTelaCheia(false);
+  };
+
   // Show dynamic system notification
   const triggerNotification = (
     text: string,
@@ -3502,6 +3517,25 @@ export default function App() {
           color: p.color,
         }))
   ) as { value: string; label: string; description: string; color: string }[];
+
+  /**
+   * Os níveis na ordem do cadastro, com os quatro antigos no lugar quando
+   * ninguém cadastrou nada. `position` cresce com a gravidade, como na carga
+   * inicial do banco — é por ela que a sala de situação sabe o que é grave.
+   */
+  const niveisDePrioridade: PriorityLevel[] = React.useMemo(
+    () =>
+      priorityLevels.length > 0
+        ? [...priorityLevels].sort((a, b) => a.position - b.position)
+        : CHECKIN_PRIORITIES.map((nivel, i) => ({
+            id: nivel.value as string,
+            label: nivel.label,
+            description: nivel.description,
+            color: nivel.color,
+            position: i,
+          })),
+    [priorityLevels],
+  );
 
   /** Nível gravado num check-in, resolvido pela lista do administrador. */
   const resolverPrioridade = (valor?: string) =>
@@ -4462,54 +4496,6 @@ export default function App() {
     },
     [filtroDe, filtroAte, filtroNiveis, filtroTiposAcao, operationTypes],
   );
-
-  /**
-   * Lista de pessoas do painel, com a contagem de cada uma. Zero inclusive.
-   *
-   * Um objeto simples no lugar de um Map: neste arquivo `Map` é o ícone do
-   * lucide, importado lá em cima, e `new Map()` quebraria a tela inteira.
-   */
-  const pessoasDoFiltro: PessoaDoFiltro[] = React.useMemo(() => {
-    const porChave: Record<string, PessoaDoFiltro> = {};
-    const ordem: string[] = [];
-
-    const guardar = (pessoa: PessoaDoFiltro) => {
-      porChave[pessoa.chave] = pessoa;
-      ordem.push(pessoa.chave);
-    };
-
-    // Toda a equipe entra, mesmo quem nunca registrou nada: saber que alguém
-    // está zerado é metade da informação que este painel existe para dar.
-    equipeDoMapa.forEach((m: any) => {
-      if (porChave[m.id]) return;
-      guardar({
-        chave: m.id,
-        nome: m.full_name || "Sem nome",
-        foto: m.image,
-        total: 0,
-      });
-    });
-
-    checkInsDoMapa.forEach((c: any) => {
-      const pessoa = pessoaDoCheckIn(c);
-      const conta = passaNosCortes(c) ? 1 : 0;
-      const atual = porChave[pessoa.chave];
-      if (atual) {
-        atual.total += conta;
-        return;
-      }
-      // Quem saiu da equipe não some do histórico nem do filtro.
-      guardar({
-        chave: pessoa.chave,
-        nome: pessoa.nome,
-        foto: pessoa.foto,
-        total: conta,
-        foraDaEquipe: true,
-      });
-    });
-
-    return ordem.map((chave) => porChave[chave]);
-  }, [equipeDoMapa, checkInsDoMapa, pessoaDoCheckIn, passaNosCortes]);
 
   const filteredCheckIns = React.useMemo(
     () =>
@@ -12338,7 +12324,6 @@ export default function App() {
               e.stopPropagation();
               setTerritorioAberto((v) => !v);
               setPesquisaLojasAberta(false);
-              setFiltroCheckInsAberto(false);
               setIsFilterDropdownOpen(false);
             },
           },
@@ -12355,22 +12340,27 @@ export default function App() {
               e.stopPropagation();
               setPesquisaLojasAberta((v) => !v);
               setTerritorioAberto(false);
-              setFiltroCheckInsAberto(false);
               setIsFilterDropdownOpen(false);
             },
           },
           {
             id: "filtro-checkins",
             grupo: "filtrar",
-            rotulo: "Filtrar check-ins",
-            ajuda: "Filtrar por pessoa, data, prioridade e tipo",
+            rotulo: "Check-ins",
+            ajuda: "Abrir a sala de situação: ritmo, bairros, equipe e missões",
             cor: "#015FC9",
-            ativa: filtroCheckInsAberto || filtrosDeCheckInLigados > 0,
+            ativa: salaDeSituacaoAberta || filtrosDeCheckInLigados > 0,
             contador: filtrosDeCheckInLigados,
             icone: <Users className="w-4 h-4" />,
             aoClicar: (e) => {
               e.stopPropagation();
-              setFiltroCheckInsAberto((v) => !v);
+              if (salaDeSituacaoAberta) {
+                fecharSalaDeSituacao();
+                return;
+              }
+              setSalaDeSituacaoAberta(true);
+              // Dois painéis de meia tela não deixam mapa nenhum entre eles.
+              closeMindMap();
               setTerritorioAberto(false);
               setPesquisaLojasAberta(false);
               setIsFilterDropdownOpen(false);
@@ -12419,6 +12409,7 @@ export default function App() {
                 return;
               }
               setIsMindMapOpen(true);
+              fecharSalaDeSituacao();
               setIsFilterDropdownOpen(false);
             },
           },
@@ -12775,42 +12766,6 @@ export default function App() {
         lugar={lojaAberta}
         onFechar={() => setLojaAberta(null)}
         onVirarPonto={virarPontoEstrategico}
-      />
-
-      {/* PAINEL DE FILTRO DOS CHECK-INS */}
-      <FiltroCheckIns
-        aberto={filtroCheckInsAberto}
-        onFechar={() => setFiltroCheckInsAberto(false)}
-        pessoas={pessoasDoFiltro}
-        pessoasSelecionadas={filtroPessoas}
-        onPessoas={setFiltroPessoas}
-        de={filtroDe}
-        ate={filtroAte}
-        niveis={opcoesDePrioridade.map((o) => ({
-          id: o.value,
-          label: o.label,
-          color: o.color,
-        }))}
-        niveisSelecionados={filtroNiveis}
-        onNiveis={setFiltroNiveis}
-        tipos={operationTypes
-          .filter(
-            (t) =>
-              (!clienteEmFoco ||
-                clienteEmFoco === "all" ||
-                t.candidateId === clienteEmFoco) &&
-              t.active !== false,
-          )
-          .sort(
-            (a, b) =>
-              (a.position ?? 0) - (b.position ?? 0) ||
-              a.label.localeCompare(b.label),
-          )}
-        tiposSelecionados={filtroTiposAcao}
-        onTipos={setFiltroTiposAcao}
-        visiveis={filteredCheckIns.length}
-        total={checkInsDoMapa.length}
-        onLimpar={limparFiltrosDeCheckIn}
       />
 
       {/* Top Banner Guide for Coordinate Picking */}
@@ -15956,6 +15911,67 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Sala de situação dos check-ins: metade da tela, ou tela cheia */}
+      <PainelDeCheckIns
+        aberto={salaDeSituacaoAberta}
+        telaCheia={salaEmTelaCheia}
+        onAlternarTelaCheia={() => setSalaEmTelaCheia((v) => !v)}
+        onFechar={fecharSalaDeSituacao}
+        checkIns={checkInsDoMapa}
+        pins={pins.filter(
+          (p) =>
+            !clienteEmFoco ||
+            clienteEmFoco === "all" ||
+            p.candidateId === clienteEmFoco,
+        )}
+        areas={areas.filter(
+          (a) =>
+            !clienteEmFoco ||
+            clienteEmFoco === "all" ||
+            a.candidateId === clienteEmFoco,
+        )}
+        equipe={equipeDoMapa}
+        operationTypes={operationTypes.filter(
+          (t) =>
+            !clienteEmFoco ||
+            clienteEmFoco === "all" ||
+            t.candidateId === clienteEmFoco,
+        )}
+        priorityLevels={niveisDePrioridade}
+        pessoaDoCheckIn={pessoaDoCheckIn}
+        de={filtroDe}
+        ate={filtroAte}
+        rotuloDoPeriodo={rotuloDoPeriodo(filtroDe, filtroAte)}
+        pessoasSelecionadas={filtroPessoas}
+        onPessoa={(chave) =>
+          setFiltroPessoas((atual) =>
+            atual.includes(chave)
+              ? atual.filter((c) => c !== chave)
+              : [...atual, chave],
+          )
+        }
+        niveisSelecionados={filtroNiveis}
+        onNivel={(id) =>
+          setFiltroNiveis((atual) =>
+            atual.includes(id) ? atual.filter((n) => n !== id) : [...atual, id],
+          )
+        }
+        tiposSelecionados={filtroTiposAcao}
+        onTipo={(id) =>
+          setFiltroTiposAcao((atual) =>
+            atual.includes(id) ? atual.filter((t) => t !== id) : [...atual, id],
+          )
+        }
+        onLimparFiltros={limparFiltrosDeCheckIn}
+        onIrParaCheckIn={(id) => {
+          if (!id) return;
+          setSelectedId(id);
+          // Em tela cheia o mapa está atrás do painel: quem pede para ver o
+          // lugar quer o mapa, não a ficha do painel por cima dele.
+          setSalaEmTelaCheia(false);
+        }}
+      />
 
       {/* Mapa Mental: metade direita da tela, ou tela cheia */}
       <MindMapPanel
