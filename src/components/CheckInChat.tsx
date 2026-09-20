@@ -12,7 +12,10 @@ import {
   Pencil,
   Plus,
   Maximize2,
+  ArrowUp,
+  BellRing,
   Target,
+  TriangleAlert,
   X
 } from 'lucide-react';
 import { reverseGeocode } from '../services/streetSources';
@@ -222,6 +225,28 @@ export default function CheckInChat({
    * registro livre numa missão que ninguém pediu.
    */
   const [missaoId, setMissaoId] = useState<string | null>(null);
+  /**
+   * Missões que chegaram com a tela já aberta e que a pessoa ainda não viu.
+   *
+   * Elas ficam marcadas até ela olhar: um aviso que some sozinho em quatro
+   * segundos não serve para uma ordem do comitê que ela precisa cumprir.
+   */
+  const [missoesNovas, setMissoesNovas] = useState<string[]>([]);
+  /**
+   * Tarja do alto já lida.
+   *
+   * Tocar nela leva até a missão, mas não apaga o selo do cartão: chegar lá e
+   * encontrar três cartões iguais, sem saber qual é o novo, é o mesmo que não
+   * ter avisado. O selo só sai quando a pessoa toca no cartão certo.
+   */
+  const [tarjaVista, setTarjaVista] = useState(false);
+  /** Título da missão que o comitê retirou, para explicar o sumiço. */
+  const [missaoRetirada, setMissaoRetirada] = useState<string | null>(null);
+  /** Aviso curto na própria tela do check-in. */
+  const [aviso, setAviso] = useState<{
+    texto: string;
+    tipo: 'success' | 'error' | 'info';
+  } | null>(null);
 
   const [salvando, setSalvando] = useState(false);
   const [horas, setHoras] = useState<{ [k: string]: string }>({});
@@ -240,13 +265,39 @@ export default function CheckInChat({
   /** Prévias locais criadas com objectURL, para devolver a memória no fim. */
   const previasRef = useRef<string[]>([]);
   const salvoRef = useRef(false);
-  /** Missões já na tela, para avisar só quando uma nova chega com ela aberta. */
-  const missoesVistasRef = useRef<string[] | null>(null);
+  /** Missões já na tela, para saber o que é novidade e o que foi retirado. */
+  const missoesVistasRef = useRef<{ id: string; title: string }[] | null>(null);
+  /** Topo do bloco de missões, para o aviso saber para onde levar a pessoa. */
+  const blocoMissoesRef = useRef<HTMLDivElement>(null);
+  const avisoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Ordem de chegada de cada mídia: a substituição fica no mesmo lugar. */
   const posicoesRef = useRef<{ mapa: { [id: string]: number }; proxima: number }>({
     mapa: {},
     proxima: 0
   });
+
+  /**
+   * Mostra o recado na tela do check-in, e não só no painel.
+   *
+   * Esta tela é a única coisa que aparece no aparelho de quem está na rua: o
+   * aviso do painel fica numa parte da aplicação que ela nunca vê. Sem isto,
+   * "não foi possível enviar o arquivo" some no silêncio.
+   */
+  const avisar = (texto: string, tipo: 'success' | 'error' | 'info' = 'info') => {
+    setAviso({ texto, tipo });
+    if (avisoRef.current) clearTimeout(avisoRef.current);
+    // Erro fica mais tempo: é o que precisa ser lido até o fim.
+    avisoRef.current = setTimeout(() => setAviso(null), tipo === 'error' ? 6500 : 4000);
+    // O painel continua sabendo: é dele o histórico da sessão.
+    notify(texto, tipo);
+  };
+
+  useEffect(
+    () => () => {
+      if (avisoRef.current) clearTimeout(avisoRef.current);
+    },
+    []
+  );
 
   const definirSeguirGps = (valor: boolean) => {
     seguirGpsRef.current = valor;
@@ -262,6 +313,19 @@ export default function CheckInChat({
 
   /** A missão deste check-in, ou nada: o registro livre continua existindo. */
   const missao = missoes.find(m => m.id === missaoId) || null;
+
+  /**
+   * Missões novas que ainda estão de pé.
+   *
+   * A marca de "nova" é lembrada por id; se o comitê enviou e recolheu antes
+   * de a pessoa olhar, a tarja tem de sumir junto — senão ela rola a tela
+   * atrás de uma missão que não está mais lá.
+   */
+  const novasDePe = missoesNovas.filter(id => missoes.some(m => m.id === id));
+  const titulosNovos = novasDePe
+    .map(id => missoes.find(m => m.id === id)?.title)
+    .filter(Boolean)
+    .join(', ');
 
   /**
    * Níveis oferecidos na tela.
@@ -291,29 +355,37 @@ export default function CheckInChat({
     return () => clearTimeout(t);
   }, [etapa, coords, midias, observacoes, operacoes, mapaPronto]);
 
-  // Missão desligada ou apagada no painel não pode continuar presa ao check-in.
-  useEffect(() => {
-    if (missaoId && !missoes.some(m => m.id === missaoId)) {
-      setMissaoId(null);
-      notify('A missão que você tinha escolhido foi retirada pelo comitê.', 'info');
-    }
-  }, [missoes, missaoId]);
-
   /**
-   * Missão que chega com a tela já aberta.
+   * O que mudou nas missões enquanto a tela estava aberta.
    *
-   * O banco avisa em tempo real, mas a conversa pode estar rolada lá embaixo,
-   * na foto ou no áudio. Sem o aviso, o comitê manda e ninguém vê.
+   * O banco sincroniza em tempo real, mas a conversa pode estar rolada lá
+   * embaixo, na foto ou no áudio: o comitê manda e ninguém vê. Então a
+   * chegada vira uma tarja fixa no alto da conversa, que fica lá até a
+   * pessoa tocar — e a retirada vira um recado escrito, porque muda o que
+   * vai ser gravado.
    */
   useEffect(() => {
-    const ids = missoes.map(m => m.id);
-    const vistas = missoesVistasRef.current;
-    missoesVistasRef.current = ids;
+    const atuais = missoes.map(m => ({ id: m.id, title: m.title }));
+    const antes = missoesVistasRef.current;
+    missoesVistasRef.current = atuais;
     // Primeira passada é a carga da tela, não novidade.
-    if (vistas === null) return;
-    const nova = missoes.find(m => !vistas.includes(m.id));
-    if (nova) notify(`Missão nova do comitê: ${nova.title}`, 'info');
-  }, [missoes]);
+    if (antes === null) return;
+
+    const chegaram = atuais.filter(m => !antes.some(a => a.id === m.id));
+    if (chegaram.length > 0) {
+      setMissoesNovas(prev => [
+        ...chegaram.map(m => m.id).filter(id => !prev.includes(id)),
+        ...prev
+      ]);
+      // Missão nova traz a tarja de volta, mesmo que a anterior já tenha sido lida.
+      setTarjaVista(false);
+    }
+
+    if (missaoId && !atuais.some(m => m.id === missaoId)) {
+      setMissaoId(null);
+      setMissaoRetirada(antes.find(a => a.id === missaoId)?.title || 'a missão escolhida');
+    }
+  }, [missoes, missaoId]);
 
   useEffect(() => {
     (async () => {
@@ -561,7 +633,7 @@ export default function CheckInChat({
       setMidias(prev =>
         prev.map(m => (m.id === id ? { ...m, estado: 'erro', erro: res.error } : m))
       );
-      notify(res.error || 'Não foi possível enviar o arquivo.', 'error');
+      avisar(res.error || 'Não foi possível enviar o arquivo.', 'error');
       return;
     }
 
@@ -604,7 +676,7 @@ export default function CheckInChat({
 
   const confirmarMidias = () => {
     if (midiasProntas.length === 0) {
-      notify('Envie pelo menos uma foto ou vídeo do local.', 'error');
+      avisar('Envie pelo menos uma foto ou vídeo do local.', 'error');
       return;
     }
     setMidiasConfirmadas(true);
@@ -650,7 +722,7 @@ export default function CheckInChat({
       setObservacoes(prev =>
         prev.map(o => (o.id === id ? { ...o, estado: 'erro', erro: res.error } : o))
       );
-      notify(res.error || 'Não foi possível enviar o áudio.', 'error');
+      avisar(res.error || 'Não foi possível enviar o áudio.', 'error');
       return;
     }
 
@@ -666,7 +738,7 @@ export default function CheckInChat({
   /** Regravar é apagar o áudio que não serviu e abrir espaço para o próximo. */
   const regravarAudio = (id: string) => {
     removerObservacao(id);
-    notify('Áudio apagado. Grave o novo quando quiser.', 'info');
+    avisar('Áudio apagado. Grave o novo quando quiser.', 'info');
   };
 
   const confirmarObservacoes = () => {
@@ -703,11 +775,11 @@ export default function CheckInChat({
   const conferirCategoria = () => {
     const nome = nomeCategoria.trim().replace(/\s+/g, ' ');
     if (nome.length < 2) {
-      notify('Escreva o nome da categoria.', 'error');
+      avisar('Escreva o nome da categoria.', 'error');
       return;
     }
     if (nomeJaExiste(nome)) {
-      notify(`"${nome}" já existe na lista deste cliente.`, 'error');
+      avisar(`"${nome}" já existe na lista deste cliente.`, 'error');
       return;
     }
     setNomeCategoria(nome);
@@ -743,7 +815,7 @@ export default function CheckInChat({
       setSalvandoCategoria(false);
 
       if (!res.success) {
-        notify('Não deu para salvar a categoria agora. Tente de novo.', 'error');
+        avisar('Não deu para salvar a categoria agora. Tente de novo.', 'error');
         return;
       }
     }
@@ -754,7 +826,7 @@ export default function CheckInChat({
     onTipoCriado?.(tipo);
     setNomeCategoria('');
     setPassoCategoria('fechado');
-    notify(`Categoria "${nome}" criada e marcada.`, 'success');
+    avisar(`Categoria "${nome}" criada e marcada.`, 'success');
   };
 
   const alternarOperacao = (tipo: OperationType) =>
@@ -764,11 +836,11 @@ export default function CheckInChat({
 
   const confirmarOperacoes = () => {
     if (operacoes.length === 0) {
-      notify('Escolha pelo menos um tipo de operação.', 'error');
+      avisar('Escolha pelo menos um tipo de operação.', 'error');
       return;
     }
     if (!prioridade) {
-      notify('Escolha o nível de prioridade.', 'error');
+      avisar('Escolha o nível de prioridade.', 'error');
       return;
     }
     setOperacoesConfirmadas(true);
@@ -804,7 +876,7 @@ export default function CheckInChat({
     const res = await DatabaseService.upsertCheckIn(registro);
     if (!res.success) {
       setSalvando(false);
-      notify(`Não foi possível salvar: ${res.error || 'erro'}`, 'error');
+      avisar(`Não foi possível salvar: ${res.error || 'erro'}`, 'error');
       return;
     }
 
@@ -815,7 +887,7 @@ export default function CheckInChat({
 
     salvoRef.current = true;
     setSalvando(false);
-    notify('Check-in confirmado!', 'success');
+    avisar('Check-in confirmado!', 'success');
     onSaved(registro);
   };
 
@@ -909,6 +981,34 @@ export default function CheckInChat({
         <h1 className="text-[15px] font-bold tracking-tight">Check-in de campo</h1>
       </header>
 
+      {/* AVISO: o recado do sistema, na tela que a pessoa está olhando */}
+      {aviso && (
+        <div
+          className="fixed top-3 left-3 right-3 z-50 rounded-2xl px-3.5 py-3 shadow-xl flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2 duration-200"
+          style={{
+            backgroundColor:
+              aviso.tipo === 'error' ? '#B91C1C' : aviso.tipo === 'success' ? VERDE : AZUL
+          }}
+        >
+          <span className="w-5 h-5 rounded-full bg-white/25 flex items-center justify-center shrink-0 mt-px">
+            {aviso.tipo === 'error' ? (
+              <TriangleAlert className="w-3 h-3 text-white" />
+            ) : (
+              <Check className="w-3 h-3 text-white stroke-[3]" />
+            )}
+          </span>
+          <p className="flex-1 text-[12.5px] font-bold text-white leading-snug">{aviso.texto}</p>
+          <button
+            type="button"
+            onClick={() => setAviso(null)}
+            className="shrink-0 p-0.5 rounded-lg hover:bg-white/15 cursor-pointer"
+            title="Fechar aviso"
+          >
+            <X className="w-3.5 h-3.5 text-white/90" />
+          </button>
+        </div>
+      )}
+
       {/* ETAPAS */}
       <div className="bg-white px-5 pt-3 pb-2.5 border-b border-slate-100 shrink-0">
         <div className="flex items-center gap-1.5">
@@ -939,6 +1039,72 @@ export default function CheckInChat({
 
       {/* FIO */}
       <div className="flex-1 min-h-0 px-3 pt-4 pb-6 space-y-3 overflow-y-auto">
+        {/* MISSÃO NOVA: fica no alto até a pessoa tocar, não some sozinha */}
+        {novasDePe.length > 0 && !tarjaVista && (
+          <button
+            type="button"
+            onClick={() => {
+              setTarjaVista(true);
+              // A tarja sai do fluxo ao sumir, e a conversa sobe a altura dela.
+              // Rolar antes disso deixa o cartão novo cortado no topo.
+              setTimeout(
+                () =>
+                  blocoMissoesRef.current?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                  }),
+                60
+              );
+            }}
+            className="sticky top-0 z-30 w-full flex items-center gap-2.5 rounded-2xl px-3.5 py-3 shadow-lg cursor-pointer active:scale-[0.99] animate-in fade-in slide-in-from-top-2 duration-200"
+            style={{ backgroundColor: VERDE }}
+          >
+            <span className="w-7 h-7 rounded-full bg-white/25 flex items-center justify-center shrink-0">
+              <BellRing className="w-3.5 h-3.5 text-white" />
+            </span>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block text-[12.5px] font-black text-white leading-tight">
+                {novasDePe.length === 1
+                  ? 'O comitê acabou de enviar uma missão para você'
+                  : `O comitê acabou de enviar ${novasDePe.length} missões para você`}
+              </span>
+              <span className="block text-[11px] font-semibold text-white/90 truncate mt-0.5">
+                {titulosNovos} · toque para ver
+              </span>
+            </span>
+            <ArrowUp className="w-4 h-4 text-white shrink-0" />
+          </button>
+        )}
+
+        {/* MISSÃO RETIRADA: muda o que vai ser gravado, então fica escrito */}
+        {missaoRetirada && (
+          <div
+            /* Gruda no alto igual à tarja: se some da vista, o check-in vai
+               ser gravado sem a missão e ninguém vai entender por quê. */
+            className="sticky top-0 z-20 rounded-2xl border px-3.5 py-3 flex items-start gap-2.5 shadow-lg animate-in fade-in duration-200"
+            style={{ backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }}
+          >
+            <TriangleAlert className="w-4 h-4 shrink-0 mt-px" style={{ color: '#B45309' }} />
+            <div className="min-w-0 flex-1">
+              <p className="text-[12.5px] font-black leading-tight" style={{ color: '#7C2D12' }}>
+                O comitê retirou a missão "{missaoRetirada}"
+              </p>
+              <p className="text-[11.5px] font-semibold leading-snug mt-0.5" style={{ color: '#92400E' }}>
+                Ela saiu da sua lista e não está mais ligada a este check-in. Escolha
+                outra missão abaixo ou siga como registro livre.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMissaoRetirada(null)}
+              className="shrink-0 p-0.5 rounded-lg hover:bg-black/5 cursor-pointer"
+              title="Entendi"
+            >
+              <X className="w-3.5 h-3.5" style={{ color: '#92400E' }} />
+            </button>
+          </div>
+        )}
+
         {/* MISSÕES: o que o comitê enviou para esta pessoa, antes de tudo */}
         {missoes.length > 0 && (
           <>
@@ -950,11 +1116,12 @@ export default function CheckInChat({
               }
               hora={horas.abertura}
             />
-            <div className="flex items-end gap-2 flex-row-reverse">
+            <div className="flex items-end gap-2 flex-row-reverse" ref={blocoMissoesRef}>
               <span className="w-7 shrink-0" />
               <div className="max-w-[86%] w-full flex flex-col items-stretch gap-2">
                 {missoes.map(missaoDaLista => {
                   const escolhida = missaoDaLista.id === missaoId;
+                  const eNova = novasDePe.includes(missaoDaLista.id);
                   // A distância só existe depois do GPS: antes dele, some.
                   const longe = coords
                     ? distanciaEmMetros(coords, missaoDaLista)
@@ -991,11 +1158,16 @@ export default function CheckInChat({
                     <button
                       key={missaoDaLista.id}
                       type="button"
-                      onClick={() => setMissaoId(escolhida ? null : missaoDaLista.id)}
+                      onClick={() => {
+                        setMissaoId(escolhida ? null : missaoDaLista.id);
+                        // Tocou: já viu. A marca de novidade sai deste cartão.
+                        setMissoesNovas(prev => prev.filter(id => id !== missaoDaLista.id));
+                      }}
                       className="w-full text-left rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
                       style={{
-                        borderColor: escolhida ? VERDE : '#E2E8F0',
-                        boxShadow: escolhida ? `0 0 0 2px ${VERDE}33` : undefined
+                        borderColor: escolhida || eNova ? VERDE : '#E2E8F0',
+                        boxShadow:
+                          escolhida || eNova ? `0 0 0 2px ${VERDE}33` : undefined
                       }}
                     >
                       <div className="flex items-start gap-2.5">
@@ -1013,6 +1185,15 @@ export default function CheckInChat({
                           <p className="text-[13px] font-black leading-tight" style={{ color: AZUL }}>
                             {missaoDaLista.title}
                           </p>
+                          {eNova && (
+                            <span
+                              className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider text-white"
+                              style={{ backgroundColor: VERDE }}
+                            >
+                              <BellRing className="w-2.5 h-2.5" />
+                              Chegou agora
+                            </span>
+                          )}
                           {missaoDaLista.description && (
                             <p className="text-[11.5px] text-slate-500 leading-snug mt-0.5 whitespace-pre-line">
                               {missaoDaLista.description}
