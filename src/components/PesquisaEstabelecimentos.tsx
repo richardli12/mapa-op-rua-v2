@@ -28,6 +28,15 @@ interface PesquisaEstabelecimentosProps {
   onEscolher: (lugar: Estabelecimento) => void;
   /** Id do que está em foco, para a lista acompanhar o mapa. */
   emFoco?: string | null;
+  /**
+   * Passar o olho na lista acende o pino no mapa.
+   *
+   * Ler "Farmácia Central" não diz onde ela fica. Com o cursor em cima da
+   * linha, o pino correspondente cresce lá fora — dá para varrer a lista
+   * inteira e entender a distribuição sem clicar em nada nem perder o
+   * enquadramento.
+   */
+  onDestacar?: (id: string | null) => void;
 }
 
 /**
@@ -49,7 +58,8 @@ export default function PesquisaEstabelecimentos({
   centroDoMapa,
   onResultados,
   onEscolher,
-  emFoco
+  emFoco,
+  onDestacar
 }: PesquisaEstabelecimentosProps) {
   const [termo, setTermo] = useState('');
   const [usarArea, setUsarArea] = useState(true);
@@ -112,6 +122,7 @@ export default function PesquisaEstabelecimentos({
     setPesquisou(false);
     termoBuscadoRef.current = '';
     onResultados([]);
+    onDestacar?.(null);
   };
 
   return (
@@ -243,13 +254,17 @@ export default function PesquisaEstabelecimentos({
                 key={lugar.id}
                 type="button"
                 onClick={() => onEscolher(lugar)}
+                onMouseEnter={() => onDestacar?.(lugar.id)}
+                onMouseLeave={() => onDestacar?.(null)}
+                onFocus={() => onDestacar?.(lugar.id)}
+                onBlur={() => onDestacar?.(null)}
                 className={`w-full text-left p-2 rounded-xl border cursor-pointer transition-all flex gap-2.5 ${
                   ativo
                     ? 'bg-[#EFF4FB] border-[#015FC9]/40'
                     : 'bg-white border-slate-100 hover:border-slate-200 hover:bg-slate-50/60'
                 }`}
               >
-                <span className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                <span className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
                   {lugar.imagem ? (
                     <img
                       src={lugar.imagem}
