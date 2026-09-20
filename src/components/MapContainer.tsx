@@ -290,6 +290,8 @@ interface MapContainerProps {
   estabelecimentoEmFoco?: string | null;
   /** Item sob o cursor na lista: o pino cresce, mas o mapa não se mexe. */
   estabelecimentoDestacado?: string | null;
+  /** Círculo que a inteligência territorial mediu, desenhado no mapa. */
+  circuloAnalisado?: { lat: number; lng: number; raio: number } | null;
   /** Clique num marcador de estabelecimento. */
   onEstabelecimentoSelecionado?: (id: string) => void;
   /** Entrega ao painel o centro e o zoom de agora, para a busca por área. */
@@ -415,6 +417,7 @@ export default function MapContainer({
   estabelecimentos,
   estabelecimentoEmFoco,
   estabelecimentoDestacado,
+  circuloAnalisado,
   onEstabelecimentoSelecionado,
   aoRegistrarVista,
   onCoordsPicked,
@@ -494,6 +497,7 @@ export default function MapContainer({
   const checkInsGroupRef = useRef<L.LayerGroup | null>(null);
   const escolasGroupRef = useRef<L.LayerGroup | null>(null);
   const lojasGroupRef = useRef<L.LayerGroup | null>(null);
+  const analiseGroupRef = useRef<L.LayerGroup | null>(null);
   /** Marcadores por id, para destacar o que a lista escolheu. */
   const lojasPorIdRef = useRef<{ [id: string]: any }>({});
   // Guarda se a camada ja estava ligada: o enquadramento acontece na virada,
@@ -1137,6 +1141,7 @@ export default function MapContainer({
     const checkInsGroup = L.layerGroup().addTo(map);
     const escolasGroup = L.layerGroup().addTo(map);
     const lojasGroup = L.layerGroup().addTo(map);
+    const analiseGroup = L.layerGroup().addTo(map);
     const delimitationGroup = L.layerGroup().addTo(map);
 
     circlesGroupRef.current = circlesGroup;
@@ -1145,6 +1150,7 @@ export default function MapContainer({
     checkInsGroupRef.current = checkInsGroup;
     escolasGroupRef.current = escolasGroup;
     lojasGroupRef.current = lojasGroup;
+    analiseGroupRef.current = analiseGroup;
     delimitationGroupRef.current = delimitationGroup;
     mapRef.current = map;
 
@@ -1831,6 +1837,59 @@ export default function MapContainer({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aoRegistrarVista]);
+
+  /**
+   * Círculo da análise territorial.
+   *
+   * Ver o número sem ver a área medida é confiar às cegas: o mesmo "4.217
+   * moradores" muda completamente se o círculo pegou o mar ou o centro. O
+   * traço fica pontilhado e sem preenchimento forte para não esconder os
+   * pinos que estão embaixo.
+   */
+  useEffect(() => {
+    const grupo = analiseGroupRef.current;
+    const map = mapRef.current;
+    if (!grupo || !map) return;
+
+    grupo.clearLayers();
+    if (!circuloAnalisado) return;
+
+    const centro = L.latLng(circuloAnalisado.lat, circuloAnalisado.lng);
+
+    L.circle(centro, {
+      radius: circuloAnalisado.raio,
+      color: '#059669',
+      weight: 2,
+      opacity: 0.9,
+      dashArray: '6, 6',
+      fillColor: '#10B981',
+      fillOpacity: 0.08,
+      interactive: false
+    }).addTo(grupo);
+
+    L.marker(centro, {
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({
+        className: '',
+        html:
+          '<span style="display:block;width:12px;height:12px;border-radius:50%;' +
+          'background:#059669;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></span>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      })
+    })
+      .addTo(grupo)
+      .bindTooltip(
+        `Área analisada · raio de ${
+          circuloAnalisado.raio >= 1000
+            ? `${circuloAnalisado.raio / 1000} km`
+            : `${circuloAnalisado.raio} m`
+        }`,
+        { permanent: true, direction: 'top', offset: [0, -10], className: 'medida-raio' }
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circuloAnalisado]);
 
   // Camada de escolas do municipio: so desenha quando ligada no dock.
   useEffect(() => {
