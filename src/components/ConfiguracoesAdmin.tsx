@@ -17,12 +17,10 @@ import { PriorityLevel } from '../types';
 import {
   CHAVE_TURNOS,
   JanelaDeTurno,
-  NOME_DO_TURNO,
   TURNOS_PADRAO,
   conferirTurnos,
   gravarTurnos,
-  lerTurnos,
-  turnoDeAgora
+  lerTurnos
 } from '../turnos';
 import SecaoAcesso from './configuracoes/SecaoAcesso';
 import SecaoMidias from './configuracoes/SecaoMidias';
@@ -104,9 +102,8 @@ const semAcento = (texto: string) =>
  * 2. NADA SE PERDE SEM AVISO. Sair da página, fechar a aba ou recarregar com
  *    alteração pendente dispara aviso; Ctrl+S salva tudo de uma vez.
  *
- * 3. O ESTADO DO SISTEMA FICA À VISTA. A faixa de cima responde, sem clique,
- *    o que costuma ser descoberto tarde e da pior maneira: o banco está
- *    ligado? o dia está todo coberto por turnos? existem níveis cadastrados?
+ * 3. O AMBIENTE SE DECLARA. Banco desligado é dito na cara, e não descoberto
+ *    depois de salvar no vazio.
  */
 export default function ConfiguracoesAdmin({
   padraoRedirecionamento,
@@ -347,52 +344,6 @@ export default function ConfiguracoesAdmin({
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  /* --------------------------------------------------- painel de saúde --- */
-  const agora = turnoDeAgora(turnos);
-  const cobertura = Math.round(conferenciaDeTurnos.cobertura * 100);
-  const saude = [
-    {
-      id: 'acesso',
-      rotulo: 'Banco de dados',
-      valor: isDatabaseConfigured ? 'Conectado' : 'Offline',
-      detalhe: isDatabaseConfigured
-        ? 'ajustes são guardados'
-        : 'nada será guardado aqui',
-      tom: isDatabaseConfigured ? ('bom' as const) : ('ruim' as const),
-      Icone: DatabaseZap
-    },
-    {
-      id: 'turnos',
-      rotulo: 'Dia coberto',
-      valor: `${cobertura}%`,
-      detalhe: agora ? `agora é ${NOME_DO_TURNO[agora].toLowerCase()}` : 'fora de turno agora',
-      tom: cobertura >= 75 ? ('bom' as const) : ('atencao' as const),
-      Icone: AlarmClock
-    },
-    {
-      id: 'prioridades',
-      rotulo: 'Prioridades',
-      valor: String(niveis.length),
-      detalhe: niveis.length === 0 ? 'nenhuma cadastrada' : 'níveis na régua',
-      tom: niveis.length === 0 ? ('ruim' as const) : ('bom' as const),
-      Icone: Flag
-    },
-    {
-      id: 'midias',
-      rotulo: 'Galeria',
-      valor: galeria ? 'Liberada' : 'Bloqueada',
-      detalhe: galeria ? 'aceita imagem antiga' : 'só foto feita na hora',
-      tom: galeria ? ('atencao' as const) : ('bom' as const),
-      Icone: Camera
-    }
-  ];
-
-  const corDoTom = {
-    bom: 'text-emerald-600',
-    atencao: 'text-amber-600',
-    ruim: 'text-rose-600'
-  };
-
   /* -------------------------------------------- ações dos níveis (CRUD) --- */
   const recarregarNiveis = async () => {
     const res = await DatabaseService.fetchPriorityLevels();
@@ -470,31 +421,6 @@ export default function ConfiguracoesAdmin({
 
   return (
     <div className="flex flex-col gap-5 flex-1 min-h-0 pb-24">
-      {/* ------------------------------------------- PAINEL DE SAÚDE --- */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {saude.map(item => (
-          <button
-            key={item.rotulo}
-            type="button"
-            onClick={() => irPara(item.id)}
-            className="text-left bg-white border border-slate-200 rounded-2xl px-4 py-3 hover:border-slate-300 hover:shadow-sm transition-all cursor-pointer group"
-          >
-            <span className="flex items-center gap-1.5 text-[9.5px] font-black uppercase tracking-widest text-slate-400">
-              <item.Icone className="w-3 h-3" />
-              {item.rotulo}
-            </span>
-            <span
-              className={`block text-[19px] font-black leading-none mt-1.5 ${corDoTom[item.tom]}`}
-            >
-              {item.valor}
-            </span>
-            <span className="block text-[10px] font-bold text-slate-400 leading-none mt-1.5 truncate">
-              {item.detalhe}
-            </span>
-          </button>
-        ))}
-      </div>
-
       {!isDatabaseConfigured && (
         <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
           <DatabaseZap className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />

@@ -42,9 +42,15 @@ import {
   EtiquetaDeTurno,
   TurnoEPrioridadeDaMissao,
 } from "./components/TurnoEPrioridade";
+import DestinoDaMissao from "./components/missao/DestinoDaMissao";
+import PreviaDaMissao from "./components/missao/PreviaDaMissao";
+import TrilhaDaMissao, {
+  PassoDoFormulario,
+} from "./components/missao/TrilhaDaMissao";
 import {
   CHAVE_TURNOS,
   JanelaDeTurno,
+  NOME_DO_TURNO,
   TURNOS_PADRAO,
   TurnoId,
   lerTurnos,
@@ -4600,6 +4606,123 @@ export default function App() {
   /** O nível de prioridade que a missão guarda, quando ele ainda existe. */
   const nivelDaMissao = (id?: string) =>
     id ? niveisDePrioridade.find((n) => n.id === id) : undefined;
+
+  /* ------------------------------------------- o formulário de missão ---
+   * O que a trilha e a prévia precisam saber, num lugar só: área e ponto são
+   * a mesma missão vista de dois jeitos, e espalhar esse "qual dos dois?"
+   * pelo JSX é como a duplicação começa.
+   */
+  const missaoEhArea = creationModalType === "area";
+  const tituloDaMissao = missaoEhArea ? areaTitle : pinTitle;
+  const descricaoDaMissao = missaoEhArea ? areaDescription : pinDescription;
+  const corDaMissao = missaoEhArea ? areaColor : pinColor;
+  const tipoDaMissaoEmEdicao: "area" | "pin" | "sem" = missaoEhArea
+    ? "area"
+    : creationLocationMode === "sem"
+      ? "sem"
+      : "pin";
+
+  const clienteDaMissao =
+    (missaoEhArea ? areaCandidateId : pinCandidateId) ||
+    (selectedCandidateFilter !== "all" ? selectedCandidateFilter : "");
+  const equipeDoClienteDaMissao = supporters.filter(
+    (s: any) =>
+      s.candidate_id === clienteDaMissao || s.candidateId === clienteDaMissao,
+  );
+  const nomesDesignados = equipeDoClienteDaMissao
+    .filter((s: any) => selectedDeltas.includes(s.id))
+    .map(
+      (s: any) =>
+        s.full_name || s.nome_completo || s.nome || s.name || "Integrante",
+    );
+
+  const [passoAtivo, setPassoAtivo] = useState("local");
+
+  /** Onde o formulário está, para a trilha acender sozinha ao rolar. */
+  useEffect(() => {
+    if (!creationModalType) return;
+    const caixa = document.getElementById("corpo-do-formulario-de-missao");
+    if (!caixa) return;
+    const ids = ["local", "missao", "quando", "destino"];
+    const calcular = () => {
+      const topo = caixa.getBoundingClientRect().top;
+      let ativo = ids[0];
+      ids.forEach((id) => {
+        const el = document.getElementById(`passo-${id}`);
+        if (el && el.getBoundingClientRect().top - topo <= 48) ativo = id;
+      });
+      // A última seção nunca encosta no topo: no fim da rolagem, é ela.
+      if (caixa.scrollTop + caixa.clientHeight >= caixa.scrollHeight - 4) {
+        ativo = ids[ids.length - 1];
+      }
+      setPassoAtivo(ativo);
+    };
+    calcular();
+    caixa.addEventListener("scroll", calcular);
+    return () => caixa.removeEventListener("scroll", calcular);
+  }, [creationModalType, creationLocationReady, creationLocationMode]);
+
+  const resumoDoLocal = !creationLocationReady
+    ? ""
+    : creationLocationMode === "sem"
+      ? "sem lugar no mapa"
+      : pickedAddressLabel ||
+        creationRuaName ||
+        creationBairroName ||
+        (missaoEhArea ? areaBairro : "") ||
+        "local definido";
+
+  const passosDaMissao = [
+    {
+      id: "local",
+      rotulo: "Onde",
+      resumo: resumoDoLocal,
+      estado: (creationLocationReady ? "feito" : "falta") as
+        | "feito"
+        | "falta"
+        | "opcional",
+    },
+    {
+      id: "missao",
+      rotulo: "A missão",
+      resumo: tituloDaMissao.trim() || "",
+      estado: (tituloDaMissao.trim()
+        ? "feito"
+        : missaoEhArea
+          ? "opcional"
+          : "falta") as "feito" | "falta" | "opcional",
+    },
+    {
+      id: "quando",
+      rotulo: "Quando",
+      resumo: [
+        missaoTurno ? NOME_DO_TURNO[missaoTurno] : "",
+        nivelDaMissao(missaoPrioridade)?.label || "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      estado: (missaoTurno || missaoPrioridade ? "feito" : "opcional") as
+        | "feito"
+        | "falta"
+        | "opcional",
+    },
+    {
+      id: "destino",
+      rotulo: "Para quem",
+      resumo:
+        selectedDeltas.length > 0
+          ? `${selectedDeltas.length} ${
+              selectedDeltas.length === 1 ? "pessoa" : "pessoas"
+            }${materialMissao.length ? ` · ${materialMissao.length} arq.` : ""}`
+          : equipeDoClienteDaMissao.length > 0
+            ? "todo o time"
+            : "",
+      estado: (selectedDeltas.length > 0 ? "feito" : "opcional") as
+        | "feito"
+        | "falta"
+        | "opcional",
+    },
+  ];
 
   /** Quantos filtros do painel estão ligados, para o aviso no botão do mapa. */
   const filtrosDeCheckInLigados =
@@ -14300,10 +14423,10 @@ export default function App() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.92, y: 15 }}
               transition={{ type: "spring", damping: 25, stiffness: 250 }}
-              className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-md w-full max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-5 relative text-slate-800"
+              className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden relative text-slate-800"
             >
               {/* Header */}
-              <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <div className="flex justify-between items-center gap-4 px-6 py-4 border-b border-slate-100 shrink-0">
                 <div>
                   <h3 className="font-extrabold text-indigo-950 text-base leading-tight">
                     {creationModalType === "area"
@@ -14343,15 +14466,48 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Form container */}
+              {/*
+                A estrutura: trilha à esquerda, formulário no meio, prévia à
+                direita.
+
+                Antes era uma coluna de 450 pixels com tudo empilhado no mesmo
+                peso — o seletor de cor com o mesmo destaque da instrução que a
+                equipe vai ler na rua. Agora a trilha diz quantas perguntas
+                existem e quais faltam, e a prévia mostra, enquanto se escreve,
+                o cartão que vai chegar no celular de quem está na rua.
+              */}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (creationModalType === "area") saveArea(e);
                   else savePin(e);
                 }}
-                className="space-y-4"
+                className="flex flex-col flex-1 min-h-0"
               >
+                <div className="grid lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_320px] flex-1 min-h-0">
+                  {/* TRILHA */}
+                  <aside className="hidden lg:block border-r border-slate-100 p-4 overflow-y-auto bg-slate-50/40">
+                    <p className="text-[9.5px] uppercase font-black tracking-widest text-slate-400 mb-2.5 px-1">
+                      Passos
+                    </p>
+                    <TrilhaDaMissao
+                      passos={passosDaMissao}
+                      ativo={passoAtivo}
+                      onIr={(id) => {
+                        setPassoAtivo(id);
+                        document
+                          .getElementById(`passo-${id}`)
+                          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                    />
+                  </aside>
+
+                  {/* FORMULÁRIO */}
+                  <div
+                    id="corpo-do-formulario-de-missao"
+                    className="overflow-y-auto p-6 space-y-5 min-w-0"
+                  >
+                <div id="passo-local" className="scroll-mt-4">
                 {/* 0. COMO INFORMAR O LOCAL */}
                 {creationLocationMode === "ask" && (
                   <div className="space-y-3 animate-in fade-in slide-in-from-top-1.5 duration-200">
@@ -14946,20 +15102,20 @@ export default function App() {
 
                 )}
 
+                </div>
                 {/* 2. DADOS ADICIONAIS SÓ APÓS O LOCAL ESTAR DEFINIDO */}
                 {creationLocationReady ? (
                   <div className="space-y-4 animate-in fade-in slide-in-from-top-1.5 duration-200">
-                    <div className="border-t border-slate-100 pt-3">
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="w-5 h-5 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center font-extrabold text-[10px] text-emerald-600">
-                          2
-                        </div>
-                        <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none">
-                          Dados de Identificação
-                        </h4>
-                      </div>
-                    </div>
-
+                    <PassoDoFormulario
+                      id="missao"
+                      numero={2}
+                      titulo="A missão"
+                      descricao={
+                        creationModalType === "area"
+                          ? "equipe, raio e bairro"
+                          : "título, tipo e instrução"
+                      }
+                    >
                     {creationModalType === "area" ? (
                       <>
                         {/* Area specific inputs */}
@@ -15059,25 +15215,6 @@ export default function App() {
                           />
                         </div>
 
-                        {/*
-                          Quando, dentro do dia, e o quanto importa.
-
-                          O prazo diz o dia; o turno diz a parte do dia. Juntos
-                          eles decidem a ordem em que a equipe vê as missões na
-                          rua — por isso ficam colados, e não num canto do
-                          formulário.
-                        */}
-                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                          <TurnoEPrioridadeDaMissao
-                            janelas={turnosDaCampanha}
-                            turno={missaoTurno}
-                            onTurno={setMissaoTurno}
-                            prioridade={missaoPrioridade}
-                            onPrioridade={setMissaoPrioridade}
-                            niveis={niveisDePrioridade}
-                          />
-                        </div>
-
                         <div>
                           <div className="flex justify-between items-center mb-1 select-none">
                             <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400">
@@ -15132,181 +15269,6 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Associar Cliente & Seleção de Membros da Equipe */}
-                        <div className="space-y-3 pt-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                          {selectedCandidateFilter === "all" && (
-                            <div>
-                              <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                                Cliente Associado à Missão
-                              </label>
-                              <select
-                                value={areaCandidateId}
-                                onChange={(e) => {
-                                  setAreaCandidateId(e.target.value);
-                                  setSelectedDeltas([]);
-                                }}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs cursor-pointer"
-                              >
-                                <option value="">Geral / Sem Cliente</option>
-                                {candidates.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.name} ({c.office || "Cliente"})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-
-                          <div className="border-t border-slate-100 pt-3">
-                            <EditorDeMaterial
-                              itens={materialMissao}
-                              onMudar={setMaterialMissao}
-                              notificar={triggerNotification}
-                              ligado={isDatabaseConfigured}
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
-                              Direcionar Missão à Equipe
-                            </label>
-                            <p className="text-[10px] text-slate-500 font-medium mb-1 leading-tight">
-                              Selecione os membros que devem receber esta
-                              missão. Se nenhum for marcado, ela ficará visível
-                              para todo o time.
-                            </p>
-                            {(() => {
-                              // Com o mapa filtrado por um cliente o seletor
-                              // acima nem aparece: sem esta volta, a edição de
-                              // uma missão desse cliente ficava sem equipe
-                              // nenhuma para marcar.
-                              const activeCandId =
-                                areaCandidateId ||
-                                (selectedCandidateFilter !== "all"
-                                  ? selectedCandidateFilter
-                                  : "");
-                              const candidatesDeltas = supporters.filter(
-                                (s) =>
-                                  s.candidate_id === activeCandId ||
-                                  s.candidateId === activeCandId,
-                              );
-
-                              if (!activeCandId) {
-                                return (
-                                  <div className="text-[10px] text-slate-400 italic bg-white p-2 rounded-xl border border-slate-150 text-center">
-                                    Selecione um cliente acima para carregar a
-                                    sua Equipe.
-                                  </div>
-                                );
-                              }
-
-                              if (candidatesDeltas.length === 0) {
-                                return (
-                                  <div className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-xl font-semibold text-center">
-                                    Nenhum integrante cadastrado na Equipe.
-                                  </div>
-                                );
-                              }
-
-                              return (
-                                <div className="grid grid-cols-1 gap-1.5 border border-slate-200 rounded-xl p-2 max-h-[140px] overflow-y-auto bg-white shadow-xs">
-                                  {candidatesDeltas.map((delta) => {
-                                    const isSelected = selectedDeltas.includes(
-                                      delta.id,
-                                    );
-                                    return (
-                                      <button
-                                        type="button"
-                                        key={delta.id}
-                                        onClick={() => {
-                                          if (isSelected) {
-                                            setSelectedDeltas((prev) =>
-                                              prev.filter(
-                                                (id) => id !== delta.id,
-                                              ),
-                                            );
-                                          } else {
-                                            setSelectedDeltas((prev) => [
-                                              ...prev,
-                                              delta.id,
-                                            ]);
-                                          }
-                                        }}
-                                        className={`flex items-center gap-2 p-1.5 rounded-lg border text-left transition-all cursor-pointer ${
-                                          isSelected
-                                            ? "bg-indigo-50 border-indigo-200 text-indigo-700 font-bold font-semibold"
-                                            : "bg-slate-50/50 hover:bg-slate-50 border-slate-100 text-slate-600"
-                                        }`}
-                                      >
-                                        <div
-                                          className={`w-3.5 h-3.5 rounded-xs border flex items-center justify-center shrink-0 ${
-                                            isSelected
-                                              ? "bg-indigo-600 border-indigo-600"
-                                              : "bg-white border-slate-300"
-                                          }`}
-                                        >
-                                          {isSelected && (
-                                            <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
-                                          )}
-                                        </div>
-                                        {(() => {
-                                          const deltaName =
-                                            delta.full_name ||
-                                            delta.nome_completo ||
-                                            delta.nome ||
-                                            "Integrante";
-                                          const deltaPhoto =
-                                            delta.image ||
-                                            delta.foto_url ||
-                                            delta.photo ||
-                                            "";
-                                          return (
-                                            <>
-                                              <div
-                                                className={`w-7 h-7 rounded-full overflow-hidden shrink-0 border flex items-center justify-center ${
-                                                  isSelected
-                                                    ? "border-indigo-300 bg-indigo-100"
-                                                    : "border-slate-200 bg-slate-100"
-                                                }`}
-                                              >
-                                                {deltaPhoto ? (
-                                                  <img
-                                                    src={deltaPhoto}
-                                                    alt={deltaName}
-                                                    className="w-full h-full object-cover"
-                                                    loading="lazy"
-                                                    onError={(e) => {
-                                                      // Foto quebrada volta para as iniciais.
-                                                      (
-                                                        e.currentTarget as HTMLImageElement
-                                                      ).style.display = "none";
-                                                    }}
-                                                  />
-                                                ) : (
-                                                  <span className="text-[9px] font-extrabold text-slate-500 uppercase">
-                                                    {getInitials(deltaName)}
-                                                  </span>
-                                                )}
-                                              </div>
-                                              <div className="truncate text-ellipsis">
-                                                <p className="text-[11px] leading-tight font-bold truncate">
-                                                  {deltaName}
-                                                </p>
-                                                <p className="text-[9px] text-slate-400 font-mono leading-none">
-                                                  {delta.whatsapp}
-                                                </p>
-                                              </div>
-                                            </>
-                                          );
-                                        })()}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        </div>
                       </>
                     ) : (
                       <>
@@ -15385,25 +15347,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/*
-                          Quando, dentro do dia, e o quanto importa.
-
-                          O prazo diz o dia; o turno diz a parte do dia. Juntos
-                          eles decidem a ordem em que a equipe vê as missões na
-                          rua — por isso ficam colados, e não num canto do
-                          formulário.
-                        */}
-                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                          <TurnoEPrioridadeDaMissao
-                            janelas={turnosDaCampanha}
-                            turno={missaoTurno}
-                            onTurno={setMissaoTurno}
-                            prioridade={missaoPrioridade}
-                            onPrioridade={setMissaoPrioridade}
-                            niveis={niveisDePrioridade}
-                          />
-                        </div>
-
                         <div>
                           <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
                             Anotações / Descrição do Marcador
@@ -15421,241 +15364,76 @@ export default function App() {
                           />
                         </div>
 
-                        {/* Associar Cliente & Seleção de Membros da Equipe para PIN */}
-                        <div className="space-y-3 pt-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                          {selectedCandidateFilter === "all" && (
-                            <div>
-                              <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                                Cliente Associado à Missão
-                              </label>
-                              <select
-                                value={pinCandidateId}
-                                onChange={(e) => {
-                                  setPinCandidateId(e.target.value);
-                                  setSelectedDeltas([]);
-                                }}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs cursor-pointer"
-                              >
-                                <option value="">Geral / Sem Cliente</option>
-                                {candidates.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.name} ({c.office || "Cliente"})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-
-                          <div className="border-t border-slate-100 pt-3">
-                            <EditorDeMaterial
-                              itens={materialMissao}
-                              onMudar={setMaterialMissao}
-                              notificar={triggerNotification}
-                              ligado={isDatabaseConfigured}
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
-                              Direcionar Missão à Equipe
-                            </label>
-                            <p className="text-[10px] text-slate-500 font-medium mb-1 leading-tight">
-                              Selecione os membros que devem receber esta
-                              missão. Se nenhum for marcado, ela ficará visível
-                              para todo o time.
-                            </p>
-                            {(() => {
-                              // Com o mapa filtrado por um cliente o seletor
-                              // acima nem aparece: sem esta volta, a edição de
-                              // uma missão desse cliente ficava sem equipe
-                              // nenhuma para marcar.
-                              const activeCandId =
-                                pinCandidateId ||
-                                (selectedCandidateFilter !== "all"
-                                  ? selectedCandidateFilter
-                                  : "");
-                              const candidatesDeltas = supporters.filter(
-                                (s) =>
-                                  s.candidate_id === activeCandId ||
-                                  s.candidateId === activeCandId,
-                              );
-
-                              if (!activeCandId) {
-                                return (
-                                  <div className="text-[10px] text-slate-400 italic bg-white p-2 rounded-xl border border-slate-150 text-center">
-                                    Selecione um cliente acima para carregar a
-                                    sua Equipe.
-                                  </div>
-                                );
-                              }
-
-                              if (candidatesDeltas.length === 0) {
-                                return (
-                                  <div className="text-[10px] text-amber-600 bg-amber-50/50 border border-amber-100 p-2 rounded-xl font-semibold text-center">
-                                    Nenhum integrante cadastrado na Equipe.
-                                  </div>
-                                );
-                              }
-
-                              return (
-                                <div className="grid grid-cols-1 gap-1.5 border border-slate-200 rounded-xl p-2 max-h-[140px] overflow-y-auto bg-white shadow-xs">
-                                  {candidatesDeltas.map((delta) => {
-                                    const isSelected = selectedDeltas.includes(
-                                      delta.id,
-                                    );
-                                    return (
-                                      <button
-                                        type="button"
-                                        key={delta.id}
-                                        onClick={() => {
-                                          if (isSelected) {
-                                            setSelectedDeltas((prev) =>
-                                              prev.filter(
-                                                (id) => id !== delta.id,
-                                              ),
-                                            );
-                                          } else {
-                                            setSelectedDeltas((prev) => [
-                                              ...prev,
-                                              delta.id,
-                                            ]);
-                                          }
-                                        }}
-                                        className={`flex items-center gap-2 p-1.5 rounded-lg border text-left transition-all cursor-pointer ${
-                                          isSelected
-                                            ? "bg-indigo-50 border-indigo-200 text-indigo-700 font-bold font-semibold"
-                                            : "bg-slate-50/50 hover:bg-slate-50 border-slate-100 text-slate-600"
-                                        }`}
-                                      >
-                                        <div
-                                          className={`w-3.5 h-3.5 rounded-xs border flex items-center justify-center shrink-0 ${
-                                            isSelected
-                                              ? "bg-indigo-600 border-indigo-600"
-                                              : "bg-white border-slate-300"
-                                          }`}
-                                        >
-                                          {isSelected && (
-                                            <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
-                                          )}
-                                        </div>
-                                        {(() => {
-                                          const deltaName =
-                                            delta.full_name ||
-                                            delta.nome_completo ||
-                                            delta.nome ||
-                                            "Integrante";
-                                          const deltaPhoto =
-                                            delta.image ||
-                                            delta.foto_url ||
-                                            delta.photo ||
-                                            "";
-                                          return (
-                                            <>
-                                              <div
-                                                className={`w-7 h-7 rounded-full overflow-hidden shrink-0 border flex items-center justify-center ${
-                                                  isSelected
-                                                    ? "border-indigo-300 bg-indigo-100"
-                                                    : "border-slate-200 bg-slate-100"
-                                                }`}
-                                              >
-                                                {deltaPhoto ? (
-                                                  <img
-                                                    src={deltaPhoto}
-                                                    alt={deltaName}
-                                                    className="w-full h-full object-cover"
-                                                    loading="lazy"
-                                                    onError={(e) => {
-                                                      // Foto quebrada volta para as iniciais.
-                                                      (
-                                                        e.currentTarget as HTMLImageElement
-                                                      ).style.display = "none";
-                                                    }}
-                                                  />
-                                                ) : (
-                                                  <span className="text-[9px] font-extrabold text-slate-500 uppercase">
-                                                    {getInitials(deltaName)}
-                                                  </span>
-                                                )}
-                                              </div>
-                                              <div className="truncate text-ellipsis">
-                                                <p className="text-[11px] leading-tight font-bold truncate">
-                                                  {deltaName}
-                                                </p>
-                                                <p className="text-[9px] text-slate-400 font-mono leading-none">
-                                                  {delta.whatsapp}
-                                                </p>
-                                              </div>
-                                            </>
-                                          );
-                                        })()}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        </div>
                       </>
                     )}
 
-                    {/* Action Buttons inside Modal */}
-                    <div className="flex flex-wrap gap-3 pt-2 justify-end items-center">
-                      {/* Excluir mora junto do resto: quem abriu a missão para
-                          mexer nela também é quem decide tirá-la do mapa. */}
-                      {editandoNoModal && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (creationModalType === "area") {
-                              if (editingAreaId) deleteArea(editingAreaId);
-                            } else if (editingPinId) {
-                              deletePin(editingPinId);
-                            }
-                          }}
-                          className="mr-auto px-3 py-2 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 font-bold text-xs rounded-xl cursor-pointer transition-colors flex items-center gap-1.5"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Excluir
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          descartarMaterialPendente();
-                          if (creationModalType === "area") resetAreaForm();
-                          else resetPinForm();
+                    </PassoDoFormulario>
+
+                    {/*
+                      Quando, dentro do dia, e o quanto importa.
+
+                      O prazo diz o dia; o turno diz a parte do dia. Fora dos
+                      dois ramos porque a pergunta é a mesma na área e no
+                      ponto — e porque ela decide a ordem em que a equipe vê
+                      as missões na rua, o que merece um passo próprio.
+                    */}
+                    <PassoDoFormulario
+                      id="quando"
+                      numero={3}
+                      titulo="Quando e quanto importa"
+                      descricao="turno e prioridade"
+                    >
+                      <TurnoEPrioridadeDaMissao
+                        janelas={turnosDaCampanha}
+                        turno={missaoTurno}
+                        onTurno={setMissaoTurno}
+                        prioridade={missaoPrioridade}
+                        onPrioridade={setMissaoPrioridade}
+                        niveis={niveisDePrioridade}
+                      />
+                    </PassoDoFormulario>
+
+                    {/*
+                      Para quem a missão vai.
+
+                      Fora dos dois ramos de propósito: cliente, material e
+                      equipe são a mesma pergunta na área e no ponto, e viviam
+                      duplicados linha por linha nos dois.
+                    */}
+                    <PassoDoFormulario
+                      id="destino"
+                      numero={4}
+                      titulo="Para quem vai"
+                      descricao="cliente, material e equipe"
+                    >
+                      <DestinoDaMissao
+                        clienteId={
+                          creationModalType === "area"
+                            ? areaCandidateId
+                            : pinCandidateId
+                        }
+                        onClienteId={(id) => {
+                          if (creationModalType === "area") setAreaCandidateId(id);
+                          else setPinCandidateId(id);
+                          setSelectedDeltas([]);
                         }}
-                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl cursor-pointer transition-colors shadow-3xs"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={isGeocoding}
-                        className={`px-5 py-2.5 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-md ${
-                          isGeocoding
-                            ? "bg-slate-400 cursor-not-allowed opacity-80"
-                            : "bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg active:scale-95 cursor-pointer"
-                        }`}
-                      >
-                        {isGeocoding ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-white shrink-0" />
-                            <span>Buscando Coordenadas...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
-                            <span>
-                              {editandoNoModal
-                                ? "Salvar alterações"
-                                : "Confirmar e Criar no Mapa"}
-                            </span>
-                          </>
-                        )}
-                      </button>
-                    </div>
+                        clientes={candidates}
+                        mostrarSeletor={selectedCandidateFilter === "all"}
+                        clienteDoMapa={
+                          selectedCandidateFilter !== "all"
+                            ? selectedCandidateFilter
+                            : ""
+                        }
+                        material={materialMissao}
+                        onMaterial={setMaterialMissao}
+                        notificar={triggerNotification}
+                        bancoLigado={isDatabaseConfigured}
+                        equipe={supporters}
+                        selecionados={selectedDeltas}
+                        onSelecionados={setSelectedDeltas}
+                      />
+                    </PassoDoFormulario>
+
                   </div>
                 ) : (
                   <div className="py-6 text-center select-none">
@@ -15668,6 +15446,109 @@ export default function App() {
                     </p>
                   </div>
                 )}
+                  </div>
+
+                  {/* PRÉVIA */}
+                  <aside className="hidden xl:block border-l border-slate-100 bg-slate-50/40 p-4 overflow-y-auto">
+                    <PreviaDaMissao
+                      tipo={tipoDaMissaoEmEdicao}
+                      titulo={tituloDaMissao}
+                      descricao={descricaoDaMissao}
+                      cor={corDaMissao}
+                      tipoLabel={
+                        creationModalType === "pin" && pinIconType
+                          ? operationTypeLabel(pinIconType)
+                          : undefined
+                      }
+                      bairro={
+                        creationModalType === "area"
+                          ? areaBairro
+                          : creationBairroName || ""
+                      }
+                      raio={
+                        creationModalType === "area"
+                          ? Number(areaRadius) || undefined
+                          : undefined
+                      }
+                      prazo={creationModalType === "pin" ? pinDate : undefined}
+                      turno={missaoTurno}
+                      janelas={turnosDaCampanha}
+                      nivel={nivelDaMissao(missaoPrioridade)}
+                      totalDeMaterial={materialMissao.length}
+                      designados={nomesDesignados}
+                      totalDaEquipe={equipeDoClienteDaMissao.length}
+                    />
+                  </aside>
+                </div>
+
+                {/* RODAPÉ: as ações, sempre à vista, fora da rolagem */}
+                <div className="shrink-0 border-t border-slate-100 bg-white px-6 py-4 flex flex-wrap gap-3 justify-end items-center">
+                  {!creationLocationReady && (
+                    <p className="mr-auto text-[11px] font-bold text-slate-400 leading-snug max-w-[340px]">
+                      {creationLocationMode === "map"
+                        ? "Clique no mapa para definir o local e seguir."
+                        : creationLocationMode === "search"
+                          ? "Escolha o bairro e a rua para seguir."
+                          : "Escolha como quer definir o local da ação."}
+                    </p>
+                  )}
+              {/* Excluir mora junto do resto: quem abriu a missão para
+                  mexer nela também é quem decide tirá-la do mapa. */}
+              {editandoNoModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (creationModalType === "area") {
+                      if (editingAreaId) deleteArea(editingAreaId);
+                    } else if (editingPinId) {
+                      deletePin(editingPinId);
+                    }
+                  }}
+                  className="mr-auto px-3 py-2 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 font-bold text-xs rounded-xl cursor-pointer transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Excluir
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  descartarMaterialPendente();
+                  if (creationModalType === "area") resetAreaForm();
+                  else resetPinForm();
+                }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl cursor-pointer transition-colors shadow-3xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isGeocoding}
+                className={`px-5 py-2.5 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-md ${
+                  isGeocoding
+                    ? "bg-slate-400 cursor-not-allowed opacity-80"
+                    : "bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg active:scale-95 cursor-pointer"
+                }`}
+              >
+                {isGeocoding ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white shrink-0" />
+                    <span>Buscando Coordenadas...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
+                    <span>
+                      {editandoNoModal
+                        ? "Salvar alterações"
+                        : creationLocationMode === "sem"
+                          ? "Enviar missão à equipe"
+                          : "Confirmar e criar no mapa"}
+                    </span>
+                  </>
+                )}
+              </button>
+                </div>
               </form>
             </motion.div>
           </motion.div>
