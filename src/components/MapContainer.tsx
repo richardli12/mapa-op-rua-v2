@@ -596,7 +596,15 @@ export default function MapContainer({
   const searchMarkerRef = useRef<L.Marker | null>(null);
   const [searchMarkerCoords, setSearchMarkerCoords] = useState<{ lat: number; lng: number; name: string } | null>(null);
 
-  // Handle search result marker on Map
+  /**
+   * O pino do resultado da pesquisa, em cima do lugar encontrado.
+   *
+   * Voar até a coordenada não é marcar: o mapa parava sobre a rua e quem
+   * procurou tinha que adivinhar qual ponto da tela era o resultado. O pino
+   * fica no lugar exato, com o nome preso nele, até a pessoa procurar outra
+   * coisa ou limpar — é ele que o botão "Marcar Aqui" transforma em pin da
+   * operação.
+   */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -606,14 +614,47 @@ export default function MapContainer({
       searchMarkerRef.current = null;
     }
 
-    // We no longer draw the blue magnifying glass pin/marker on the map,
-    // so only the visual bounding block/street lines are drawn.
+    if (!searchMarkerCoords) return;
+
+    const marcador = L.marker([searchMarkerCoords.lat, searchMarkerCoords.lng], {
+      // Acima dos demais marcadores: o resultado recém-procurado é o que a
+      // pessoa está olhando, e não pode ficar atrás de um pin antigo.
+      zIndexOffset: 1200,
+      keyboard: false,
+      icon: L.divIcon({
+        className: 'custom-div-icon',
+        html: `
+          <div class="pino-busca">
+            <span class="pino-busca__pulso"></span>
+            <span class="pino-busca__corpo">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="#ffffff" stroke-width="2.5"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+            </span>
+          </div>
+        `,
+        iconSize: [34, 44],
+        // A ponta do pino é que marca o lugar, não o meio do desenho.
+        iconAnchor: [17, 44],
+        popupAnchor: [0, -40],
+      }),
+    })
+      .addTo(map)
+      .bindTooltip(searchMarkerCoords.name, {
+        permanent: true,
+        direction: 'top',
+        offset: [0, -42],
+        className: 'rotulo-busca',
+      });
+
+    searchMarkerRef.current = marcador;
 
     return () => {
-      if (searchMarkerRef.current) {
-        searchMarkerRef.current.remove();
-        searchMarkerRef.current = null;
-      }
+      marcador.remove();
+      if (searchMarkerRef.current === marcador) searchMarkerRef.current = null;
     };
   }, [searchMarkerCoords]);
 
@@ -672,10 +713,12 @@ export default function MapContainer({
       animate: true,
       duration: 1.2,
     });
+    // No mapa vale o nome curto: o endereço inteiro vira um rótulo que tapa
+    // a rua que ele está tentando apontar, e já está logo ali, na lista.
     setSearchMarkerCoords({
       lat: lugar.latitude,
       lng: lugar.longitude,
-      name: lugar.endereco ? `${lugar.titulo} — ${lugar.endereco}` : lugar.titulo,
+      name: lugar.titulo,
     });
   };
 
