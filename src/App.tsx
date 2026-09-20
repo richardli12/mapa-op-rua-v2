@@ -965,17 +965,23 @@ export default function App() {
   const [periodoAberto, setPeriodoAberto] = useState(false);
   const [filtroDe, setFiltroDe] = useState("");
   const [filtroAte, setFiltroAte] = useState("");
-  const [periodoEmCheckIns, setPeriodoEmCheckIns] = useState(true);
-  const [periodoEmMissoes, setPeriodoEmMissoes] = useState(true);
   const [filtroPrazos, setFiltroPrazos] = useState<
     EstadoDoPeriodo["prazos"]
   >([]);
   const [filtroNiveis, setFiltroNiveis] = useState<string[]>([]);
   const [filtroTiposAcao, setFiltroTiposAcao] = useState<string[]>([]);
 
-  const [mapFilter, setMapFilter] = useState<"all" | "checkins" | "markers" | "favoritos">(
-    "all",
-  );
+  /**
+   * Que camadas o mapa desenha.
+   *
+   * É um estado só, e não um por camada, porque o menu "Visualização" e as
+   * chaves da barra de período mexem na mesma coisa: o que aparece no mapa.
+   * Dois estados para isso dariam duas respostas diferentes para a mesma
+   * pergunta.
+   */
+  const [mapFilter, setMapFilter] = useState<
+    "all" | "checkins" | "markers" | "favoritos" | "nada"
+  >("all");
 
   // Modo de visualização (admin / checkin)
   /**
@@ -4264,7 +4270,7 @@ export default function App() {
     (prazo: string | undefined, criadaEm: string | undefined) => {
       if (currentUrlView === "checkin") return true;
       if (!passaNoPrazo(prazo, filtroPrazos)) return false;
-      if (!periodoEmMissoes || (!filtroDe && !filtroAte)) return true;
+      if (!filtroDe && !filtroAte) return true;
       const dia = diaDaMissao(prazo, criadaEm);
       // Missão sem data nenhuma não se esconde: some do mapa quem a gente
       // sabe que está fora, não quem a gente não sabe datar.
@@ -4273,7 +4279,7 @@ export default function App() {
       if (filtroAte && dia > filtroAte) return false;
       return true;
     },
-    [currentUrlView, filtroPrazos, periodoEmMissoes, filtroDe, filtroAte],
+    [currentUrlView, filtroPrazos, filtroDe, filtroAte],
   );
 
   const filteredAreas = React.useMemo(() => areas.filter((a) => {
@@ -4433,7 +4439,7 @@ export default function App() {
    */
   const passaNosCortes = React.useCallback(
     (c: any) => {
-      if (periodoEmCheckIns && (filtroDe || filtroAte)) {
+      if (filtroDe || filtroAte) {
         const dia = new Date(c.createdAt);
         if (Number.isNaN(dia.getTime())) return false;
         const iso = dia.toLocaleDateString("sv-SE");
@@ -4454,14 +4460,7 @@ export default function App() {
       }
       return true;
     },
-    [
-      filtroDe,
-      filtroAte,
-      periodoEmCheckIns,
-      filtroNiveis,
-      filtroTiposAcao,
-      operationTypes,
-    ],
+    [filtroDe, filtroAte, filtroNiveis, filtroTiposAcao, operationTypes],
   );
 
   /**
@@ -4543,26 +4542,47 @@ export default function App() {
   }, [pins, areas, clienteEmFoco]);
 
   const contagemDoPeriodo = {
-    checkInsVisiveis: filteredCheckIns.length,
+    // Favoritos é um corte do menu de visualização, não do período: a conta
+    // tem de bater com o que o mapa realmente desenha.
+    checkInsVisiveis:
+      mapFilter === "favoritos"
+        ? filteredCheckIns.filter((c: any) => c.favorite).length
+        : filteredCheckIns.length,
     checkInsTotal: checkInsDoMapa.length,
     missoesVisiveis: filteredPins.length + filteredAreas.length,
     missoesTotal: missoesNoFoco,
   };
 
+  /**
+   * As chaves de camada da barra são a mesma coisa que o menu
+   * "Visualização": ler e escrever direto no `mapFilter` é o que mantém os
+   * dois contando a mesma história.
+   */
+  const verCheckIns = mapFilter !== "markers" && mapFilter !== "nada";
+  const verMissoes =
+    mapFilter !== "checkins" &&
+    mapFilter !== "favoritos" &&
+    mapFilter !== "nada";
+
   const estadoDoPeriodo: EstadoDoPeriodo = {
     de: filtroDe,
     ate: filtroAte,
-    emCheckIns: periodoEmCheckIns,
-    emMissoes: periodoEmMissoes,
+    verCheckIns,
+    verMissoes,
     prazos: filtroPrazos,
   };
 
   const mudarPeriodo = (novo: EstadoDoPeriodo) => {
     setFiltroDe(novo.de);
     setFiltroAte(novo.ate);
-    setPeriodoEmCheckIns(novo.emCheckIns);
-    setPeriodoEmMissoes(novo.emMissoes);
     setFiltroPrazos(novo.prazos);
+    if (novo.verCheckIns && novo.verMissoes) setMapFilter("all");
+    else if (novo.verCheckIns)
+      // Quem estava vendo só os favoritos continua nos favoritos: desligar
+      // as missões não é pedir para rever o resto dos check-ins.
+      setMapFilter(mapFilter === "favoritos" ? "favoritos" : "checkins");
+    else if (novo.verMissoes) setMapFilter("markers");
+    else setMapFilter("nada");
   };
 
   /** Quantos filtros do painel estão ligados, para o aviso no botão do mapa. */
@@ -12162,25 +12182,6 @@ export default function App() {
         </div>
       )}
 
-      {/*
-        O RECORTE DE TEMPO, na barra de cima.
-
-        Fica ao lado da busca e nunca dentro de um menu: é ele que explica
-        um mapa com menos coisa do que ontem. Em tela estreita ele desce uma
-        linha em vez de brigar por espaço com a busca.
-      */}
-      {adminUser && adminTab === "map" && !clickToPickCoords && !definindoRaio && (
-        <div className="absolute top-[4.25rem] left-[15.5rem] xl:top-4 xl:left-[32.5rem] z-[1001]">
-          <FiltroDePeriodo
-            aberto={periodoAberto}
-            onAbrir={setPeriodoAberto}
-            valor={estadoDoPeriodo}
-            onMudar={mudarPeriodo}
-            contagem={contagemDoPeriodo}
-          />
-        </div>
-      )}
-
       {/* RÉGUA: controle pequeno no canto, só o necessário para medir */}
       {reguaLigada && (
         <div className="absolute top-4 right-4 z-[1002] font-sans w-[190px] bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200/70 p-3 animate-in slide-in-from-top duration-200">
@@ -14035,6 +14036,22 @@ export default function App() {
           tempPlacementCoords={pickedCoords}
           itemEmEdicaoId={itemEmEdicaoId}
           equipe={supporters}
+          /*
+            O recorte de tempo desce para a barra do mapa, ao lado da busca.
+            Ele é do painel — mas o lugar dele é essa fila, colado no resto,
+            e não um absoluto solto tentando adivinhar onde a busca termina.
+          */
+          acoesDaBarra={
+            adminUser && adminTab === "map" ? (
+              <FiltroDePeriodo
+                aberto={periodoAberto}
+                onAbrir={setPeriodoAberto}
+                valor={estadoDoPeriodo}
+                onMudar={mudarPeriodo}
+                contagem={contagemDoPeriodo}
+              />
+            ) : null
+          }
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor
           }

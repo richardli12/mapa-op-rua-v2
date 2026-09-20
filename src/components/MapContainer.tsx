@@ -317,6 +317,14 @@ interface MapContainerProps {
    */
   itemEmEdicaoId?: string | null;
   /**
+   * O que a tela de cima quer pendurar na barra, ao lado da busca.
+   *
+   * O recorte de tempo é do painel, não do mapa — mas o lugar dele é esta
+   * fila. Assim os dois controles ficam colados e a busca, ao abrir, empurra
+   * o resto sem ninguém calcular posição na mão.
+   */
+  acoesDaBarra?: React.ReactNode;
+  /**
    * Integrantes da equipe, para a missão dizer o nome de quem vai cumpri-la.
    *
    * A missão guarda só os ids; sem esta lista a ficha mostraria "sup-1" a
@@ -337,8 +345,15 @@ interface MapContainerProps {
   } | null;
   selectedCandidateId?: string;
   candidates?: Candidate[];
-  mapFilter?: 'all' | 'checkins' | 'markers' | 'favoritos';
-  onMapFilterChange?: (filter: 'all' | 'checkins' | 'markers' | 'favoritos') => void;
+  /**
+   * Que camadas o mapa desenha.
+   *
+   * 'nada' é o caso de quem desligou as duas na barra de período: o mapa
+   * fica com o território e nada por cima. Existe porque desligar a última
+   * camada tem de fazer o que diz, e não virar um clique que não responde.
+   */
+  mapFilter?: 'all' | 'checkins' | 'markers' | 'favoritos' | 'nada';
+  onMapFilterChange?: (filter: 'all' | 'checkins' | 'markers' | 'favoritos' | 'nada') => void;
   /** Liga ou desliga a estrela de um check-in, direto do mapa. */
   onToggleCheckInFavorite?: (checkIn: CheckIn) => void;
   /** Exclusão do check-in pelo administrador, direto do mapa. */
@@ -533,6 +548,7 @@ export default function MapContainer({
   aoRegistrarVista,
   onCoordsPicked,
   itemEmEdicaoId = null,
+  acoesDaBarra,
   equipe = [],
   tempPlacementCoords,
   tempPlacementColor,
@@ -618,7 +634,7 @@ export default function MapContainer({
   const delimitationGroupRef = useRef<L.LayerGroup | null>(null);
 
   const [mouseCoords, setMouseCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [localMapFilter, setLocalMapFilter] = useState<'all' | 'checkins' | 'markers' | 'favoritos'>('all');
+  const [localMapFilter, setLocalMapFilter] = useState<'all' | 'checkins' | 'markers' | 'favoritos' | 'nada'>('all');
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
@@ -1344,7 +1360,7 @@ export default function MapContainer({
 
     circlesGroup.clearLayers();
 
-    if (mapFilter === 'checkins' || mapFilter === 'favoritos') {
+    if (mapFilter === 'checkins' || mapFilter === 'favoritos' || mapFilter === 'nada') {
       return;
     }
 
@@ -1431,7 +1447,7 @@ export default function MapContainer({
 
     pinsGroup.clearLayers();
 
-    if (mapFilter === 'checkins' || mapFilter === 'favoritos') {
+    if (mapFilter === 'checkins' || mapFilter === 'favoritos' || mapFilter === 'nada') {
       return;
     }
 
@@ -1509,7 +1525,7 @@ export default function MapContainer({
 
     checkInsGroup.clearLayers();
 
-    if (mapFilter === 'markers') {
+    if (mapFilter === 'markers' || mapFilter === 'nada') {
       return;
     }
 
@@ -2527,11 +2543,20 @@ export default function MapContainer({
 
       {/* PESQUISA DE LUGARES (Google Maps, via SerpApi) */}
       {/* Ao lado do botão Voltar, que ocupa o canto esquerdo do topo. */}
+      {/*
+        A BARRA DE CIMA
+
+        Busca e período em fila, com o mesmo respiro do botão de voltar.
+        Absolutos soltos, cada um no seu `left`, deixavam buracos entre os
+        controles — e brigavam por espaço quando a busca abria. Numa fila,
+        abrir a busca empurra o resto para a direita sozinho.
+      */}
       <div
-        className={`absolute top-4 left-[10.5rem] z-[1000] w-76 sm:w-80 font-sans ${
+        className={`absolute top-4 left-[9.5rem] z-[1000] flex items-start gap-2.5 font-sans ${
           esconderBusca ? 'hidden' : ''
         }`}
       >
+      <div className="w-auto">
         {!isPanelOpen ? (
           <button
             type="button"
@@ -2545,7 +2570,7 @@ export default function MapContainer({
             )}
           </button>
         ) : (
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 p-3.5 space-y-3 animate-in fade-in zoom-in-95 duration-150">
+          <div className="w-76 sm:w-80 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 p-3.5 space-y-3 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <div className="flex items-center gap-2 select-none">
                 <div className="p-1 bg-indigo-50 rounded-lg text-indigo-600">
@@ -2670,6 +2695,8 @@ export default function MapContainer({
             )}
           </div>
         )}
+      </div>
+        {acoesDaBarra}
       </div>
 
       {/* MATCH CONFIRMATION CARD AT BOTTOM LEFT */}

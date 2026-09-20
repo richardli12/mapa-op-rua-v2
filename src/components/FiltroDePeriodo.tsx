@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { CalendarDays, ChevronDown, RotateCcw, AlertTriangle, Clock, CalendarClock, CalendarOff } from 'lucide-react';
+import { CalendarDays, ChevronDown, RotateCcw, AlertTriangle, Clock, CalendarClock, CalendarOff, Layers, Check } from 'lucide-react';
 
 /** Situação do prazo de uma missão, do ponto de vista de hoje. */
 export type SituacaoDePrazo = 'atrasada' | 'hoje' | 'proximos' | 'sem';
@@ -7,8 +7,9 @@ export type SituacaoDePrazo = 'atrasada' | 'hoje' | 'proximos' | 'sem';
 export interface EstadoDoPeriodo {
   de: string;
   ate: string;
-  emCheckIns: boolean;
-  emMissoes: boolean;
+  /** Camadas ligadas. Desligar uma tira ela do mapa, período ou não. */
+  verCheckIns: boolean;
+  verMissoes: boolean;
   prazos: SituacaoDePrazo[];
 }
 
@@ -104,9 +105,10 @@ export const rotuloDoPeriodo = (de: string, ate: string) => {
  */
 export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, contagem }: Props) {
   const caixa = useRef<HTMLDivElement | null>(null);
-  const { de, ate, emCheckIns, emMissoes, prazos } = valor;
+  const { de, ate, verCheckIns, verMissoes, prazos } = valor;
 
-  const ligado = !!de || !!ate || prazos.length > 0;
+  const ligado =
+    !!de || !!ate || prazos.length > 0 || !verCheckIns || !verMissoes;
 
   useEffect(() => {
     if (!aberto) return;
@@ -139,7 +141,7 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
     });
 
   const limpar = () =>
-    onMudar({ de: '', ate: '', emCheckIns: true, emMissoes: true, prazos: [] });
+    onMudar({ de: '', ate: '', verCheckIns: true, verMissoes: true, prazos: [] });
 
   const escondidos =
     contagem.checkInsTotal -
@@ -164,9 +166,18 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
           <span className="text-xs font-bold leading-none">{rotuloDoPeriodo(de, ate)}</span>
           {ligado && (
             <span className="text-[9.5px] font-semibold text-white/75 leading-none mt-1">
-              {contagem.checkInsVisiveis} check-in
-              {contagem.checkInsVisiveis === 1 ? '' : 's'} · {contagem.missoesVisiveis} missã
-              {contagem.missoesVisiveis === 1 ? 'o' : 'es'}
+              {[
+                verCheckIns &&
+                  `${contagem.checkInsVisiveis} check-in${
+                    contagem.checkInsVisiveis === 1 ? '' : 's'
+                  }`,
+                verMissoes &&
+                  `${contagem.missoesVisiveis} missã${
+                    contagem.missoesVisiveis === 1 ? 'o' : 'es'
+                  }`
+              ]
+                .filter(Boolean)
+                .join(' · ') || 'mapa sem camadas'}
             </span>
           )}
         </span>
@@ -247,21 +258,22 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
             </div>
           </section>
 
-          {/* O QUE O PERÍODO CORTA */}
+          {/* CAMADAS */}
           <section className="pt-3.5 border-t border-slate-100">
-            <h4 className="text-[10px] uppercase tracking-widest font-black text-slate-400 mb-2">
-              O período vale para
+            <h4 className="text-[10px] uppercase tracking-widest font-black text-slate-400 flex items-center gap-1.5 mb-2">
+              <Layers className="w-3.5 h-3.5" />
+              Mostrar no mapa
             </h4>
             <div className="grid grid-cols-2 gap-2">
               {[
                 {
-                  chave: 'emCheckIns' as const,
+                  chave: 'verCheckIns' as const,
                   rotulo: 'Check-ins',
                   visiveis: contagem.checkInsVisiveis,
                   total: contagem.checkInsTotal
                 },
                 {
-                  chave: 'emMissoes' as const,
+                  chave: 'verMissoes' as const,
                   rotulo: 'Missões',
                   visiveis: contagem.missoesVisiveis,
                   total: contagem.missoesTotal
@@ -273,28 +285,40 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
                     key={op.chave}
                     type="button"
                     onClick={() => onMudar({ ...valor, [op.chave]: !marcado })}
-                    className={`px-3 py-2 rounded-xl border text-left cursor-pointer transition-all ${
+                    className={`px-3 py-2 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2 ${
                       marcado
                         ? 'bg-blue-50/70 border-[#015FC9]/40 text-[#0D233A]'
                         : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
                     }`}
                   >
-                    <span className="block text-[11.5px] font-black leading-none">{op.rotulo}</span>
-                    <span className="block text-[10px] font-bold mt-1 leading-none opacity-70">
-                      {op.visiveis} de {op.total}
+                    <span
+                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 ${
+                        marcado ? 'bg-[#015FC9] border-[#015FC9]' : 'bg-white border-slate-300'
+                      }`}
+                    >
+                      {marcado && <Check className="w-2.5 h-2.5 text-white stroke-[4]" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[11.5px] font-black leading-none truncate">
+                        {op.rotulo}
+                      </span>
+                      <span className="block text-[10px] font-bold mt-1 leading-none opacity-70">
+                        {marcado ? `${op.visiveis} de ${op.total}` : 'oculto'}
+                      </span>
                     </span>
                   </button>
                 );
               })}
             </div>
             <p className="text-[10px] text-slate-400 font-semibold leading-snug mt-2">
-              O check-in entra pela data em que foi registrado. A missão entra
-              pelo prazo; quando não tem prazo, pelo dia em que foi enviada.
+              Desligar uma camada tira ela do mapa. O que fica é cortado pelo
+              período: o check-in pela data em que foi registrado, a missão
+              pelo prazo — e, sem prazo, pelo dia em que foi enviada.
             </p>
           </section>
 
           {/* PRAZO DA MISSÃO */}
-          {emMissoes && (
+          {verMissoes && (
             <section className="pt-3.5 border-t border-slate-100">
               <h4 className="text-[10px] uppercase tracking-widest font-black text-slate-400 mb-2">
                 Prazo da missão
