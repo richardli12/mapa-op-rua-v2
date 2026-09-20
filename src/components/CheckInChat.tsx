@@ -12,6 +12,7 @@ import {
   Pencil,
   Plus,
   Maximize2,
+  Target,
   X
 } from 'lucide-react';
 import { reverseGeocode } from '../services/streetSources';
@@ -32,6 +33,29 @@ import MapaAjuste from './MapaAjuste';
 import CheckInMidias, { MidiaItem, MidiaTipo } from './CheckInMidias';
 import CheckInObservacoes, { ObservacaoItem } from './CheckInObservacoes';
 
+/**
+ * Missão enviada pelo comitê e mostrada no alto da conversa.
+ *
+ * Área e ponto viram a mesma coisa aqui de propósito: na rua os dois são um
+ * lugar para ir com uma instrução junto, e a diferença entre círculo e pino
+ * só importa no mapa do painel.
+ */
+export interface MissaoDoCampo {
+  id: string;
+  tipo: 'area' | 'pin';
+  title: string;
+  description: string;
+  bairro?: string;
+  color: string;
+  lat: number;
+  lng: number;
+  /** Só na área: o raio em metros que o comitê desenhou. */
+  raio?: number;
+  /** Rótulo do tipo de operação, quando o comitê escolheu um. */
+  tipoLabel?: string;
+  createdAt?: string;
+}
+
 interface CheckInChatProps {
   member: any;
   clientId: string;
@@ -46,6 +70,14 @@ interface CheckInChatProps {
   nomesReservados?: string[];
   /** Avisa o painel quando uma categoria nasce em campo. */
   onTipoCriado?: (tipo: OperationType) => void;
+  /**
+   * Missões que o comitê enviou para esta pessoa, neste cliente.
+   *
+   * Chegam prontas do painel: quem decide o que ela vê é a atribuição feita
+   * lá, não esta tela. E chegam pelo tempo real do banco, então uma missão
+   * enviada agora aparece na conversa sem ninguém recarregar nada.
+   */
+  missoes?: MissaoDoCampo[];
   onSaved: (checkIn: CheckIn) => void;
   onBack: () => void;
   notify: (texto: string, tipo?: 'success' | 'error' | 'info') => void;
@@ -57,6 +89,27 @@ const FUNDO = '#F3F6FA';
 const VERDE = '#08A47B';
 
 const TOTAL_ETAPAS = 5;
+
+/** Distância em metros entre dois pontos, para dizer o quão longe é a missão. */
+const distanciaEmMetros = (
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+) => {
+  const R = 6371000;
+  const rad = (grau: number) => (grau * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
+/** Metro vira quilômetro quando a conta fica comprida demais para a rua. */
+const distanciaCurta = (metros: number) =>
+  metros < 1000
+    ? `${Math.round(metros)} m`
+    : `${(metros / 1000).toFixed(1).replace('.', ',')} km`;
 
 const horaAgora = () =>
   new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -113,6 +166,7 @@ export default function CheckInChat({
   operationTypes,
   nomesReservados = [],
   onTipoCriado,
+  missoes = [],
   onSaved,
   onBack,
   notify
@@ -160,6 +214,15 @@ export default function CheckInChat({
   const [prioridade, setPrioridade] = useState('');
   const [niveis, setNiveis] = useState<PriorityLevel[]>([]);
 
+  /**
+   * Missão escolhida para este check-in, das que o comitê enviou.
+   *
+   * Fica em aberto de propósito: quem tem missão atribuída também topa com
+   * coisa fora dela na rua, e obrigar a escolher uma transformaria todo
+   * registro livre numa missão que ninguém pediu.
+   */
+  const [missaoId, setMissaoId] = useState<string | null>(null);
+
   const [salvando, setSalvando] = useState(false);
   const [horas, setHoras] = useState<{ [k: string]: string }>({});
   /** Enviar da galeria: desligado até o administrador liberar. */
@@ -177,6 +240,8 @@ export default function CheckInChat({
   /** Prévias locais criadas com objectURL, para devolver a memória no fim. */
   const previasRef = useRef<string[]>([]);
   const salvoRef = useRef(false);
+  /** Missões já na tela, para avisar só quando uma nova chega com ela aberta. */
+  const missoesVistasRef = useRef<string[] | null>(null);
   /** Ordem de chegada de cada mídia: a substituição fica no mesmo lugar. */
   const posicoesRef = useRef<{ mapa: { [id: string]: number }; proxima: number }>({
     mapa: {},
@@ -192,7 +257,11 @@ export default function CheckInChat({
 
   const nomeMembro: string =
     member?.full_name || member?.name || member?.nome || 'Integrante';
+  const primeiroNome = nomeMembro.split(' ')[0];
   const fotoMembro: string = member?.image || '';
+
+  /** A missão deste check-in, ou nada: o registro livre continua existindo. */
+  const missao = missoes.find(m => m.id === missaoId) || null;
 
   /**
    * Níveis oferecidos na tela.
@@ -221,6 +290,30 @@ export default function CheckInChat({
     );
     return () => clearTimeout(t);
   }, [etapa, coords, midias, observacoes, operacoes, mapaPronto]);
+
+  // Missão desligada ou apagada no painel não pode continuar presa ao check-in.
+  useEffect(() => {
+    if (missaoId && !missoes.some(m => m.id === missaoId)) {
+      setMissaoId(null);
+      notify('A missão que você tinha escolhido foi retirada pelo comitê.', 'info');
+    }
+  }, [missoes, missaoId]);
+
+  /**
+   * Missão que chega com a tela já aberta.
+   *
+   * O banco avisa em tempo real, mas a conversa pode estar rolada lá embaixo,
+   * na foto ou no áudio. Sem o aviso, o comitê manda e ninguém vê.
+   */
+  useEffect(() => {
+    const ids = missoes.map(m => m.id);
+    const vistas = missoesVistasRef.current;
+    missoesVistasRef.current = ids;
+    // Primeira passada é a carga da tela, não novidade.
+    if (vistas === null) return;
+    const nova = missoes.find(m => !vistas.includes(m.id));
+    if (nova) notify(`Missão nova do comitê: ${nova.title}`, 'info');
+  }, [missoes]);
 
   useEffect(() => {
     (async () => {
@@ -404,7 +497,10 @@ export default function CheckInChat({
       userLongitude: coords?.lng,
       createdAt: new Date().toISOString(),
       candidateId: clientId,
-      mode: 'livre',
+      // Escolheu uma missão, o check-in é dela; sem escolha, é registro livre.
+      mode: missao ? 'missao' : 'livre',
+      missionId: missao?.id,
+      missionTitle: missao?.title,
       priority: prioridade || undefined,
       status,
       // Primeiro tipo escolhido, para as telas antigas que leem uma operação só.
@@ -843,6 +939,123 @@ export default function CheckInChat({
 
       {/* FIO */}
       <div className="flex-1 min-h-0 px-3 pt-4 pb-6 space-y-3 overflow-y-auto">
+        {/* MISSÕES: o que o comitê enviou para esta pessoa, antes de tudo */}
+        {missoes.length > 0 && (
+          <>
+            <Fala
+              texto={
+                missoes.length === 1
+                  ? `${primeiroNome}, o comitê enviou uma missão para você.`
+                  : `${primeiroNome}, o comitê enviou ${missoes.length} missões para você. Qual delas você está fazendo agora?`
+              }
+              hora={horas.abertura}
+            />
+            <div className="flex items-end gap-2 flex-row-reverse">
+              <span className="w-7 shrink-0" />
+              <div className="max-w-[86%] w-full flex flex-col items-stretch gap-2">
+                {missoes.map(missaoDaLista => {
+                  const escolhida = missaoDaLista.id === missaoId;
+                  // A distância só existe depois do GPS: antes dele, some.
+                  const longe = coords
+                    ? distanciaEmMetros(coords, missaoDaLista)
+                    : null;
+                  const cor = missaoDaLista.color || AZUL;
+                  /**
+                   * Onde a pessoa está em relação à missão.
+                   *
+                   * Dentro da área, distância até o centro não diz nada de
+                   * útil — o que importa é que ela já chegou. Fora dela, o
+                   * número é o que decide se dá para ir a pé.
+                   */
+                  const ondeEstou =
+                    longe === null
+                      ? null
+                      : missaoDaLista.raio && longe <= missaoDaLista.raio
+                        ? 'você já está dentro'
+                        : longe < 30
+                          ? 'você está no ponto'
+                          : `a ${distanciaCurta(longe)} de você`;
+                  const detalhes = [
+                    missaoDaLista.tipo === 'area' ? 'Área de trabalho' : 'Ponto no mapa',
+                    missaoDaLista.bairro,
+                    missaoDaLista.tipoLabel,
+                    missaoDaLista.raio
+                      ? `raio de ${distanciaCurta(missaoDaLista.raio)}`
+                      : null,
+                    ondeEstou
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+
+                  return (
+                    <button
+                      key={missaoDaLista.id}
+                      type="button"
+                      onClick={() => setMissaoId(escolhida ? null : missaoDaLista.id)}
+                      className="w-full text-left rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
+                      style={{
+                        borderColor: escolhida ? VERDE : '#E2E8F0',
+                        boxShadow: escolhida ? `0 0 0 2px ${VERDE}33` : undefined
+                      }}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <span
+                          className="w-8 h-8 rounded-xl shrink-0 flex items-center justify-center"
+                          style={{ backgroundColor: `${cor}1A`, color: cor }}
+                        >
+                          {missaoDaLista.tipo === 'area' ? (
+                            <Target className="w-4 h-4" />
+                          ) : (
+                            <MapPin className="w-4 h-4" />
+                          )}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-black leading-tight" style={{ color: AZUL }}>
+                            {missaoDaLista.title}
+                          </p>
+                          {missaoDaLista.description && (
+                            <p className="text-[11.5px] text-slate-500 leading-snug mt-0.5 whitespace-pre-line">
+                              {missaoDaLista.description}
+                            </p>
+                          )}
+                          {detalhes && (
+                            <p className="text-[10.5px] text-slate-400 font-bold mt-1.5">
+                              {detalhes}
+                            </p>
+                          )}
+                        </div>
+                        {escolhida && (
+                          <span
+                            className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center"
+                            style={{ backgroundColor: VERDE }}
+                          >
+                            <Check className="w-3 h-3 text-white stroke-[3]" />
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+
+                {missaoId ? (
+                  <button
+                    type="button"
+                    onClick={() => setMissaoId(null)}
+                    className="self-end px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400 cursor-pointer"
+                  >
+                    Tirar a missão deste check-in
+                  </button>
+                ) : (
+                  <p className="text-[10.5px] text-slate-400 font-semibold text-right leading-snug">
+                    Toque na missão que você está fazendo. Se for outra coisa,
+                    siga sem escolher — entra como registro livre.
+                  </p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ETAPA 1: tipo de ação do cliente */}
         <Fala
           texto="Qual ação você vai fazer e qual a prioridade dela?"
@@ -1252,6 +1465,17 @@ export default function CheckInChat({
                     Revisão do check-in
                   </p>
                   <ul className="mt-2 space-y-2">
+                    {missao && (
+                      <li
+                        className="flex items-center gap-2 text-[12px] font-semibold"
+                        style={{ color: '#05603F' }}
+                      >
+                        <Target className="w-3.5 h-3.5 shrink-0" style={{ color: VERDE }} />
+                        <span className="flex-1 min-w-0 truncate">
+                          Missão: {missao.title}
+                        </span>
+                      </li>
+                    )}
                     <LinhaResumo
                       icone={<MapPin className="w-3.5 h-3.5" style={{ color: VERDE }} />}
                       texto={endereco?.rua || 'Local confirmado'}
