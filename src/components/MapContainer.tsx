@@ -1,10 +1,10 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { candidateLocationText } from '../services/candidateLocation';
 import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, corDaDependencia, getCheckInPriority } from '../types';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, Download, CircleDot } from 'lucide-react';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, corDaDependencia, getCheckInPriority } from '../types';
 import { buildOperationIconSvg } from '../operationIcons';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
@@ -315,6 +315,13 @@ interface MapContainerProps {
    * visível nenhum até salvar.
    */
   itemEmEdicaoId?: string | null;
+  /**
+   * Integrantes da equipe, para a missão dizer o nome de quem vai cumpri-la.
+   *
+   * A missão guarda só os ids; sem esta lista a ficha mostraria "sup-1" a
+   * quem quer ler "Carlos Alberto Silva".
+   */
+  equipe?: any[];
   tempPlacementCoords: { lat: number; lng: number } | null;
   tempPlacementColor: string;
   tempPlacementRadius?: number;
@@ -352,61 +359,152 @@ interface MapContainerProps {
   onRulerPoint?: (coords: { lat: number; lng: number }) => void;
 }
 
-/**
- * Ícone do marcador, vindo da mesma lista que o restante do sistema usa.
- * `type` é a chave do ícone do Tipo de Operação cadastrado pelo usuário.
- */
-const getSvgIconString = (type: string) => buildOperationIconSvg(type, 16);
+/** Escapa o que veio do usuário antes de virar HTML dentro do balão. */
+const escaparHtml = (texto: string) =>
+  String(texto ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 
-const getCustomPinIcon = (color: string, iconType: string, isSelected: boolean) => {
-  const scaledSize = isSelected ? 44 : 36;
-  const borderSize = isSelected ? 4 : 3;
-  const shadowClass = isSelected ? 'drop-shadow-lg' : 'drop-shadow-md';
+/**
+ * O pino da missão.
+ *
+ * A missão é a única coisa no mapa que alguém tem de cumprir — e vinha
+ * desenhada igual a qualquer outro marcador, parada no meio dos rótulos de
+ * rua. Agora ela pulsa: uma onda sai do pé do pino e a gota flutua, então o
+ * olho acha a ordem antes de procurar. O desenho mora no CSS (`.pino-missao`)
+ * porque animação em atributo de estilo não tem como ter keyframes.
+ *
+ * Os selos do canto dizem, sem clique nenhum, o que muda a prioridade de
+ * quem olha: quantas pessoas receberam e se há prazo marcado.
+ */
+const construirPinoDeMissao = (opcoes: {
+  cor: string;
+  iconeChave: string;
+  destacado: boolean;
+  pessoas: number;
+  temMaterial: boolean;
+  prazoVencendo: boolean;
+}) => {
+  const { cor, iconeChave, destacado, pessoas, temMaterial, prazoVencendo } = opcoes;
+  const tamanho = destacado ? 52 : 44;
+  const borda = destacado ? 4 : 3;
+
+  const selos: string[] = [];
+  if (pessoas > 0) {
+    selos.push(
+      `<span class="pino-missao__selo" title="${pessoas} pessoa${pessoas > 1 ? 's' : ''} designada${pessoas > 1 ? 's' : ''}">` +
+        `<svg viewBox="0 0 24 24" width="8" height="8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">` +
+        `<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>` +
+        `${pessoas}</span>`
+    );
+  } else if (temMaterial) {
+    selos.push(
+      `<span class="pino-missao__selo" title="Tem material de apoio">` +
+        `<svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">` +
+        `<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>`
+    );
+  }
+  if (prazoVencendo) {
+    selos.push(
+      `<span class="pino-missao__selo pino-missao__selo--prazo" title="Prazo chegando">` +
+        `<svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">` +
+        `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>`
+    );
+  }
 
   return L.divIcon({
-    className: `custom-div-icon ${shadowClass}`,
+    className: 'custom-div-icon',
     html: `
-      <div style="
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: ${scaledSize}px;
-        height: ${scaledSize}px;
-        background: white;
-        border-radius: 50% 50% 50% 0;
-        transform: rotate(-45deg);
-        border: ${borderSize}px solid ${color};
-        position: relative;
-        transition: all 0.2s ease-in-out;
-      ">
-        <div style="
-          transform: rotate(45deg);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: ${color};
-          width: 22px;
-          height: 22px;
-        ">
-          ${getSvgIconString(iconType)}
+      <div class="pino-missao${destacado ? ' pino-missao--ativa' : ''}"
+           style="--cor:${cor};--tamanho:${tamanho}px;--borda:${borda}px">
+        <span class="pino-missao__onda"></span>
+        <span class="pino-missao__onda pino-missao__onda--2"></span>
+        <span class="pino-missao__sombra"></span>
+        <div class="pino-missao__gota">
+          <div class="pino-missao__icone">${buildOperationIconSvg(iconeChave, 20)}</div>
         </div>
+        ${selos.join('')}
       </div>
-      <div style="
-        width: 10px;
-        height: 10px;
-        background: ${color};
-        border-radius: 50%;
-        position: absolute;
-        top: ${scaledSize - 5}px;
-        left: ${(scaledSize / 2) - 5}px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        border: 1px solid white;
-      "></div>
     `,
-    iconSize: [scaledSize, scaledSize + 10],
-    iconAnchor: [scaledSize / 2, scaledSize + 8],
-    popupAnchor: [0, -scaledSize]
+    // A âncora é o bico da gota, e não o pé da caixa: é ele que aponta a
+    // coordenada. Daí o 1.207 — ver o comentário em `.pino-missao__onda`.
+    iconSize: [tamanho, Math.round(tamanho * 1.207) + 6],
+    iconAnchor: [tamanho / 2, Math.round(tamanho * 1.207)],
+    popupAnchor: [0, -tamanho]
   });
+};
+
+/**
+ * O cartão que aparece ao passar o cursor, igual em missão e check-in.
+ *
+ * Quem passa o mouse quer decidir se vale clicar: então entra o que decide
+ * isso — o que é, onde, para quem, o que veio junto — e nada além.
+ */
+const montarBalaoDaMissao = (dados: {
+  cor: string;
+  etiqueta: string;
+  titulo: string;
+  descricao?: string;
+  linhas: string[];
+  pessoas: string[];
+  anexos: number;
+  capa?: string;
+}) => {
+  const { cor, etiqueta, titulo, descricao, linhas, pessoas, anexos, capa } = dados;
+
+  const linhasHtml = linhas
+    .filter(Boolean)
+    .map(
+      (linha) =>
+        `<p class="text-[10.5px] text-slate-500 font-semibold leading-snug">${linha}</p>`
+    )
+    .join('');
+
+  const pessoasHtml =
+    pessoas.length > 0
+      ? `<div class="mt-2 flex flex-wrap items-center gap-1">
+           <span class="text-[8.5px] font-black uppercase tracking-wider text-slate-400">Para</span>
+           ${pessoas
+             .slice(0, 2)
+             .map(
+               (nome) =>
+                 `<span class="text-[9.5px] font-bold px-1.5 py-0.5 rounded-md" style="background:${cor}18;color:${cor}">${escaparHtml(nome)}</span>`
+             )
+             .join('')}
+           ${pessoas.length > 2 ? `<span class="text-[9.5px] font-bold text-slate-400">+${pessoas.length - 2}</span>` : ''}
+         </div>`
+      : `<p class="mt-2 text-[9.5px] font-bold text-slate-400">Visível para todo o time</p>`;
+
+  const anexosHtml =
+    anexos > 0
+      ? `<p class="text-[9.5px] text-slate-500 font-bold mt-1.5">📎 ${anexos} arquivo${anexos > 1 ? 's' : ''} de apoio</p>`
+      : '';
+
+  const capaHtml = capa
+    ? `<div class="mt-2 rounded-lg overflow-hidden border border-slate-100 max-h-[100px]">
+         <img src="${escaparHtml(capa)}" referrerpolicy="no-referrer" class="w-full h-full object-cover" />
+       </div>`
+    : '';
+
+  return `
+    <div class="font-sans min-w-[190px] max-w-[250px]">
+      <div class="balao-missao__faixa" style="height:4px;background:${cor}"></div>
+      <div class="px-3 py-2.5">
+        <p class="font-black uppercase tracking-wider text-[9px] leading-none" style="color:${cor}">
+          ${escaparHtml(etiqueta)}
+        </p>
+        <p class="font-bold text-slate-900 text-[13px] leading-tight mt-1">${escaparHtml(titulo)}</p>
+        ${descricao ? `<p class="text-[10.5px] text-slate-500 leading-snug mt-1 line-clamp-2">${escaparHtml(descricao)}</p>` : ''}
+        <div class="mt-1.5 space-y-0.5">${linhasHtml}</div>
+        ${pessoasHtml}
+        ${anexosHtml}
+        ${capaHtml}
+        <p class="text-[8.5px] text-slate-400 font-black uppercase tracking-wider mt-2">💡 Clique para abrir a ficha</p>
+      </div>
+    </div>
+  `;
 };
 
 export default function MapContainer({
@@ -434,6 +532,7 @@ export default function MapContainer({
   aoRegistrarVista,
   onCoordsPicked,
   itemEmEdicaoId = null,
+  equipe = [],
   tempPlacementCoords,
   tempPlacementColor,
   tempPlacementRadius = 0,
@@ -522,6 +621,17 @@ export default function MapContainer({
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
+  /**
+   * Missão aberta na ficha, guardada só pelo id.
+   *
+   * Guardar o objeto inteiro deixaria a ficha mostrando a versão de antes
+   * depois de uma edição, e viva depois de uma exclusão. Com o id, ela lê
+   * sempre a lista de agora e se fecha sozinha quando a missão sai do mapa.
+   */
+  const [missaoAbertaRef, setMissaoAbertaRef] = useState<{
+    id: string;
+    tipo: 'pin' | 'area';
+  } | null>(null);
   /**
    * Observações, operações e mídias do check-in aberto.
    *
@@ -1085,6 +1195,132 @@ export default function MapContainer({
     }
   }, [selectedId, areas, pins, checkIns]);
 
+  /* --------------------------------------------------------- missões ---
+   * A missão é a mesma coisa vista de três lugares: o pino no mapa, o balão
+   * do cursor e a ficha do clique. Estes ajudantes existem para os três
+   * lerem os mesmos dados — se o nome de quem recebe muda num, muda nos
+   * três.
+   */
+  const nomeDoIntegrante = (m: any) =>
+    m?.full_name || m?.nome_completo || m?.nome || m?.name || 'Integrante';
+  const fotoDoIntegrante = (m: any) => m?.image || m?.foto_url || m?.photo || '';
+
+  /** Quem recebeu a missão, já com a ficha de cada um. */
+  const equipeDaMissao = (ids?: string[]) => {
+    if (!ids || ids.length === 0) return [];
+    return (equipe || []).filter((m: any) => ids.includes(m.id));
+  };
+
+  /** Data no formato de quem lê, não no do banco. */
+  const dataCurta = (iso?: string) => {
+    if (!iso) return '';
+    const [ano, mes, dia] = iso.split('T')[0].split('-');
+    return dia && mes && ano ? `${dia}/${mes}/${ano}` : iso;
+  };
+
+  /** Faltam poucos dias para o prazo? É o que muda a ordem do dia. */
+  const prazoApertado = (data?: string) => {
+    if (!data) return false;
+    const alvo = new Date(`${data}T23:59:59`).getTime();
+    if (Number.isNaN(alvo)) return false;
+    const dias = (alvo - Date.now()) / 86400000;
+    return dias >= -1 && dias <= 3;
+  };
+
+  /**
+   * A missão aberta na ficha, lida sempre da lista de agora.
+   *
+   * Se ela for editada com a ficha aberta, a ficha acompanha; se for
+   * excluída, some sozinha em vez de mostrar um fantasma.
+   */
+  const missaoAberta = React.useMemo(() => {
+    if (!missaoAbertaRef) return null;
+    if (missaoAbertaRef.tipo === 'pin') {
+      const pin = pins.find(p => p.id === missaoAbertaRef.id);
+      if (!pin) return null;
+      const tipo = operationTypes.find(t => t.id === pin.iconType);
+      const ids = pin.assignedDeltas || pin.position?.assignedDeltas || [];
+      return {
+        tipo: 'pin' as const,
+        id: pin.id,
+        cor: pin.color,
+        etiqueta: tipo?.label || 'Ponto estratégico',
+        iconeChave: tipo?.icon || pin.iconType,
+        titulo: pin.title,
+        descricao: pin.description,
+        prazo: pin.date,
+        criadaEm: pin.createdAt,
+        coords: { lat: pin.position.lat, lng: pin.position.lng },
+        semLocal: !!pin.position?.semLocal,
+        material: (pin.position?.material || []) as MaterialDeApoio[],
+        pessoas: equipeDaMissao(ids),
+        totalDesignados: ids.length,
+        raio: null as number | null,
+        bairro: '',
+        responsavel: '',
+        voluntarios: 0
+      };
+    }
+    const area = areas.find(a => a.id === missaoAbertaRef.id);
+    if (!area) return null;
+    const ids = area.assignedDeltas || area.center?.assignedDeltas || [];
+    return {
+      tipo: 'area' as const,
+      id: area.id,
+      cor: area.color,
+      etiqueta: 'Área de trabalho',
+      iconeChave: '',
+      titulo: area.title,
+      descricao: area.description,
+      prazo: undefined as string | undefined,
+      criadaEm: area.createdAt,
+      coords: { lat: area.center.lat, lng: area.center.lng },
+      semLocal: false,
+      material: (area.center?.material || []) as MaterialDeApoio[],
+      pessoas: equipeDaMissao(ids),
+      totalDesignados: ids.length,
+      raio: area.radius,
+      bairro: area.bairro || '',
+      responsavel: area.contactName || '',
+      voluntarios: area.teamSize || 0
+    };
+  }, [missaoAbertaRef, pins, areas, operationTypes, equipe]);
+
+  /** Endereço da missão aberta, descoberto pela coordenada. */
+  const [enderecoDaMissao, setEnderecoDaMissao] = useState<string | null>(null);
+  const [buscandoEnderecoDaMissao, setBuscandoEnderecoDaMissao] = useState(false);
+
+  useEffect(() => {
+    if (!missaoAberta) {
+      setEnderecoDaMissao(null);
+      setBuscandoEnderecoDaMissao(false);
+      return;
+    }
+    const { lat, lng } = missaoAberta.coords;
+    let vivo = true;
+    setEnderecoDaMissao(null);
+    setBuscandoEnderecoDaMissao(true);
+    fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=pt-BR`
+    )
+      .then(res => res.json())
+      .then(dados => {
+        if (!vivo) return;
+        setEnderecoDaMissao(dados?.display_name || null);
+      })
+      .catch(() => {
+        // Sem rede o endereço simplesmente não aparece; a coordenada e o
+        // botão do Google Maps continuam servindo.
+        if (vivo) setEnderecoDaMissao(null);
+      })
+      .finally(() => {
+        if (vivo) setBuscandoEnderecoDaMissao(false);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [missaoAbertaRef?.id, missaoAberta?.coords.lat, missaoAberta?.coords.lng]);
+
   // Render Areas (Circles)
   useEffect(() => {
     const circlesGroup = circlesGroupRef.current;
@@ -1102,7 +1338,7 @@ export default function MapContainer({
       // Em edição: quem aparece no lugar dela é o fantasma arrastável.
       if (itemEmEdicaoId && area.id === itemEmEdicaoId) return;
 
-      const isSelected = area.id === selectedId;
+      const isSelected = area.id === selectedId || missaoAbertaRef?.id === area.id;
 
       // Draw Radius Circle
       const circle = L.circle([area.center.lat, area.center.lng], {
@@ -1115,11 +1351,11 @@ export default function MapContainer({
         className: 'transition-all duration-300'
       });
 
-      // Simple click handler
-      circle.on('click', (e) => {
+      const abrirFicha = (e: any) => {
         L.DomEvent.stopPropagation(e);
-        onSelectItem(area.id, 'area');
-      });
+        setMissaoAbertaRef({ id: area.id, tipo: 'area' });
+      };
+      circle.on('click', abrirFicha);
 
       // Add a small center point marker to make it clickable and visible
       const centerMarker = L.circleMarker([area.center.lat, area.center.lng], {
@@ -1131,30 +1367,46 @@ export default function MapContainer({
         fillOpacity: 1
       });
 
-      centerMarker.on('click', (e) => {
-        L.DomEvent.stopPropagation(e);
-        onSelectItem(area.id, 'area');
+      centerMarker.on('click', abrirFicha);
+
+      // O mesmo cartão do pino: área também é missão, e quem passa o cursor
+      // por cima faz a mesma pergunta — o que é isto e para quem.
+      const designadosDaArea = area.assignedDeltas || area.center?.assignedDeltas || [];
+      const materialDaArea = area.center?.material || [];
+      const balaoDaArea = montarBalaoDaMissao({
+        cor: area.color,
+        etiqueta: 'Área de trabalho',
+        titulo: area.title,
+        descricao: area.description,
+        linhas: [
+          area.bairro ? `🏘️ ${area.bairro}` : '',
+          `⭕ Raio de ${area.radius >= 1000 ? `${(area.radius / 1000).toFixed(area.radius % 1000 === 0 ? 0 : 1)} km` : `${area.radius} m`}`,
+          area.teamSize ? `👥 ${area.teamSize} voluntário${area.teamSize > 1 ? 's' : ''} previstos` : '',
+          area.contactName ? `🎖️ ${area.contactName}` : ''
+        ],
+        pessoas: equipeDaMissao(designadosDaArea).map(nomeDoIntegrante),
+        anexos: materialDaArea.length,
+        capa: materialDaArea.find(m => m.tipo === 'imagem')?.url
       });
 
-      // Tooltip/Label on circle hover
-      circle.bindTooltip(`
-        <div class="px-2 py-1 font-sans text-xs">
-          <p class="font-bold text-gray-900">${area.title}</p>
-          <p class="text-gray-500">Unidade: ${area.bairro}</p>
-          <p class="text-gray-600">Raio: ${area.radius}m</p>
-          ${area.teamSize ? `<p class="text-blue-600 font-semibold mt-0.5">Equipe: ${area.teamSize} pessoas</p>` : ''}
-        </div>
-      `, {
+      circle.bindTooltip(balaoDaArea, {
         permanent: false,
         direction: 'top',
-        opacity: 0.95
+        className: 'balao-missao',
+        opacity: 1
+      });
+      centerMarker.bindTooltip(balaoDaArea, {
+        permanent: false,
+        direction: 'top',
+        className: 'balao-missao',
+        opacity: 1
       });
 
       // Add to group
       circlesGroup.addLayer(circle);
       circlesGroup.addLayer(centerMarker);
     });
-  }, [areas, selectedId, mapFilter, itemEmEdicaoId]);
+  }, [areas, selectedId, mapFilter, itemEmEdicaoId, equipe, missaoAbertaRef]);
 
   // Render Pins
   useEffect(() => {
@@ -1173,39 +1425,67 @@ export default function MapContainer({
       // Em edição: quem aparece no lugar dele é o fantasma arrastável.
       if (itemEmEdicaoId && pin.id === itemEmEdicaoId) return;
 
-      const isSelected = pin.id === selectedId;
+      const isSelected = pin.id === selectedId || missaoAbertaRef?.id === pin.id;
       // pin.iconType guarda o id do Tipo de Operação; o desenho vem do tipo.
       // Se o tipo foi apagado, o próprio id ainda serve de chave de ícone
       // (é o caso dos pontos antigos, cujo id já era 'flag', 'star'...).
       const operationType = operationTypes.find(t => t.id === pin.iconType);
-      const customIcon = getCustomPinIcon(pin.color, operationType?.icon || pin.iconType, isSelected);
+      const designados = pin.assignedDeltas || pin.position?.assignedDeltas || [];
+      const material = pin.position?.material || [];
+
+      const customIcon = construirPinoDeMissao({
+        cor: pin.color,
+        iconeChave: operationType?.icon || pin.iconType,
+        destacado: isSelected,
+        pessoas: designados.length,
+        temMaterial: material.length > 0,
+        prazoVencendo: prazoApertado(pin.date)
+      });
 
       const marker = L.marker([pin.position.lat, pin.position.lng], {
         icon: customIcon,
-        zIndexOffset: isSelected ? 1000 : 0
+        riseOnHover: true,
+        zIndexOffset: isSelected ? 1000 : 400
       });
 
+      // O clique abre a ficha, como no check-in. Editar é um botão dentro
+      // dela: quem clica no mapa quase sempre quer ler, não mexer.
       marker.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
-        onSelectItem(pin.id, 'pin');
+        setMissaoAbertaRef({ id: pin.id, tipo: 'pin' });
       });
 
-      const dateText = pin.date ? `<p class="text-[10px] text-blue-600 font-bold mt-0.5">📅 ${pin.date.split('-').reverse().join('/')}</p>` : '';
-      marker.bindTooltip(`
-        <div class="px-2 py-1 font-sans text-xs">
-          <p class="font-bold text-gray-900">${pin.title}</p>
-          <p class="text-gray-500">${pin.description || 'Ponto de Campanha'}</p>
-          ${dateText}
-        </div>
-      `, {
-        permanent: false,
-        direction: 'top',
-        offset: [0, -10]
-      });
+      const pessoas = equipeDaMissao(designados).map(nomeDoIntegrante);
+      const capa = material.find(m => m.tipo === 'imagem')?.url;
+
+      marker.bindTooltip(
+        montarBalaoDaMissao({
+          cor: pin.color,
+          etiqueta: operationType?.label || 'Ponto estratégico',
+          titulo: pin.title,
+          descricao: pin.description,
+          linhas: [
+            pin.date ? `🗓️ Prazo ${dataCurta(pin.date)}` : '',
+            `📍 ${pin.position.lat.toFixed(5)}, ${pin.position.lng.toFixed(5)}`
+          ],
+          pessoas,
+          anexos: material.length,
+          capa
+        }),
+        {
+          permanent: false,
+          direction: 'top',
+          // A âncora do pino é a ponta, lá embaixo; sem descontar a altura
+          // da gota o balão abria em cima do próprio pino.
+          offset: [0, isSelected ? -70 : -60],
+          className: 'balao-missao',
+          opacity: 1
+        }
+      );
 
       pinsGroup.addLayer(marker);
     });
-  }, [pins, selectedId, mapFilter, operationTypes, itemEmEdicaoId]);
+  }, [pins, selectedId, mapFilter, operationTypes, itemEmEdicaoId, equipe, missaoAbertaRef]);
 
   // Render Check-ins
   useEffect(() => {
@@ -1296,35 +1576,44 @@ export default function MapContainer({
       const videoCount = media.filter(m => m.type === 'video').length;
 
       const countHtml = media.length > 1
-        ? `<p class="text-[9px] text-slate-500 font-bold mt-1">📎 ${media.length} arquivos${videoCount > 0 ? ` • ${videoCount} vídeo${videoCount > 1 ? 's' : ''}` : ''}</p>`
+        ? `<p class="text-[9.5px] text-slate-500 font-bold mt-1.5">📎 ${media.length} arquivos${videoCount > 0 ? ` • ${videoCount} vídeo${videoCount > 1 ? 's' : ''}` : ''}</p>`
         : videoCount > 0
-          ? `<p class="text-[9px] text-slate-500 font-bold mt-1">🎬 Vídeo anexado</p>`
+          ? `<p class="text-[9.5px] text-slate-500 font-bold mt-1.5">🎬 Vídeo anexado</p>`
           : '';
 
       const photoHtml = coverImage ? `
-        <div class="mt-2 rounded-lg overflow-hidden border border-slate-100 max-w-[150px] max-h-[100px] shadow-2xs">
-          <img src="${coverImage.url}" class="w-full h-full object-cover animate-in fade-in duration-300" />
+        <div class="mt-2 rounded-lg overflow-hidden border border-slate-100 max-h-[100px]">
+          <img src="${escaparHtml(coverImage.url)}" referrerpolicy="no-referrer" class="w-full h-full object-cover" />
         </div>
       ` : '';
 
-      const headerHtml = isFree
-        ? `<p class="font-extrabold uppercase tracking-wider text-[9px] mb-0.5" style="color:${markerColor}">⚠️ Check-in Livre${priority ? ` • Prioridade ${priority.label}` : ''}</p>`
-        : `<p class="font-extrabold text-emerald-600 uppercase tracking-wider text-[9px] mb-0.5">✅ Check-in de Voluntário</p>`;
+      // O mesmo cartão da missão: no mapa as duas coisas se clicam igual, e
+      // o que o cursor mostra também tem de ser igual.
+      const etiqueta = isFree
+        ? `⚠️ Check-in livre${priority ? ` • Prioridade ${priority.label}` : ''}`
+        : '✅ Check-in de voluntário';
 
       marker.bindTooltip(`
-        <div class="px-2.5 py-2 font-sans text-xs min-w-[160px]">
-          ${headerHtml}
-          <p class="font-bold text-slate-900 text-sm">${checkIn.name}</p>
-          <p class="text-[10px] text-slate-500 font-semibold mt-0.5">📍 ${checkIn.rua}, ${checkIn.bairro}</p>
-          <p class="text-[9px] text-slate-400 mt-1 font-medium bg-slate-50 border border-slate-100 p-1 rounded inline-block">🕒 ${dateText}</p>
-          ${countHtml}
-          <p class="text-[8px] text-slate-400 font-bold uppercase mt-1">💡 Clique para ver detalhes</p>
-          ${photoHtml}
+        <div class="font-sans min-w-[190px] max-w-[250px]">
+          <div class="balao-missao__faixa" style="height:4px;background:${markerColor}"></div>
+          <div class="px-3 py-2.5">
+            <p class="font-black uppercase tracking-wider text-[9px] leading-none" style="color:${markerColor}">${etiqueta}</p>
+            <p class="font-bold text-slate-900 text-[13px] leading-tight mt-1">${escaparHtml(checkIn.name)}</p>
+            <div class="mt-1.5 space-y-0.5">
+              <p class="text-[10.5px] text-slate-500 font-semibold leading-snug">📍 ${escaparHtml([checkIn.rua, checkIn.bairro].filter(Boolean).join(', ') || 'Sem endereço')}</p>
+              <p class="text-[10.5px] text-slate-500 font-semibold leading-snug">🕒 ${dateText}</p>
+            </div>
+            ${countHtml}
+            <p class="text-[8.5px] text-slate-400 font-black uppercase tracking-wider mt-2">💡 Clique para abrir a ficha</p>
+            ${photoHtml}
+          </div>
         </div>
       `, {
         permanent: false,
         direction: 'top',
-        offset: [0, -10]
+        offset: [0, -26],
+        className: 'balao-missao',
+        opacity: 1
       });
 
       // Evento de clique para mostrar todas as informações no meio da tela
@@ -2080,7 +2369,17 @@ export default function MapContainer({
         tempFantasmaRef.current = () => metrosDe(45);
       } else {
         // Draw temp pin marker
-        const tempIcon = getCustomPinIcon(tempPlacementColor, 'flag', true);
+        // O fantasma é o mesmo pino da missão, só que ainda não salvo: mesma
+        // forma, mesma ponta, para o lugar que se vê arrastando ser o lugar
+        // que fica depois de salvar.
+        const tempIcon = construirPinoDeMissao({
+          cor: tempPlacementColor,
+          iconeChave: 'flag',
+          destacado: true,
+          pessoas: 0,
+          temMaterial: false,
+          prazoVencendo: false
+        });
         /**
          * O ponto provisório se arrasta.
          *
@@ -2385,6 +2684,346 @@ export default function MapContainer({
           <div className="flex items-center gap-2 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white rounded-lg shadow-lg border border-slate-700 text-xs animate-pulse">
             <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-ping" />
             <span>Selecione onde quer marcar clicando em qualquer rua ou bairro</span>
+          </div>
+        </div>
+      )}
+
+      {/*
+        FICHA DA MISSÃO
+
+        O mesmo formato da ficha do check-in, de propósito: no mapa as duas
+        coisas se clicam igual, então têm de abrir igual. Muda a cor, que é a
+        da própria missão, e o conteúdo — aqui é a ordem que foi dada, lá é o
+        que voltou do campo. Ler é o que o clique faz; mexer é um botão.
+      */}
+      {missaoAberta && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[2000] flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setMissaoAbertaRef(null)}
+        >
+          <div
+            className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Cabeçalho na cor da missão */}
+            <div
+              className="px-6 py-4 flex items-center justify-between text-white shadow-md"
+              style={{ backgroundColor: missaoAberta.cor }}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0"
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      missaoAberta.tipo === 'pin'
+                        ? buildOperationIconSvg(missaoAberta.iconeChave, 22)
+                        : '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg>'
+                  }}
+                />
+                <div className="min-w-0">
+                  <h3 className="font-extrabold text-[10.5px] uppercase tracking-widest text-white/80 leading-none">
+                    {missaoAberta.etiqueta}
+                  </h3>
+                  <p className="text-[15px] font-extrabold leading-tight mt-1 truncate">
+                    {missaoAberta.titulo}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMissaoAbertaRef(null)}
+                className="p-1.5 hover:bg-white/15 rounded-full transition-colors cursor-pointer shrink-0"
+                title="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5 text-left font-sans">
+              {/* Etiquetas do topo: o que decide a ordem do dia */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border"
+                  style={{
+                    color: missaoAberta.cor,
+                    borderColor: `${missaoAberta.cor}40`,
+                    backgroundColor: `${missaoAberta.cor}14`
+                  }}
+                >
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: missaoAberta.cor }} />
+                  {missaoAberta.tipo === 'pin' ? 'Missão em ponto' : 'Missão em área'}
+                </span>
+
+                {missaoAberta.prazo && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border ${
+                      prazoApertado(missaoAberta.prazo)
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    <Clock className="w-3 h-3" />
+                    Prazo {dataCurta(missaoAberta.prazo)}
+                  </span>
+                )}
+
+                {missaoAberta.raio !== null && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider bg-slate-50 text-slate-600 border border-slate-200">
+                    <CircleDot className="w-3 h-3" />
+                    Raio {missaoAberta.raio >= 1000
+                      ? `${(missaoAberta.raio / 1000).toFixed(missaoAberta.raio % 1000 === 0 ? 0 : 1)} km`
+                      : `${missaoAberta.raio} m`}
+                  </span>
+                )}
+
+                {missaoAberta.voluntarios > 0 && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider bg-slate-50 text-slate-600 border border-slate-200">
+                    <Users className="w-3 h-3" />
+                    {missaoAberta.voluntarios} previstos
+                  </span>
+                )}
+              </div>
+
+              {/* O que precisa ser feito */}
+              <div
+                className="p-4 rounded-xl border"
+                style={{
+                  backgroundColor: `${missaoAberta.cor}0D`,
+                  borderColor: `${missaoAberta.cor}33`
+                }}
+              >
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                  O que precisa ser feito
+                </p>
+                <p className="text-[13px] text-slate-700 font-medium leading-relaxed mt-2 whitespace-pre-wrap break-words">
+                  {missaoAberta.descricao?.trim() || 'Nenhuma instrução foi escrita nesta missão.'}
+                </p>
+                {missaoAberta.responsavel && (
+                  <p className="text-[11px] text-slate-500 font-semibold mt-3 flex items-center gap-1.5">
+                    <Flag className="w-3.5 h-3.5 shrink-0" style={{ color: missaoAberta.cor }} />
+                    Coordenação: <strong className="text-slate-700">{missaoAberta.responsavel}</strong>
+                  </p>
+                )}
+              </div>
+
+              {/* Quem recebeu */}
+              <div>
+                <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                  Quem recebeu a missão
+                  {missaoAberta.totalDesignados > 0 ? ` (${missaoAberta.totalDesignados})` : ''}
+                </p>
+                {missaoAberta.totalDesignados === 0 ? (
+                  <div className="border border-dashed border-slate-200 bg-slate-50 rounded-xl p-3.5 flex items-center gap-2.5">
+                    <Users className="w-4 h-4 text-slate-300 shrink-0" />
+                    <p className="text-[11px] text-slate-500 font-semibold">
+                      Ninguém foi marcado: ela aparece para todo o time no check-in.
+                    </p>
+                  </div>
+                ) : missaoAberta.pessoas.length === 0 ? (
+                  <div className="border border-dashed border-amber-200 bg-amber-50/60 rounded-xl p-3.5">
+                    <p className="text-[11px] text-amber-700 font-semibold">
+                      {missaoAberta.totalDesignados} pessoa
+                      {missaoAberta.totalDesignados > 1 ? 's' : ''} designada
+                      {missaoAberta.totalDesignados > 1 ? 's' : ''}, mas a equipe não está
+                      carregada nesta tela.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {missaoAberta.pessoas.map((pessoa: any) => (
+                      <div
+                        key={pessoa.id}
+                        className="flex items-center gap-2.5 border border-slate-200 bg-slate-50/60 rounded-xl p-2.5"
+                      >
+                        <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-200 border border-slate-200 flex items-center justify-center shrink-0">
+                          {fotoDoIntegrante(pessoa) ? (
+                            <img
+                              src={fotoDoIntegrante(pessoa)}
+                              alt={nomeDoIntegrante(pessoa)}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                              onError={e => {
+                                (e.currentTarget as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <User className="w-4 h-4 text-slate-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[11.5px] font-bold text-slate-700 truncate leading-tight">
+                            {nomeDoIntegrante(pessoa)}
+                          </p>
+                          {pessoa.whatsapp && (
+                            <p className="text-[9.5px] text-slate-400 font-mono leading-none mt-0.5">
+                              {pessoa.whatsapp}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Material que foi junto com a ordem */}
+              {missaoAberta.material.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                    Material de apoio ({missaoAberta.material.length})
+                  </p>
+                  <div className="space-y-2.5">
+                    {missaoAberta.material.map(item => {
+                      if (item.tipo === 'imagem') {
+                        return (
+                          <div
+                            key={item.id}
+                            className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-50"
+                          >
+                            <img
+                              src={item.url}
+                              alt={item.nome}
+                              referrerPolicy="no-referrer"
+                              className="w-full object-cover max-h-64"
+                            />
+                          </div>
+                        );
+                      }
+                      if (item.tipo === 'video') {
+                        return (
+                          <div
+                            key={item.id}
+                            className="rounded-2xl overflow-hidden border border-slate-200 bg-black"
+                          >
+                            <video
+                              src={item.url}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              className="w-full max-h-64"
+                            />
+                          </div>
+                        );
+                      }
+                      if (item.tipo === 'audio') {
+                        return (
+                          <div
+                            key={item.id}
+                            className="border border-slate-200 rounded-xl p-3 bg-slate-50/60 flex items-center gap-2.5"
+                          >
+                            <Mic className="w-4 h-4 shrink-0" style={{ color: missaoAberta.cor }} />
+                            <audio src={item.url} controls preload="metadata" className="w-full h-9" />
+                          </div>
+                        );
+                      }
+                      return (
+                        <a
+                          key={item.id}
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="border border-slate-200 rounded-xl p-3 bg-slate-50/60 flex items-center gap-2.5 hover:bg-slate-100 transition-colors no-underline"
+                        >
+                          <FileText className="w-4 h-4 shrink-0" style={{ color: missaoAberta.cor }} />
+                          <span className="text-[11.5px] font-bold text-slate-700 truncate flex-1">
+                            {item.nome}
+                          </span>
+                          <Download className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Onde é */}
+              <div className="space-y-2">
+                <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                  Onde a missão acontece
+                </p>
+                <div className="bg-slate-50/60 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <MapPin className="w-4 h-4 shrink-0 mt-0.5" style={{ color: missaoAberta.cor }} />
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                        Endereço
+                      </p>
+                      {buscandoEnderecoDaMissao ? (
+                        <p className="text-[11.5px] font-semibold text-slate-500 mt-0.5 flex items-center gap-1.5">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                          Procurando o endereço deste ponto...
+                        </p>
+                      ) : (
+                        <p className="text-[11.5px] font-semibold text-slate-700 mt-0.5 leading-relaxed">
+                          {enderecoDaMissao ||
+                            missaoAberta.bairro ||
+                            'Endereço não identificado para esta coordenada.'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5 pt-2.5 border-t border-slate-200/70">
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 uppercase block mb-0.5">
+                        Coordenada
+                      </span>
+                      <span className="text-[11px] font-extrabold text-slate-700 font-mono">
+                        {missaoAberta.coords.lat.toFixed(5)}, {missaoAberta.coords.lng.toFixed(5)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 uppercase block mb-0.5">
+                        Criada em
+                      </span>
+                      <span className="text-[11px] font-extrabold text-slate-700">
+                        {missaoAberta.criadaEm
+                          ? new Date(missaoAberta.criadaEm).toLocaleDateString('pt-BR', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric'
+                            })
+                          : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${missaoAberta.coords.lat},${missaoAberta.coords.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-extrabold text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 no-underline active:scale-98"
+                  >
+                    <Navigation className="w-4 h-4 stroke-[2.5]" style={{ color: missaoAberta.cor }} />
+                    Abrir no Google Maps
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Rodapé */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const alvo = missaoAberta;
+                  setMissaoAbertaRef(null);
+                  onSelectItem(alvo.id, alvo.tipo);
+                }}
+                className="px-4 py-2.5 text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer transition-all flex items-center gap-2 shadow-md hover:shadow-lg active:scale-95"
+                style={{ backgroundColor: missaoAberta.cor }}
+              >
+                <Pencil className="w-3.5 h-3.5 stroke-[2.5]" />
+                Editar missão
+              </button>
+              <button
+                type="button"
+                onClick={() => setMissaoAbertaRef(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-extrabold cursor-pointer transition-colors"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2791,7 +3430,7 @@ export default function MapContainer({
               <button
                 type="button"
                 onClick={() => setSelectedCheckInForModal(null)}
-                className="px-4 py-2 bg-slate-850 hover:bg-slate-900 text-white rounded-xl text-xs font-extrabold cursor-pointer transition-colors"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-extrabold cursor-pointer transition-colors"
               >
                 Fechar
               </button>
