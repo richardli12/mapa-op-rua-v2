@@ -119,6 +119,8 @@ interface Props {
   onLimparFiltros: () => void;
   /** Leva o mapa até um registro. */
   onIrParaCheckIn: (id: string) => void;
+  /** Troca o período de tudo — painel e mapa —, como a barra de cima faz. */
+  onPeriodo: (de: string, ate: string) => void;
 }
 
 /** Cabeçalho de seção, com o mesmo peso em todas. */
@@ -186,14 +188,13 @@ function Variacao({ agora, antes }: { agora: number; antes: number }) {
 }
 
 /* --------------------------------------------------- atividades da pessoa ---
- * O recorte de tempo de quem está sendo olhado.
+ * O recorte de tempo, à mão de quem está olhando uma pessoa.
  *
- * A barra de cima manda no painel inteiro, e é assim que tem de ser: todos os
- * números precisam falar do mesmo intervalo. Mas ao abrir uma pessoa a
- * pergunta muda de escala — "o que ele fez ontem?", "e na semana passada?" —
- * e mexer no período geral para responder isso reescreve o painel inteiro e
- * faz perder o lugar. Por isso a ficha da pessoa tem relógio próprio: começa
- * no período do painel e volta para ele num clique.
+ * Quem abre a ficha de alguém e pede "hoje" está perguntando o que essa
+ * pessoa fez hoje — no mapa, não só nesta lista. Um recorte que valesse só
+ * aqui dentro deixaria a tela contando duas histórias ao mesmo tempo: a lista
+ * com o dia e o mapa com tudo. Então estes botões são os mesmos da barra de
+ * cima: mexem no período inteiro — mapa, painel e ficha juntos.
  */
 const ATALHOS_DA_PESSOA: { rotulo: string; calcular: () => { de: string; ate: string } }[] = [
   { rotulo: 'Hoje', calcular: () => ({ de: diaISO(new Date()), ate: diaISO(new Date()) }) },
@@ -232,9 +233,10 @@ function AtividadesDaPessoa({
   pessoaDoCheckIn,
   operationTypes,
   priorityLevels,
-  dePainel,
-  atePainel,
+  de,
+  ate,
   rotuloDoPeriodo,
+  onPeriodo,
   onIrParaCheckIn
 }: {
   chave: string;
@@ -243,18 +245,14 @@ function AtividadesDaPessoa({
   pessoaDoCheckIn: (c: any) => PessoaResolvida;
   operationTypes: OperationType[];
   priorityLevels: PriorityLevel[];
-  dePainel: string;
-  atePainel: string;
+  de: string;
+  ate: string;
   rotuloDoPeriodo: string;
+  onPeriodo: (de: string, ate: string) => void;
   onIrParaCheckIn: (id: string) => void;
 }) {
-  const [recorte, setRecorte] = React.useState({ de: dePainel, ate: atePainel });
-  /** Mexeu na barra de cima: a ficha volta a acompanhar o painel. */
-  React.useEffect(() => {
-    setRecorte({ de: dePainel, ate: atePainel });
-  }, [dePainel, atePainel]);
-
-  const seguindoOPainel = recorte.de === dePainel && recorte.ate === atePainel;
+  /* O recorte é o do painel: um só relógio para a tela inteira. */
+  const recorte = { de, ate };
 
   const { dias, total, graves, ultimo } = useMemo(() => {
     const hoje = diaISO(new Date());
@@ -310,23 +308,11 @@ function AtividadesDaPessoa({
       graves: dentro.filter(c => idsGraves.includes(c.priority || '')).length,
       ultimo: todosOsDias.length ? todosOsDias[todosOsDias.length - 1] : ''
     };
-  }, [checkIns, chave, pessoaDoCheckIn, operationTypes, priorityLevels, recorte]);
-
-  const rotuloDoRecorte = seguindoOPainel
-    ? rotuloDoPeriodo
-    : !recorte.de && !recorte.ate
-      ? 'Todo o período'
-      : recorte.de && recorte.ate
-        ? recorte.de === recorte.ate
-          ? curto(recorte.de)
-          : `${curto(recorte.de)} – ${curto(recorte.ate)}`
-        : recorte.de
-          ? `De ${curto(recorte.de)}`
-          : `Até ${curto(recorte.ate)}`;
+  }, [checkIns, chave, pessoaDoCheckIn, operationTypes, priorityLevels, de, ate]);
 
   const ligado = (calcular: () => { de: string; ate: string }) => {
     const v = calcular();
-    return v.de === recorte.de && v.ate === recorte.ate;
+    return v.de === de && v.ate === ate;
   };
 
   return (
@@ -338,30 +324,21 @@ function AtividadesDaPessoa({
           <span className="truncate">Atividades de {nome.split(' ')[0]}</span>
         </h5>
         <span className="text-[9.5px] font-black text-[#015FC9] shrink-0">
-          {rotuloDoRecorte}
+          {rotuloDoPeriodo}
         </span>
       </div>
 
       <div className="flex flex-wrap gap-1 mb-2">
-        <button
-          type="button"
-          onClick={() => setRecorte({ de: dePainel, ate: atePainel })}
-          className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all border ${
-            seguindoOPainel
-              ? 'bg-[#015FC9] border-[#015FC9] text-white'
-              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-          }`}
-          title="Voltar para o período da barra de cima"
-        >
-          Período do painel
-        </button>
         {ATALHOS_DA_PESSOA.map(a => (
           <button
             key={a.rotulo}
             type="button"
-            onClick={() => setRecorte(a.calcular())}
+            onClick={() => {
+              const v = a.calcular();
+              onPeriodo(v.de, v.ate);
+            }}
             className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all border ${
-              ligado(a.calcular) && !seguindoOPainel
+              ligado(a.calcular)
                 ? 'bg-[#015FC9] border-[#015FC9] text-white'
                 : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
             }`}
@@ -378,9 +355,9 @@ function AtividadesDaPessoa({
           </span>
           <input
             type="date"
-            value={recorte.de}
-            max={recorte.ate || undefined}
-            onChange={e => setRecorte(r => ({ ...r, de: e.target.value }))}
+            value={de}
+            max={ate || undefined}
+            onChange={e => onPeriodo(e.target.value, ate)}
             className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
           />
         </label>
@@ -390,9 +367,9 @@ function AtividadesDaPessoa({
           </span>
           <input
             type="date"
-            value={recorte.ate}
-            min={recorte.de || undefined}
-            onChange={e => setRecorte(r => ({ ...r, ate: e.target.value }))}
+            value={ate}
+            min={de || undefined}
+            onChange={e => onPeriodo(de, e.target.value)}
             className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
           />
         </label>
@@ -488,8 +465,8 @@ function AtividadesDaPessoa({
       )}
 
       <p className="text-[9px] font-semibold text-slate-400 leading-snug mt-2">
-        Este recorte vale só para esta ficha. O resto do painel e o mapa seguem
-        o período da barra de cima.
+        Este recorte é o mesmo da barra de cima: mexer aqui recorta o mapa e o
+        painel inteiro, não só esta lista.
       </p>
     </div>
   );
@@ -531,7 +508,8 @@ export default function PainelDeCheckIns({
   tiposSelecionados,
   onTipo,
   onLimparFiltros,
-  onIrParaCheckIn
+  onIrParaCheckIn,
+  onPeriodo
 }: Props) {
   /** Só aparece com equipe grande: até oito pessoas a lista inteira é a busca. */
   const [buscaDePessoa, setBuscaDePessoa] = React.useState('');
@@ -1159,9 +1137,13 @@ export default function PainelDeCheckIns({
                               por isso tem botão próprio. */}
                           <button
                             type="button"
-                            onClick={() =>
-                              setPessoaExpandida(atual => (atual === p.chave ? null : p.chave))
-                            }
+                            onClick={() => {
+                              const abrindo = pessoaExpandida !== p.chave;
+                              setPessoaExpandida(abrindo ? p.chave : null);
+                              // Pedir as atividades de alguém é pedir para ver
+                              // o que essa pessoa fez — no mapa também.
+                              if (abrindo && !marcado) onPessoa(p.chave);
+                            }}
                             title={aberta ? 'Fechar as atividades' : 'Ver as atividades desta pessoa'}
                             className={`shrink-0 px-2 border-l flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all ${
                               aberta
@@ -1186,9 +1168,10 @@ export default function PainelDeCheckIns({
                             pessoaDoCheckIn={pessoaDoCheckIn}
                             operationTypes={operationTypes}
                             priorityLevels={priorityLevels}
-                            dePainel={de}
-                            atePainel={ate}
+                            de={de}
+                            ate={ate}
                             rotuloDoPeriodo={rotuloDoPeriodo}
+                            onPeriodo={onPeriodo}
                             onIrParaCheckIn={onIrParaCheckIn}
                           />
                         )}

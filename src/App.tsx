@@ -15964,6 +15964,15 @@ export default function App() {
           )
         }
         onLimparFiltros={limparFiltrosDeCheckIn}
+        /*
+          O recorte de tempo da ficha de uma pessoa é o mesmo da barra de
+          cima: um só relógio para a tela inteira, senão a lista conta um dia
+          e o mapa continua contando o mês.
+        */
+        onPeriodo={(novoDe, novoAte) => {
+          setFiltroDe(novoDe);
+          setFiltroAte(novoAte);
+        }}
         onIrParaCheckIn={(id) => {
           if (!id) return;
           setSelectedId(id);
