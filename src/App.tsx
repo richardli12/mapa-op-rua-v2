@@ -881,6 +881,8 @@ export default function App() {
   const [lojaEmFoco, setLojaEmFoco] = useState<string | null>(null);
   /** Ficha aberta no meio da tela: tudo que a pesquisa sabe do lugar. */
   const [lojaAberta, setLojaAberta] = useState<Estabelecimento | null>(null);
+  /** Item sob o cursor na lista: acende o pino sem mexer no mapa. */
+  const [lojaDestacada, setLojaDestacada] = useState<string | null>(null);
   /** Leitura do centro e do zoom do mapa, entregue pelo próprio mapa. */
   const lerVistaDoMapaRef = React.useRef<
     (() => { lat: number; lng: number; zoom: number } | null) | null
@@ -12245,6 +12247,7 @@ export default function App() {
           setLojaAberta(lugar);
         }}
         emFoco={lojaEmFoco}
+        onDestacar={setLojaDestacada}
       />
 
       {/* FICHA DO ESTABELECIMENTO */}
@@ -13741,6 +13744,7 @@ export default function App() {
           onMapFilterChange={setMapFilter}
           estabelecimentos={estabelecimentos}
           estabelecimentoEmFoco={lojaEmFoco}
+          estabelecimentoDestacado={lojaDestacada}
           onEstabelecimentoSelecionado={(id) => {
             setLojaEmFoco(id);
             // O pino abre a ficha inteira; a lista fica aberta atrás, com o

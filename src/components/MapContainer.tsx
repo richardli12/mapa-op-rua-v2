@@ -284,9 +284,12 @@ interface MapContainerProps {
     categoria: string | null;
     avaliacao: number | null;
     situacao: string | null;
+    imagem: string | null;
   }[];
   /** Qual deles está em foco: o mapa voa até ele e destaca o marcador. */
   estabelecimentoEmFoco?: string | null;
+  /** Item sob o cursor na lista: o pino cresce, mas o mapa não se mexe. */
+  estabelecimentoDestacado?: string | null;
   /** Clique num marcador de estabelecimento. */
   onEstabelecimentoSelecionado?: (id: string) => void;
   /** Entrega ao painel o centro e o zoom de agora, para a busca por área. */
@@ -411,6 +414,7 @@ export default function MapContainer({
   esconderBusca = false,
   estabelecimentos,
   estabelecimentoEmFoco,
+  estabelecimentoDestacado,
   onEstabelecimentoSelecionado,
   aoRegistrarVista,
   onCoordsPicked,
@@ -1700,43 +1704,66 @@ export default function MapContainer({
 
     (estabelecimentos || []).forEach(lugar => {
       if (typeof lugar.latitude !== 'number' || typeof lugar.longitude !== 'number') return;
+
       const emFoco = estabelecimentoEmFoco === lugar.id;
-      const tamanho = emFoco ? 42 : 34;
+      const sobOCursor = estabelecimentoDestacado === lugar.id;
+      const tamanho = emFoco ? 48 : sobOCursor ? 42 : 36;
+      const inicial = (lugar.nome || '?').trim().charAt(0).toUpperCase();
 
       /**
-       * O mesmo pino de localização do resto do mapa — gota branca com a
-       * borda colorida e a bolinha da base. O que muda é a cor: roxo é a
-       * pesquisa, então dá para ver num relance o que é da campanha e o que
-       * veio de fora, sem inventar um símbolo novo para quem olha.
+       * Pino com a cara do lugar.
+       *
+       * Vinte pinos iguais obrigam a clicar em cada um para saber o que são.
+       * Com a foto dentro da gota, a padaria parece padaria e o posto parece
+       * posto — quem olha o mapa escolhe antes de clicar. Sem foto, fica a
+       * inicial do nome, que ao menos distingue um do outro; um ícone
+       * genérico repetido vinte vezes não distingue nada.
+       *
+       * A nota vai num selo no canto, porque entre três farmácias na mesma
+       * rua é ela que decide qual visitar primeiro.
        */
+      const miolo = lugar.imagem
+        ? `<img src="${lugar.imagem}" alt="" referrerpolicy="no-referrer"
+             style="width:100%;height:100%;object-fit:cover;display:block" />`
+        : `<span style="display:flex;align-items:center;justify-content:center;
+             width:100%;height:100%;color:#5B21B6;font-weight:900;
+             font-size:${Math.round(tamanho * 0.42)}px;font-family:sans-serif">${inicial}</span>`;
+
+      const selo =
+        lugar.avaliacao !== null && lugar.avaliacao !== undefined
+          ? `<span style="position:absolute;top:${tamanho - 14}px;left:${tamanho - 12}px;
+               display:flex;align-items:center;gap:1px;padding:1px 4px;border-radius:9px;
+               background:#fff;border:1px solid #E9D5FF;box-shadow:0 1px 3px rgba(0,0,0,.25);
+               font-family:sans-serif;font-size:9px;font-weight:900;color:#B45309;z-index:2">
+               <svg viewBox="0 0 24 24" width="7" height="7" fill="#F59E0B"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+               ${Number(lugar.avaliacao).toFixed(1)}</span>`
+          : '';
+
       const marcador = L.marker([lugar.latitude, lugar.longitude], {
         icon: L.divIcon({
           className: `custom-div-icon ${emFoco ? 'drop-shadow-lg' : 'drop-shadow-md'}`,
           html: `
-            <div style="display:flex;align-items:center;justify-content:center;
-              width:${tamanho}px;height:${tamanho}px;background:#fff;
-              border-radius:50% 50% 50% 0;transform:rotate(-45deg);
-              border:${emFoco ? 4 : 3}px solid #7C3AED;position:relative;
-              ${emFoco ? 'box-shadow:0 0 0 6px rgba(124,58,237,.18);' : ''}">
-              <div style="transform:rotate(45deg);display:flex;align-items:center;
-                justify-content:center;color:#7C3AED;width:20px;height:20px;">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
-                  stroke-linejoin="round" width="${emFoco ? 17 : 15}" height="${emFoco ? 17 : 15}">
-                  <path d="m2 7 1.5-4h17L22 7"/><path d="M4 7v13h16V7"/>
-                  <path d="M2 7a3 3 0 0 0 5 2 3 3 0 0 0 5 0 3 3 0 0 0 5 0 3 3 0 0 0 5-2"/>
-                  <path d="M9 20v-6h6v6"/>
-                </svg>
+            <div style="position:relative;width:${tamanho}px;height:${tamanho + 10}px">
+              <div style="display:flex;align-items:center;justify-content:center;
+                width:${tamanho}px;height:${tamanho}px;background:#fff;
+                border-radius:50% 50% 50% 0;transform:rotate(-45deg);
+                border:${emFoco ? 4 : 3}px solid #7C3AED;overflow:hidden;
+                ${emFoco ? 'box-shadow:0 0 0 6px rgba(124,58,237,.18);' : ''}">
+                <div style="transform:rotate(45deg);width:${tamanho - 8}px;height:${tamanho - 8}px;
+                  border-radius:50%;overflow:hidden;background:#F5F3FF;flex:none">
+                  ${miolo}
+                </div>
               </div>
+              <div style="width:10px;height:10px;background:#7C3AED;border-radius:50%;
+                position:absolute;top:${tamanho - 5}px;left:${tamanho / 2 - 5}px;
+                box-shadow:0 2px 4px rgba(0,0,0,.2);border:1px solid #fff"></div>
+              ${selo}
             </div>
-            <div style="width:10px;height:10px;background:#7C3AED;border-radius:50%;
-              position:absolute;top:${tamanho - 5}px;left:${tamanho / 2 - 5}px;
-              box-shadow:0 2px 4px rgba(0,0,0,.2);border:1px solid #fff;"></div>
           `,
           iconSize: [tamanho, tamanho + 10],
           iconAnchor: [tamanho / 2, tamanho + 8]
         }),
-        zIndexOffset: emFoco ? 1000 : 0
+        zIndexOffset: emFoco ? 1000 : sobOCursor ? 500 : 0
       });
 
       // Só o nome no passar do mouse: a ficha inteira é do clique, senão a
@@ -1754,9 +1781,30 @@ export default function MapContainer({
 
       grupo.addLayer(marcador);
       lojasPorIdRef.current[lugar.id] = marcador;
+
+      /**
+       * Foto que não carrega não pode deixar um buraco no pino.
+       *
+       * As miniaturas vêm de um provedor externo e falham por bloqueio, por
+       * link vencido ou por rede ruim. Quando isso acontece, o pino cai para
+       * a inicial — o ouvinte é registrado aqui, e não num `onerror` dentro
+       * do HTML, porque atributo de evento embutido é a primeira coisa que
+       * uma política de segurança de conteúdo bloqueia.
+       */
+      const imagem = marcador.getElement()?.querySelector('img');
+      if (imagem) {
+        imagem.addEventListener('error', () => {
+          const caixa = imagem.parentElement;
+          if (!caixa) return;
+          caixa.innerHTML =
+            `<span style="display:flex;align-items:center;justify-content:center;` +
+            `width:100%;height:100%;color:#5B21B6;font-weight:900;` +
+            `font-size:${Math.round(tamanho * 0.42)}px;font-family:sans-serif">${inicial}</span>`;
+        });
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estabelecimentos, estabelecimentoEmFoco]);
+  }, [estabelecimentos, estabelecimentoEmFoco, estabelecimentoDestacado]);
 
   // O escolhido na lista chama o mapa até ele, sem mudar o zoom de quem está
   // olhando de perto.
