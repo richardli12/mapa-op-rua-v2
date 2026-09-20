@@ -28,6 +28,10 @@ import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import { Estabelecimento } from "./services/estabelecimentos";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat, { MissaoDoCampo } from "./components/CheckInChat";
+import {
+  EditorDeMaterial,
+  ItemMaterial,
+} from "./components/MaterialDaMissao";
 import { lerDispositivo } from "./services/dispositivo";
 import DispositivosMembroModal from "./components/DispositivosMembroModal";
 import ConfiguracoesAdmin, {
@@ -1640,8 +1644,16 @@ export default function App() {
    * "map" tira o formulário da frente para ele clicar direto no mapa.
    */
   const [creationLocationMode, setCreationLocationMode] = useState<
-    "ask" | "search" | "map" | null
+    "ask" | "search" | "map" | "sem" | null
   >(null);
+  /**
+   * Material de apoio da missão em edição, área ou ponto.
+   *
+   * Um estado só para os dois formulários porque só um deles fica aberto por
+   * vez, e porque o arquivo já subiu para o Storage antes de a missão existir:
+   * quem desiste no meio precisa de alguém para apagar o que ficou.
+   */
+  const [materialMissao, setMaterialMissao] = useState<ItemMaterial[]>([]);
   const [isResolvingPickedAddress, setIsResolvingPickedAddress] =
     useState(false);
   const [pickedAddressLabel, setPickedAddressLabel] = useState<string | null>(
@@ -1834,7 +1846,8 @@ export default function App() {
       ? !!pickedCoords
       : creationLocationMode === "search"
         ? !!(creationBairroName && creationRuaName)
-        : false;
+        : // Missão sem local não tem o que esperar: o passo do endereço não existe.
+          creationLocationMode === "sem";
 
   /**
    * Cliente do link de check-in compartilhado pelo mapa.
@@ -3247,6 +3260,7 @@ export default function App() {
     const targetCoords = pickedCoords || { lat: -9.6548, lng: -35.715 }; // Default Maceió Centro
 
     const titulo = areaTitle.trim() || nomePadraoDaArea();
+    const materialDaArea = materialParaSalvar();
 
     if (editingAreaId) {
       // Edit existing
@@ -3256,7 +3270,13 @@ export default function App() {
         title: titulo,
         description: areaDescription,
         bairro: areaBairro,
-        center: { ...targetCoords, assignedDeltas: selectedDeltas },
+        center: {
+          // Só lat e lng: ver o comentário em savePin.
+          lat: targetCoords.lat,
+          lng: targetCoords.lng,
+          assignedDeltas: selectedDeltas,
+          ...(materialDaArea.length > 0 ? { material: materialDaArea } : {}),
+        },
         radius: Number(areaRadius),
         color: areaColor,
         active: existingArea ? existingArea.active : true,
@@ -3289,7 +3309,13 @@ export default function App() {
         title: titulo,
         description: areaDescription.trim(),
         bairro: areaBairro,
-        center: { ...targetCoords, assignedDeltas: selectedDeltas },
+        center: {
+          // Só lat e lng: ver o comentário em savePin.
+          lat: targetCoords.lat,
+          lng: targetCoords.lng,
+          assignedDeltas: selectedDeltas,
+          ...(materialDaArea.length > 0 ? { material: materialDaArea } : {}),
+        },
         radius: Number(areaRadius),
         color: areaColor,
         active: true,
@@ -3317,6 +3343,7 @@ export default function App() {
   };
 
   const resetAreaForm = () => {
+    setMaterialMissao([]);
     setDefinindoRaio(false);
     setNomeandoRaio(null);
     setAreaTitle("");
@@ -3667,6 +3694,25 @@ export default function App() {
     }
 
     const targetCoords = pickedCoords || { lat: -9.66, lng: -35.72 };
+    /**
+     * Missão sem lugar no mapa.
+     *
+     * A marca vai dentro de `position`, que já é jsonb livre — assim a função
+     * nasce funcionando em todo banco que já está no ar, sem esperar migração.
+     * A coordenada continua preenchida só para a coluna `not null` do banco;
+     * quem lê é `position.semLocal`, nunca a lat/lng deste caso.
+     */
+    const semLocal = creationLocationMode === "sem";
+    const material = materialParaSalvar();
+    // Só lat e lng do que veio: na edição `pickedCoords` é o `position` antigo
+    // inteiro, e espalhá-lo faria o material removido voltar sozinho.
+    const posicao = {
+      lat: targetCoords.lat,
+      lng: targetCoords.lng,
+      assignedDeltas: selectedDeltas,
+      ...(semLocal ? { semLocal: true } : {}),
+      ...(material.length > 0 ? { material } : {}),
+    };
 
     if (editingPinId) {
       // Edit existing
@@ -3675,7 +3721,7 @@ export default function App() {
         id: editingPinId,
         title: pinTitle,
         description: pinDescription,
-        position: { ...targetCoords, assignedDeltas: selectedDeltas },
+        position: posicao,
         color: pinColor,
         iconType: pinIconType,
         active: existingPin ? existingPin.active : true,
@@ -3703,7 +3749,7 @@ export default function App() {
         id: "pin_" + Math.random().toString(36).substr(2, 9),
         title: pinTitle,
         description: pinDescription || "",
-        position: { ...targetCoords, assignedDeltas: selectedDeltas },
+        position: posicao,
         color: pinColor,
         iconType: pinIconType,
         active: true,
@@ -3720,7 +3766,9 @@ export default function App() {
         });
       }
       triggerNotification(
-        "Novo ponto estratégico (Pin) adicionado ao mapa!",
+        semLocal
+          ? "Missão enviada. Ela aparece no check-in de quem você marcou."
+          : "Novo ponto estratégico (Pin) adicionado ao mapa!",
         "success",
       );
     }
@@ -3728,7 +3776,38 @@ export default function App() {
     resetPinForm();
   };
 
+  /**
+   * Larga o material que subiu e não virou missão.
+   *
+   * Cancelar o formulário sem isto deixa o arquivo no Storage para sempre,
+   * sem nada que o referencie. Salvar não passa por aqui: lá o material fica.
+   */
+  const descartarMaterialPendente = () => {
+    const caminhos = materialMissao
+      .filter((m) => !m.jaSalvo)
+      .map((m) => m.storagePath)
+      .filter(Boolean) as string[];
+    if (caminhos.length > 0) DatabaseService.removerArquivosStorage(caminhos);
+    materialMissao.forEach((m) => m.previa && URL.revokeObjectURL(m.previa));
+    setMaterialMissao([]);
+  };
+
+  /** O material pronto, no formato que a missão guarda. */
+  const materialParaSalvar = () =>
+    materialMissao
+      .filter((m) => m.estado === "pronto" && m.url)
+      .map(({ id, tipo, url, storagePath, nome, tamanho, duracao }) => ({
+        id,
+        tipo,
+        url,
+        storagePath,
+        nome,
+        tamanho,
+        duracao,
+      }));
+
   const resetPinForm = () => {
+    setMaterialMissao([]);
     setPinTitle("");
     setPinDescription("");
     setPinColor("#ea580c");
@@ -3853,6 +3932,14 @@ export default function App() {
     setPickedCoords(area.center);
     setAreaCandidateId(area.candidateId || "");
     setSelectedDeltas(area.assignedDeltas || area.center?.assignedDeltas || []);
+    setMaterialMissao(
+      (area.center?.material || []).map((m) => ({
+        ...m,
+        estado: "pronto" as const,
+        progresso: 100,
+        jaSalvo: true,
+      })),
+    );
     triggerNotification("Carregado dados para edição da área!", "info");
   };
 
@@ -3866,6 +3953,15 @@ export default function App() {
     setPinIconType(pin.iconType);
     setPinDate(pin.date || "");
     setPickedCoords(pin.position);
+    setCreationLocationMode(pin.position?.semLocal ? "sem" : "map");
+    setMaterialMissao(
+      (pin.position?.material || []).map((m) => ({
+        ...m,
+        estado: "pronto" as const,
+        progresso: 100,
+        jaSalvo: true,
+      })),
+    );
     setPinCandidateId(pin.candidateId || "");
     setSelectedDeltas(pin.assignedDeltas || pin.position?.assignedDeltas || []);
     triggerNotification(
@@ -3909,6 +4005,7 @@ export default function App() {
   /** Larga a criação do raio inteira: nada fica desenhado nem pela metade. */
   const cancelarRaio = () => {
     setClickToPickCoords(false);
+    descartarMaterialPendente();
     resetAreaForm();
     triggerNotification("Criação da área cancelada.", "info");
   };
@@ -4039,6 +4136,18 @@ export default function App() {
     authenticatedSupporter,
     searchQuery,
   ]);
+
+  /**
+   * O que de fato vai para o mapa.
+   *
+   * Missão sem local tem coordenada só para a coluna do banco: desenhá-la
+   * poria um ponto falso na rua errada. Ela vive na lista e na conversa do
+   * check-in. Memorizada porque desce como prop do Leaflet.
+   */
+  const pinsNoMapa = React.useMemo(
+    () => filteredPins.filter((p) => !p.position?.semLocal),
+    [filteredPins],
+  );
 
   /** Id do cliente cujo mapa está aberto agora. */
   const clienteEmFoco =
@@ -4334,6 +4443,7 @@ export default function App() {
         lat: a.center?.lat ?? 0,
         lng: a.center?.lng ?? 0,
         raio: a.radius,
+        material: a.center?.material || [],
         createdAt: a.createdAt,
       }));
 
@@ -4353,6 +4463,8 @@ export default function App() {
         lat: p.position?.lat ?? 0,
         lng: p.position?.lng ?? 0,
         tipoLabel: rotuloDoTipo(p.iconType),
+        semLocal: p.position?.semLocal === true,
+        material: p.position?.material || [],
         createdAt: p.createdAt,
       }));
 
@@ -12325,6 +12437,15 @@ export default function App() {
                       className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs resize-none"
                     />
                   </div>
+
+                  <div className="border-t border-slate-100 pt-3.5">
+                    <EditorDeMaterial
+                      itens={materialMissao}
+                      onMudar={setMaterialMissao}
+                      notificar={triggerNotification}
+                      ligado={isDatabaseConfigured}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2 pt-5">
@@ -13663,6 +13784,12 @@ export default function App() {
                                 <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide font-semibold">
                                   {operationTypeLabel(pin.iconType)}
                                 </p>
+                                {pin.position?.semLocal && (
+                                  <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-[9px] font-black uppercase tracking-wider text-amber-700">
+                                    <ClipboardList className="w-2.5 h-2.5" />
+                                    Sem local
+                                  </span>
+                                )}
                               </div>
                             </div>
 
@@ -13917,7 +14044,7 @@ export default function App() {
       <div className="flex-1 h-full relative order-1">
         <MapContainer
           areas={filteredAreas}
-          pins={filteredPins}
+          pins={pinsNoMapa}
           checkIns={filteredCheckIns}
           selectedId={selectedId}
           defaultLocation={mapDefaultLocation}
@@ -14281,19 +14408,24 @@ export default function App() {
                   <h3 className="font-extrabold text-indigo-950 text-base leading-tight">
                     {creationModalType === "area"
                       ? "Criar Área de Trabalho (Raio)"
-                      : "Criar Ponto Estratégico (PIN)"}
+                      : creationLocationMode === "sem"
+                        ? "Criar Missão (sem local)"
+                        : "Criar Ponto Estratégico (PIN)"}
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
                     {creationLocationMode === "map"
                       ? "Local definido pelo ponto clicado no mapa."
                       : creationLocationMode === "search"
                         ? "Planeje a localização ideal selecionando o bairro e rua."
-                        : "Primeiro, escolha como quer definir o local."}
+                        : creationLocationMode === "sem"
+                          ? "Sem lugar no mapa: a missão vai direto para quem você marcar."
+                          : "Primeiro, escolha como quer definir o local."}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
+                    descartarMaterialPendente();
                     if (creationModalType === "area") resetAreaForm();
                     else resetPinForm();
                   }}
@@ -14364,6 +14496,60 @@ export default function App() {
                         </p>
                       </div>
                     </button>
+
+                    {/* Nem toda missão é um lugar: "ligar para o presidente do
+                        bairro" não tem onde ser desenhada no mapa. */}
+                    {creationModalType === "pin" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCreationLocationMode("sem");
+                          setPickedCoords(null);
+                        }}
+                        className="w-full text-left p-4 bg-white border border-slate-200 rounded-2xl hover:border-amber-400 hover:bg-amber-50/40 transition-all cursor-pointer flex items-start gap-3 shadow-2xs"
+                      >
+                        <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center shrink-0">
+                          <ClipboardList className="w-4 h-4 text-amber-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-sm text-indigo-950 leading-tight">
+                            Sem local — só a missão
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1 leading-snug">
+                            Vai direto para a conversa de quem você marcar. Nada
+                            é desenhado no mapa.
+                          </p>
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* 1C. MISSÃO SEM LOCAL */}
+                {creationLocationMode === "sem" && (
+                  <div className="space-y-2 p-4 bg-amber-50/40 border border-amber-100 rounded-2xl animate-in fade-in slide-in-from-top-1.5 duration-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-5 h-5 rounded-full bg-amber-100 border border-amber-200 flex items-center justify-center font-extrabold text-[10px] text-amber-700 shrink-0">
+                          1
+                        </div>
+                        <h4 className="font-extrabold text-[11px] text-indigo-950 uppercase tracking-widest leading-none truncate">
+                          Missão sem local
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCreationLocationMode("ask")}
+                        className="text-[10px] uppercase font-bold tracking-wider text-slate-400 hover:text-slate-600 transition-colors cursor-pointer shrink-0"
+                      >
+                        Trocar
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-snug">
+                      Ela não entra no mapa. Aparece na conversa do check-in de
+                      quem você marcar em "Equipe", e o check-in é feito onde a
+                      pessoa estiver.
+                    </p>
                   </div>
                 )}
 
@@ -15002,6 +15188,15 @@ export default function App() {
                             </div>
                           )}
 
+                          <div className="border-t border-slate-100 pt-3">
+                            <EditorDeMaterial
+                              itens={materialMissao}
+                              onMudar={setMaterialMissao}
+                              notificar={triggerNotification}
+                              ligado={isDatabaseConfigured}
+                            />
+                          </div>
+
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
                               Direcionar Missão à Equipe
@@ -15141,12 +15336,18 @@ export default function App() {
                         {/* Pin specific inputs */}
                         <div>
                           <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                            Título do Ponto Estratégico *
+                            {creationLocationMode === "sem"
+                              ? "Título da missão *"
+                              : "Título do Ponto Estratégico *"}
                           </label>
                           <input
                             type="text"
                             required
-                            placeholder="Ex: Comitê Setorial Jatiúca"
+                            placeholder={
+                              creationLocationMode === "sem"
+                                ? "Ex: Ligar para o presidente do bairro"
+                                : "Ex: Comitê Setorial Jatiúca"
+                            }
                             value={pinTitle}
                             onChange={(e) => setPinTitle(e.target.value)}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
@@ -15212,7 +15413,11 @@ export default function App() {
                             Anotações / Descrição do Marcador
                           </label>
                           <textarea
-                            placeholder="Ex: Reunião às 19h com a liderança no comitê..."
+                            placeholder={
+                              creationLocationMode === "sem"
+                                ? "Ex: Confirmar presença dele na reunião de sábado..."
+                                : "Ex: Reunião às 19h com a liderança no comitê..."
+                            }
                             value={pinDescription}
                             onChange={(e) => setPinDescription(e.target.value)}
                             rows={2}
@@ -15244,6 +15449,15 @@ export default function App() {
                               </select>
                             </div>
                           )}
+
+                          <div className="border-t border-slate-100 pt-3">
+                            <EditorDeMaterial
+                              itens={materialMissao}
+                              onMudar={setMaterialMissao}
+                              notificar={triggerNotification}
+                              ligado={isDatabaseConfigured}
+                            />
+                          </div>
 
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">

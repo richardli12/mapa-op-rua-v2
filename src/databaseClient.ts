@@ -848,9 +848,19 @@ export const DatabaseService = {
    * Devolve também o caminho dentro do bucket: é por ele que o arquivo é
    * apagado quando a mídia sai do check-in.
    */
+  /**
+   * Material de apoio de uma missao enviada pelo comite.
+   *
+   * Mesmo balde e mesmo caminho publico das midias do check-in; o que muda e
+   * a pasta, para dar para varrer o que e de missao sem tocar no resto.
+   */
+  uploadArquivoMissao(file: File, onProgress?: (porcento: number) => void) {
+    return DatabaseService.uploadArquivoCheckIn(file, 'missoes', onProgress);
+  },
+
   uploadArquivoCheckIn(
     file: File,
-    pasta: 'midias' | 'audios',
+    pasta: 'midias' | 'audios' | 'missoes',
     onProgress?: (porcento: number) => void
   ): Promise<{ success: boolean; url: string | null; path: string | null; error?: string }> {
     if (!db) {
@@ -868,7 +878,9 @@ export const DatabaseService = {
     const padrao = tipo.startsWith('video/') ? 'mp4' : tipo.startsWith('audio/') ? 'webm' : 'jpg';
     const extensao = (extensaoDoNome || padrao).toLowerCase().replace(/[^a-z0-9]/g, '');
     const nome = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extensao}`;
-    const caminho = `check_ins/${pasta}/${nome}`;
+    // A missao nao e um check-in: o material dela mora fora dessa pasta.
+    const caminho =
+      pasta === 'missoes' ? `missoes/material/${nome}` : `check_ins/${pasta}/${nome}`;
 
     return new Promise(resolve => {
       const xhr = new XMLHttpRequest();

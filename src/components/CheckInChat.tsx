@@ -14,6 +14,7 @@ import {
   Maximize2,
   ArrowUp,
   BellRing,
+  ClipboardList,
   Target,
   TriangleAlert,
   X
@@ -21,6 +22,7 @@ import {
 import { reverseGeocode } from '../services/streetSources';
 import { DatabaseService, isDatabaseConfigured } from '../databaseClient';
 import {
+  MaterialDeApoio,
   OperationType,
   CheckIn,
   CheckInMedia,
@@ -35,6 +37,7 @@ import MiniMapa from './MiniMapa';
 import MapaAjuste from './MapaAjuste';
 import CheckInMidias, { MidiaItem, MidiaTipo } from './CheckInMidias';
 import CheckInObservacoes, { ObservacaoItem } from './CheckInObservacoes';
+import { MaterialDaMissao } from './MaterialDaMissao';
 
 /**
  * Missão enviada pelo comitê e mostrada no alto da conversa.
@@ -56,6 +59,10 @@ export interface MissaoDoCampo {
   raio?: number;
   /** Rótulo do tipo de operação, quando o comitê escolheu um. */
   tipoLabel?: string;
+  /** Missão sem lugar no mapa: a tarefa é a missão, e o local é onde ela estiver. */
+  semLocal?: boolean;
+  /** O que o comitê mandou junto: arte, planilha, um recado gravado. */
+  material?: MaterialDeApoio[];
   createdAt?: string;
 }
 
@@ -1135,7 +1142,7 @@ export default function CheckInChat({
                    * número é o que decide se dá para ir a pé.
                    */
                   const ondeEstou =
-                    longe === null
+                    missaoDaLista.semLocal || longe === null
                       ? null
                       : missaoDaLista.raio && longe <= missaoDaLista.raio
                         ? 'você já está dentro'
@@ -1143,7 +1150,11 @@ export default function CheckInChat({
                           ? 'você está no ponto'
                           : `a ${distanciaCurta(longe)} de você`;
                   const detalhes = [
-                    missaoDaLista.tipo === 'area' ? 'Área de trabalho' : 'Ponto no mapa',
+                    missaoDaLista.semLocal
+                      ? 'Sem local marcado · faça o check-in onde você estiver'
+                      : missaoDaLista.tipo === 'area'
+                        ? 'Área de trabalho'
+                        : 'Ponto no mapa',
                     missaoDaLista.bairro,
                     missaoDaLista.tipoLabel,
                     missaoDaLista.raio
@@ -1155,27 +1166,38 @@ export default function CheckInChat({
                     .join(' · ');
 
                   return (
-                    <button
+                    /*
+                     * Cartão é div, não botão: o material traz link e tocador
+                     * de áudio, e botão dentro de botão não é HTML válido --
+                     * tocar no play escolheria a missão junto.
+                     */
+                    <div
                       key={missaoDaLista.id}
-                      type="button"
-                      onClick={() => {
-                        setMissaoId(escolhida ? null : missaoDaLista.id);
-                        // Tocou: já viu. A marca de novidade sai deste cartão.
-                        setMissoesNovas(prev => prev.filter(id => id !== missaoDaLista.id));
-                      }}
-                      className="w-full text-left rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
+                      className="w-full text-left rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition-all"
                       style={{
                         borderColor: escolhida || eNova ? VERDE : '#E2E8F0',
                         boxShadow:
                           escolhida || eNova ? `0 0 0 2px ${VERDE}33` : undefined
                       }}
                     >
-                      <div className="flex items-start gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMissaoId(escolhida ? null : missaoDaLista.id);
+                          // Tocou: já viu. A marca de novidade sai daqui.
+                          setMissoesNovas(prev =>
+                            prev.filter(id => id !== missaoDaLista.id)
+                          );
+                        }}
+                        className="w-full text-left flex items-start gap-2.5 cursor-pointer active:scale-[0.99] transition-transform"
+                      >
                         <span
                           className="w-8 h-8 rounded-xl shrink-0 flex items-center justify-center"
                           style={{ backgroundColor: `${cor}1A`, color: cor }}
                         >
-                          {missaoDaLista.tipo === 'area' ? (
+                          {missaoDaLista.semLocal ? (
+                            <ClipboardList className="w-4 h-4" />
+                          ) : missaoDaLista.tipo === 'area' ? (
                             <Target className="w-4 h-4" />
                           ) : (
                             <MapPin className="w-4 h-4" />
@@ -1213,8 +1235,12 @@ export default function CheckInChat({
                             <Check className="w-3 h-3 text-white stroke-[3]" />
                           </span>
                         )}
-                      </div>
-                    </button>
+                      </button>
+
+                      {missaoDaLista.material && missaoDaLista.material.length > 0 && (
+                        <MaterialDaMissao itens={missaoDaLista.material} />
+                      )}
+                    </div>
                   );
                 })}
 
