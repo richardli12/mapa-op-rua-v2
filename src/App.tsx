@@ -27,7 +27,7 @@ import FichaEstabelecimento from "./components/FichaEstabelecimento";
 import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import { Estabelecimento } from "./services/estabelecimentos";
 import TeamSignupPage from "./components/TeamSignupPage";
-import CheckInChat from "./components/CheckInChat";
+import CheckInChat, { MissaoDoCampo } from "./components/CheckInChat";
 import { lerDispositivo } from "./services/dispositivo";
 import DispositivosMembroModal from "./components/DispositivosMembroModal";
 import ConfiguracoesAdmin, {
@@ -4298,6 +4298,70 @@ export default function App() {
   })();
   const hasAssignedMissions = userMissionCount > 0;
 
+  /**
+   * As missões que o comitê mandou para quem está logado no check-in.
+   *
+   * É o que a pessoa vê no alto da conversa. Áreas e pinos entram na mesma
+   * lista porque, na rua, os dois são a mesma coisa: um lugar para ir com uma
+   * instrução junto. A atribuição tem de ser explícita — ponto sem ninguém
+   * atribuído é do comitê, não dela, e não aparece aqui.
+   *
+   * Memorizada porque desce como prop: array novo a cada render faria o aviso
+   * de missão nova disparar sozinho a cada tecla digitada na conversa.
+   */
+  const missoesDoIntegrante = React.useMemo<MissaoDoCampo[]>(() => {
+    const meuId = authenticatedSupporter?.id;
+    if (!checkInCandidateId || !meuId) return [];
+    const minha = (atribuidos: any) =>
+      Array.isArray(atribuidos) && atribuidos.includes(meuId);
+    const rotuloDoTipo = (id?: string) =>
+      operationTypes.find((t) => t.id === id)?.label;
+
+    const deAreas: MissaoDoCampo[] = areas
+      .filter(
+        (a) =>
+          a.active &&
+          a.candidateId === checkInCandidateId &&
+          minha(a.assignedDeltas || a.center?.assignedDeltas),
+      )
+      .map((a) => ({
+        id: a.id,
+        tipo: "area" as const,
+        title: a.title,
+        description: a.description || "",
+        bairro: a.bairro || "",
+        color: a.color || "#0C3556",
+        lat: a.center?.lat ?? 0,
+        lng: a.center?.lng ?? 0,
+        raio: a.radius,
+        createdAt: a.createdAt,
+      }));
+
+    const dePinos: MissaoDoCampo[] = pins
+      .filter(
+        (p) =>
+          p.active &&
+          p.candidateId === checkInCandidateId &&
+          minha(p.assignedDeltas || p.position?.assignedDeltas),
+      )
+      .map((p) => ({
+        id: p.id,
+        tipo: "pin" as const,
+        title: p.title,
+        description: p.description || "",
+        color: p.color || "#0C3556",
+        lat: p.position?.lat ?? 0,
+        lng: p.position?.lng ?? 0,
+        tipoLabel: rotuloDoTipo(p.iconType),
+        createdAt: p.createdAt,
+      }));
+
+    // Mais nova em cima: a missão que acabou de chegar é a que interessa.
+    return [...deAreas, ...dePinos].sort((a, b) =>
+      (b.createdAt || "").localeCompare(a.createdAt || ""),
+    );
+  }, [areas, pins, operationTypes, checkInCandidateId, authenticatedSupporter]);
+
   // Sem missão atribuída não há escolha a fazer: o check-in livre é o único
   // caminho, então o app já entra nele em vez de oferecer um botão.
   useEffect(() => {
@@ -5250,6 +5314,7 @@ export default function App() {
           nomesReservados={operationTypes
             .filter((t) => t.candidateId === checkInCandidateId)
             .map((t) => t.label)}
+          missoes={missoesDoIntegrante}
           onTipoCriado={(tipo) =>
             setOperationTypes((prev) =>
               prev.some((t) => t.id === tipo.id) ? prev : [...prev, tipo],
