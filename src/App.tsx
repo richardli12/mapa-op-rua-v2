@@ -9,6 +9,7 @@ import {
 import {
   candidateLocationText,
   CandidateLocation,
+  parseCandidateLocation,
   resolveCandidateLocation,
 } from "./services/candidateLocation";
 import { fetchExternalData, fetchExternalTeam } from "./services/externalApi";
@@ -23,6 +24,7 @@ import FiltroCheckIns, { PessoaDoFiltro } from "./components/FiltroCheckIns";
 import LaserPointer from "./components/LaserPointer";
 import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
 import FichaEstabelecimento from "./components/FichaEstabelecimento";
+import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import { Estabelecimento } from "./services/estabelecimentos";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
@@ -52,6 +54,7 @@ import {
   Star,
   Crosshair,
   Store,
+  Layers3,
   Maximize2,
   Navigation,
   TrendingUp,
@@ -883,6 +886,18 @@ export default function App() {
   const [lojaAberta, setLojaAberta] = useState<Estabelecimento | null>(null);
   /** Item sob o cursor na lista: acende o pino sem mexer no mapa. */
   const [lojaDestacada, setLojaDestacada] = useState<string | null>(null);
+
+  /* --------------------------------------- inteligência territorial ---
+   * População, bairros e Censo do território em que a equipe trabalha.
+   * O círculo medido fica desenhado no mapa: numero sem a area a vista e
+   * numero para acreditar de olhos fechados.
+   */
+  const [territorioAberto, setTerritorioAberto] = useState(false);
+  const [circuloAnalisado, setCirculoAnalisado] = useState<{
+    lat: number;
+    lng: number;
+    raio: number;
+  } | null>(null);
   /** Leitura do centro e do zoom do mapa, entregue pelo próprio mapa. */
   const lerVistaDoMapaRef = React.useRef<
     (() => { lat: number; lng: number; zoom: number } | null) | null
@@ -11883,6 +11898,32 @@ export default function App() {
 
         <div className="w-8 h-[1px] bg-slate-800/50" />
 
+        {/* Inteligência territorial: quem mora no território */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setTerritorioAberto((v) => !v);
+            setPesquisaLojasAberta(false);
+            setFiltroCheckInsAberto(false);
+            setIsFilterDropdownOpen(false);
+          }}
+          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
+            circuloAnalisado
+              ? "bg-emerald-600 border-emerald-700 text-white shadow-lg shadow-emerald-500/20"
+              : territorioAberto
+                ? "bg-indigo-700 border-indigo-600 text-white"
+                : "bg-indigo-900/80 hover:bg-indigo-800 border-indigo-700 text-indigo-200"
+          }`}
+          title="Inteligência territorial: população, bairros e Censo"
+        >
+          <Layers3 className="w-5 h-5" />
+          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
+            Inteligência territorial
+          </span>
+        </button>
+
+        <div className="w-8 h-[1px] bg-slate-800/50" />
+
         {/* Pesquisa de estabelecimentos: o que existe no terreno em volta */}
         <button
           onClick={(e) => {
@@ -12232,6 +12273,34 @@ export default function App() {
 
       {/* Ponteiro laser: segue ligado quando o painel abre o mapa */}
       <LaserPointer ativo={laserLigado} />
+
+      {/* INTELIGÊNCIA TERRITORIAL */}
+      <InteligenciaTerritorial
+        aberto={territorioAberto}
+        onFechar={() => setTerritorioAberto(false)}
+        /*
+         * A UF sai de `candidateLocation`, que é a mesma que o resto do mapa
+         * usa. Muito cadastro tem só a cidade ("Maceió", "Parauapebas"), e é
+         * esse estado resolvido que já descobriu a UF — ler o campo cru aqui
+         * daria vazio justamente nos clientes mais comuns.
+         */
+        ufDoCliente={
+          candidateLocation?.uf ||
+          parseCandidateLocation(
+            candidateLocationText(
+              candidates.find((c) => c.id === selectedCandidateFilter),
+            ),
+          )?.uf ||
+          null
+        }
+        cidadeDoCliente={
+          candidateLocation?.cityName ||
+          candidates.find((c) => c.id === selectedCandidateFilter)?.city ||
+          null
+        }
+        centroDoMapa={() => lerVistaDoMapaRef.current?.() || null}
+        onCirculoAnalisado={setCirculoAnalisado}
+      />
 
       {/* PESQUISA DE ESTABELECIMENTOS */}
       <PesquisaEstabelecimentos
@@ -13745,6 +13814,7 @@ export default function App() {
           estabelecimentos={estabelecimentos}
           estabelecimentoEmFoco={lojaEmFoco}
           estabelecimentoDestacado={lojaDestacada}
+          circuloAnalisado={circuloAnalisado}
           onEstabelecimentoSelecionado={(id) => {
             setLojaEmFoco(id);
             // O pino abre a ficha inteira; a lista fica aberta atrás, com o
