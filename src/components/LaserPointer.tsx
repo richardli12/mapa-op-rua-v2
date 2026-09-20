@@ -202,21 +202,28 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
           const vida = (vidaDe(de) + vidaDe(ate)) / 2;
           if (vida <= 0) continue;
 
-          // Halo difuso por baixo...
+          // Halo difuso por baixo, agora mais aberto e mais presente...
           fatia(
             de,
             ate,
-            (v) => 4 + 17 * v,
-            `rgba(255, 45, 45, ${0.11 * vida * vida})`
+            (v) => 6 + 24 * v,
+            `rgba(255, 40, 40, ${0.15 * vida * vida})`
+          );
+          // ...uma camada intermediária que engrossa o vermelho...
+          fatia(
+            de,
+            ate,
+            (v) => 2 + 11 * v,
+            `rgba(255, 25, 25, ${0.3 * vida * vida})`
           );
           // ...e o fio quente por cima, que clareia perto da ponta.
           fatia(
             de,
             ate,
-            (v) => 0.9 + 5.6 * v,
-            `rgba(255, ${Math.round(70 + 140 * vida)}, ${Math.round(
-              70 + 110 * vida
-            )}, ${0.9 * vida * Math.sqrt(vida)})`
+            (v) => 1.2 + 7.3 * v,
+            `rgba(255, ${Math.round(60 + 150 * vida)}, ${Math.round(
+              60 + 120 * vida
+            )}, ${Math.min(1, 1.15 * vida * Math.sqrt(vida))})`
           );
         }
       }
@@ -236,14 +243,14 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
           0,
           cabeca.x,
           cabeca.y,
-          23 * pulso
+          29 * pulso
         );
-        halo.addColorStop(0, 'rgba(255, 40, 40, 0.55)');
-        halo.addColorStop(0.45, 'rgba(255, 30, 30, 0.2)');
+        halo.addColorStop(0, 'rgba(255, 40, 40, 0.68)');
+        halo.addColorStop(0.45, 'rgba(255, 30, 30, 0.26)');
         halo.addColorStop(1, 'rgba(255, 0, 0, 0)');
         ctx.fillStyle = halo;
         ctx.beginPath();
-        ctx.arc(cabeca.x, cabeca.y, 23 * pulso, 0, Math.PI * 2);
+        ctx.arc(cabeca.x, cabeca.y, 29 * pulso, 0, Math.PI * 2);
         ctx.fill();
 
         const miolo = ctx.createRadialGradient(
@@ -252,14 +259,14 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
           0,
           cabeca.x,
           cabeca.y,
-          6.5
+          7.6
         );
         miolo.addColorStop(0, 'rgba(255, 255, 255, 1)');
         miolo.addColorStop(0.38, 'rgba(255, 120, 120, 1)');
         miolo.addColorStop(1, 'rgba(230, 0, 0, 0.9)');
         ctx.fillStyle = miolo;
         ctx.beginPath();
-        ctx.arc(cabeca.x, cabeca.y, 6.5, 0, Math.PI * 2);
+        ctx.arc(cabeca.x, cabeca.y, 7.6, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -276,13 +283,13 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
     };
 
     /**
-     * Guarda a posição nova.
+     * Acrescenta um pedaço de rastro.
      *
      * Num movimento rápido o navegador entrega saltos grandes entre um aviso
      * e outro; os pontos intermediários entram aqui para a curva não virar
      * uma corda esticada de um canto ao outro.
      */
-    const mover = (x: number, y: number) => {
+    const rastrear = (x: number, y: number) => {
       const pontos = pontosRef.current;
       const ultimo = pontos[pontos.length - 1];
       const agora = performance.now();
@@ -308,48 +315,114 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
       if (pontos.length > MAXIMO_DE_PONTOS) {
         pontos.splice(0, pontos.length - MAXIMO_DE_PONTOS);
       }
+    };
 
-      cabecaRef.current = { x, y, visivel: true };
+    /* --------------------------------------------------------- o gesto ---
+     * O ponto segue o cursor o tempo todo, mas o rastro é riscado: ele só
+     * nasce com o botão esquerdo apertado (ou o dedo na tela) e para no
+     * instante em que ele é solto. Sem isso, atravessar a tela para alcançar
+     * um menu deixaria um risco vermelho que ninguém pediu.
+     */
+    let riscando = false;
+    let inicio = { x: 0, y: 0 };
+    let arrastou = false;
+    /** Um arrasto não pode virar clique em quem estava embaixo do dedo. */
+    let bloquearClique = false;
+
+    const aoDescer = (e: PointerEvent) => {
+      // Só o botão principal risca; o direito e o do meio têm dono no mapa.
+      if (!e.isPrimary || e.button !== 0) return;
+      riscando = true;
+      arrastou = false;
+      inicio = { x: e.clientX, y: e.clientY };
+      cabecaRef.current = { x: e.clientX, y: e.clientY, visivel: true };
+      // O traço novo começa do zero, e não emendado no que sobrou do último.
+      pontosRef.current = [];
+      rastrear(e.clientX, e.clientY);
       agendar();
     };
 
-    /** A ponta some, mas o rastro que ficou continua apagando sozinho. */
-    const soltar = () => {
+    const aoMover = (e: PointerEvent) => {
+      cabecaRef.current = { x: e.clientX, y: e.clientY, visivel: true };
+
+      // O botão pode ter sido solto fora da janela: `buttons` é a verdade do
+      // momento, e sem ele o rastro continuaria sozinho.
+      if (riscando && !(e.buttons & 1)) {
+        riscando = false;
+      }
+
+      if (riscando) {
+        if (
+          !arrastou &&
+          Math.hypot(e.clientX - inicio.x, e.clientY - inicio.y) > 6
+        ) {
+          arrastou = true;
+        }
+        rastrear(e.clientX, e.clientY);
+      }
+
+      agendar();
+    };
+
+    const aoSubir = (e: PointerEvent) => {
+      if (riscando && arrastou) {
+        // Só o arrasto bloqueia o clique. Um toque seco continua clicando,
+        // senão o laser transformaria o painel numa vitrine.
+        bloquearClique = true;
+      }
+      riscando = false;
+      arrastou = false;
+      // No toque não há cursor pairando: tirou o dedo, a ponta sai junto.
+      if (e.pointerType !== 'mouse') {
+        cabecaRef.current = { ...cabecaRef.current, visivel: false };
+      }
+      agendar();
+    };
+
+    const aoCancelar = () => {
+      riscando = false;
+      arrastou = false;
       cabecaRef.current = { ...cabecaRef.current, visivel: false };
       agendar();
     };
 
-    const noMouse = (e: MouseEvent) => mover(e.clientX, e.clientY);
-    const noToque = (e: TouchEvent) => {
-      const dedo = e.touches[0];
-      if (dedo) mover(dedo.clientX, dedo.clientY);
+    const aoClicar = (e: MouseEvent) => {
+      if (!bloquearClique) return;
+      bloquearClique = false;
+      e.stopPropagation();
+      e.preventDefault();
     };
+
     /** Mouse que saiu da janela não deixa um ponto parado na borda. */
     const saiuDaJanela = (e: MouseEvent) => {
-      if (!e.relatedTarget) soltar();
+      if (!e.relatedTarget) {
+        riscando = false;
+        cabecaRef.current = { ...cabecaRef.current, visivel: false };
+        agendar();
+      }
     };
+
     const aoRedimensionar = () => {
       medir();
       agendar();
     };
 
-    window.addEventListener('mousemove', noMouse, { passive: true });
-    window.addEventListener('dragover', noMouse as any, { passive: true });
-    window.addEventListener('touchstart', noToque, { passive: true });
-    window.addEventListener('touchmove', noToque, { passive: true });
-    window.addEventListener('touchend', soltar, { passive: true });
-    window.addEventListener('touchcancel', soltar, { passive: true });
+    window.addEventListener('pointerdown', aoDescer, { passive: true });
+    window.addEventListener('pointermove', aoMover, { passive: true });
+    window.addEventListener('pointerup', aoSubir, { passive: true });
+    window.addEventListener('pointercancel', aoCancelar, { passive: true });
+    // Captura: o clique precisa ser barrado antes de chegar em quem escuta.
+    window.addEventListener('click', aoClicar, true);
     window.addEventListener('resize', aoRedimensionar);
     document.addEventListener('mouseout', saiuDaJanela);
 
     return () => {
       raiz.classList.remove('laser-ligado');
-      window.removeEventListener('mousemove', noMouse);
-      window.removeEventListener('dragover', noMouse as any);
-      window.removeEventListener('touchstart', noToque);
-      window.removeEventListener('touchmove', noToque);
-      window.removeEventListener('touchend', soltar);
-      window.removeEventListener('touchcancel', soltar);
+      window.removeEventListener('pointerdown', aoDescer);
+      window.removeEventListener('pointermove', aoMover);
+      window.removeEventListener('pointerup', aoSubir);
+      window.removeEventListener('pointercancel', aoCancelar);
+      window.removeEventListener('click', aoClicar, true);
       window.removeEventListener('resize', aoRedimensionar);
       document.removeEventListener('mouseout', saiuDaJanela);
 
