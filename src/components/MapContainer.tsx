@@ -1701,35 +1701,53 @@ export default function MapContainer({
     (estabelecimentos || []).forEach(lugar => {
       if (typeof lugar.latitude !== 'number' || typeof lugar.longitude !== 'number') return;
       const emFoco = estabelecimentoEmFoco === lugar.id;
-      const inicial = (lugar.nome || '?').trim().charAt(0).toUpperCase();
+      const tamanho = emFoco ? 42 : 34;
 
+      /**
+       * O mesmo pino de localização do resto do mapa — gota branca com a
+       * borda colorida e a bolinha da base. O que muda é a cor: roxo é a
+       * pesquisa, então dá para ver num relance o que é da campanha e o que
+       * veio de fora, sem inventar um símbolo novo para quem olha.
+       */
       const marcador = L.marker([lugar.latitude, lugar.longitude], {
         icon: L.divIcon({
-          className: '',
-          html:
-            `<span style="display:flex;align-items:center;justify-content:center;` +
-            `width:${emFoco ? 34 : 26}px;height:${emFoco ? 34 : 26}px;border-radius:50%;` +
-            `background:#fff;border:${emFoco ? 3 : 2}px solid #7C3AED;` +
-            `box-shadow:0 2px 6px rgba(0,0,0,.3)${emFoco ? ',0 0 0 6px rgba(124,58,237,.22)' : ''};` +
-            `color:#5B21B6;font-weight:900;font-size:${emFoco ? 14 : 11}px;font-family:sans-serif">` +
-            `${inicial}</span>`,
-          iconSize: [emFoco ? 34 : 26, emFoco ? 34 : 26],
-          iconAnchor: [emFoco ? 17 : 13, emFoco ? 17 : 13]
+          className: `custom-div-icon ${emFoco ? 'drop-shadow-lg' : 'drop-shadow-md'}`,
+          html: `
+            <div style="display:flex;align-items:center;justify-content:center;
+              width:${tamanho}px;height:${tamanho}px;background:#fff;
+              border-radius:50% 50% 50% 0;transform:rotate(-45deg);
+              border:${emFoco ? 4 : 3}px solid #7C3AED;position:relative;
+              ${emFoco ? 'box-shadow:0 0 0 6px rgba(124,58,237,.18);' : ''}">
+              <div style="transform:rotate(45deg);display:flex;align-items:center;
+                justify-content:center;color:#7C3AED;width:20px;height:20px;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+                  stroke-linejoin="round" width="${emFoco ? 17 : 15}" height="${emFoco ? 17 : 15}">
+                  <path d="m2 7 1.5-4h17L22 7"/><path d="M4 7v13h16V7"/>
+                  <path d="M2 7a3 3 0 0 0 5 2 3 3 0 0 0 5 0 3 3 0 0 0 5 0 3 3 0 0 0 5-2"/>
+                  <path d="M9 20v-6h6v6"/>
+                </svg>
+              </div>
+            </div>
+            <div style="width:10px;height:10px;background:#7C3AED;border-radius:50%;
+              position:absolute;top:${tamanho - 5}px;left:${tamanho / 2 - 5}px;
+              box-shadow:0 2px 4px rgba(0,0,0,.2);border:1px solid #fff;"></div>
+          `,
+          iconSize: [tamanho, tamanho + 10],
+          iconAnchor: [tamanho / 2, tamanho + 8]
         }),
         zIndexOffset: emFoco ? 1000 : 0
       });
 
+      // Só o nome no passar do mouse: a ficha inteira é do clique, senão a
+      // tela vira um cartaz cada vez que o cursor atravessa o mapa.
       marcador.bindTooltip(
-        `<div class="px-2.5 py-2 font-sans text-xs min-w-[150px] max-w-[230px]">
-           <p class="font-extrabold uppercase tracking-wider text-[9px] mb-0.5 text-violet-600">
-             ${lugar.categoria || 'Estabelecimento'}
-           </p>
-           <p class="font-bold text-slate-900 text-sm leading-tight">${lugar.nome}</p>
-           ${lugar.endereco ? `<p class="text-[10px] text-slate-500 font-semibold mt-1 leading-snug">📍 ${lugar.endereco}</p>` : ''}
-           ${lugar.avaliacao !== null && lugar.avaliacao !== undefined ? `<p class="text-[10px] text-amber-600 font-bold mt-1">★ ${lugar.avaliacao}</p>` : ''}
-           ${lugar.situacao ? `<p class="text-[10px] font-bold mt-0.5 text-slate-500">${lugar.situacao}</p>` : ''}
+        `<div class="px-2.5 py-1.5 font-sans">
+           <p class="font-bold text-slate-900 text-[12px] leading-tight">${lugar.nome}</p>
+           ${lugar.categoria ? `<p class="text-[10px] text-violet-600 font-bold">${lugar.categoria}</p>` : ''}
+           <p class="text-[9px] text-slate-400 font-bold uppercase mt-0.5">Clique para ver a ficha</p>
          </div>`,
-        { direction: 'top', offset: [0, -12] }
+        { direction: 'top', offset: [0, -tamanho] }
       );
 
       marcador.on('click', () => onEstabelecimentoSelecionado?.(lugar.id));
@@ -1750,7 +1768,6 @@ export default function MapContainer({
     map.setView([lugar.latitude, lugar.longitude], Math.max(map.getZoom(), 16), {
       animate: true
     });
-    lojasPorIdRef.current[lugar.id]?.openTooltip?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estabelecimentoEmFoco]);
 

@@ -22,6 +22,7 @@ import OperationTypeSelect from "./components/OperationTypeSelect";
 import FiltroCheckIns, { PessoaDoFiltro } from "./components/FiltroCheckIns";
 import LaserPointer from "./components/LaserPointer";
 import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
+import FichaEstabelecimento from "./components/FichaEstabelecimento";
 import { Estabelecimento } from "./services/estabelecimentos";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
@@ -878,6 +879,8 @@ export default function App() {
   const [pesquisaLojasAberta, setPesquisaLojasAberta] = useState(false);
   const [estabelecimentos, setEstabelecimentos] = useState<Estabelecimento[]>([]);
   const [lojaEmFoco, setLojaEmFoco] = useState<string | null>(null);
+  /** Ficha aberta no meio da tela: tudo que a pesquisa sabe do lugar. */
+  const [lojaAberta, setLojaAberta] = useState<Estabelecimento | null>(null);
   /** Leitura do centro e do zoom do mapa, entregue pelo próprio mapa. */
   const lerVistaDoMapaRef = React.useRef<
     (() => { lat: number; lng: number; zoom: number } | null) | null
@@ -3878,6 +3881,37 @@ export default function App() {
     setClickToPickCoords(false);
     resetAreaForm();
     triggerNotification("Criação da área cancelada.", "info");
+  };
+
+  /**
+   * Um estabelecimento da pesquisa vira um ponto estratégico do cliente.
+   *
+   * O lugar já tem nome, endereço e coordenada — redigitar isso à mão é o
+   * tipo de trabalho que o sistema existe para poupar. O formulário abre
+   * preenchido, e quem salva é a pessoa, depois de conferir.
+   */
+  const virarPontoEstrategico = (lugar: Estabelecimento) => {
+    resetPinForm();
+    if (selectedCandidateFilter !== "all") setPinCandidateId(selectedCandidateFilter);
+    setPinTitle(lugar.nome);
+    setPinDescription(
+      [lugar.categoria, lugar.endereco, lugar.telefone]
+        .filter(Boolean)
+        .join(" • "),
+    );
+    setPickedCoords({ lat: lugar.latitude, lng: lugar.longitude });
+    setCoordsPickingMode("pin");
+    setCreationLocationMode("map");
+    setCreationModalType("pin");
+    setClickToPickCoords(false);
+    setSelectedId(null);
+    setActiveTab("pins");
+    setIsSidebarOpen(false);
+    setLojaAberta(null);
+    triggerNotification(
+      `"${lugar.nome}" veio para o formulário do ponto. Confira e salve.`,
+      "info",
+    );
   };
 
   const triggerCreatePin = () => {
@@ -12206,8 +12240,18 @@ export default function App() {
           setEstabelecimentos(lugares);
           setLojaEmFoco(null);
         }}
-        onEscolher={(lugar) => setLojaEmFoco(lugar.id)}
+        onEscolher={(lugar) => {
+          setLojaEmFoco(lugar.id);
+          setLojaAberta(lugar);
+        }}
         emFoco={lojaEmFoco}
+      />
+
+      {/* FICHA DO ESTABELECIMENTO */}
+      <FichaEstabelecimento
+        lugar={lojaAberta}
+        onFechar={() => setLojaAberta(null)}
+        onVirarPonto={virarPontoEstrategico}
       />
 
       {/* PAINEL DE FILTRO DOS CHECK-INS */}
@@ -13699,6 +13743,9 @@ export default function App() {
           estabelecimentoEmFoco={lojaEmFoco}
           onEstabelecimentoSelecionado={(id) => {
             setLojaEmFoco(id);
+            // O pino abre a ficha inteira; a lista fica aberta atrás, com o
+            // mesmo item destacado, para a pessoa não se perder.
+            setLojaAberta(estabelecimentos.find((e) => e.id === id) || null);
             setPesquisaLojasAberta(true);
           }}
           aoRegistrarVista={registrarVistaDoMapa}
