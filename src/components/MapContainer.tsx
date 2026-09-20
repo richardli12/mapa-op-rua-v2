@@ -1,17 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { candidateLocationText } from '../services/candidateLocation';
+import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import { DatabaseService } from '../databaseClient';
-import {
-  expandBox,
-  fetchCepStreets,
-  fetchNeighborhoodArea,
-  fetchOsmStreets,
-  fetchStreetGeometry,
-  isInsideBox,
-  mergeStreetLists,
-  StreetOption,
-} from '../services/streetSources';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, corDaDependencia, getCheckInPriority } from '../types';
 import { buildOperationIconSvg } from '../operationIcons';
@@ -321,18 +312,6 @@ interface MapContainerProps {
   tempPlacementType?: 'area' | 'pin';
   /** Avisa o raio novo enquanto o circulo e arrastado no mapa. */
   onTempRadiusChange?: (metros: number) => void;
-  externalBairroName?: string | null;
-  externalRuaName?: string | null;
-  onExternalBairroChange?: (name: string | null) => void;
-  onExternalRuaChange?: (name: string | null, lat: number, lng: number) => void;
-  externalStateShortName?: string | null;
-  externalStateName?: string | null;
-  externalCityIbgeId?: number | null;
-  externalCityName?: string | null;
-  externalDistrictId?: number | null;
-  onExternalStateChange?: (shortName: string | null, name: string | null) => void;
-  onExternalCityChange?: (ibgeId: number | null, name: string | null) => void;
-  onExternalDistrictIdChange?: (id: number | null) => void;
   defaultLocation?: {
     uf: string;
     stateName: string;
@@ -450,18 +429,6 @@ export default function MapContainer({
   tempPlacementRadius = 0,
   tempPlacementType = 'area',
   onTempRadiusChange,
-  externalBairroName,
-  externalRuaName,
-  onExternalBairroChange,
-  onExternalRuaChange,
-  externalStateShortName,
-  externalStateName,
-  externalCityIbgeId,
-  externalCityName,
-  externalDistrictId,
-  onExternalStateChange,
-  onExternalCityChange,
-  onExternalDistrictIdChange,
   defaultLocation,
   selectedCandidateId,
   candidates,
@@ -599,401 +566,35 @@ export default function MapContainer({
     }
   }, [selectedCheckInForModal]);
 
-  // Controle de visibilidade do painel de navegação cascata
+  // Controle de visibilidade do painel de pesquisa
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-
-  // Brasil Aberto lists & selections
-  const [brasilStates, setBrasilStates] = useState<{ name: string; shortName: string }[]>([]);
-  const [brasilCities, setBrasilCities] = useState<{ id: number; ibgeId: number; name: string }[]>([]);
-  const [brasilDistricts, setBrasilDistricts] = useState<{ id: number; name: string }[]>([]);
-  const [brasilStreets, setBrasilStreets] = useState<StreetOption[]>([]);
-
-  const [selectedStateShortName, setSelectedStateShortName] = useState<string | null>(externalStateShortName || 'AL');
-  const [selectedStateName, setSelectedStateName] = useState<string | null>(externalStateName || 'Alagoas');
-  const [selectedCityIbgeId, setSelectedCityIbgeId] = useState<number | null>(externalCityIbgeId || 2704302);
-  const [selectedCityName, setSelectedCityName] = useState<string | null>(externalCityName || 'Maceió');
-  const [selectedBairroName, setSelectedBairroName] = useState<string | null>(externalBairroName || null);
-  const [selectedDistrictId, setSelectedDistrictId] = useState<number | null>(externalDistrictId || null);
-  const [selectedRuaName, setSelectedRuaName] = useState<string | null>(externalRuaName || null);
-  const [selectedStreetId, setSelectedStreetId] = useState<number | null>(null);
 
   const [isMapLoading, setIsMapLoading] = useState(() => {
     return !!(selectedCandidateId && selectedCandidateId !== 'all');
   });
 
-  // Search inputs for filtering dropdowns
-  const [stateSearch, setStateSearch] = useState('');
-  const [citySearch, setCitySearch] = useState('');
-  const [bairroSearch, setBairroSearch] = useState('');
-  const [ruaSearch, setRuaSearch] = useState('');
-
-  // Dropdown open states
-  const [openStateDropdown, setOpenStateDropdown] = useState(false);
-  const [openCityDropdown, setOpenCityDropdown] = useState(false);
-  const [openBairroDropdown, setOpenBairroDropdown] = useState(false);
-  const [openRuaDropdown, setOpenRuaDropdown] = useState(false);
-
-  // Loading states
-  const [loadingStates, setLoadingStates] = useState(false);
-  const [loadingCities, setLoadingCities] = useState(false);
-  const [loadingDistricts, setLoadingDistricts] = useState(false);
-  const [loadingStreets, setLoadingStreets] = useState(false);
-  const [loadingOsmStreets, setLoadingOsmStreets] = useState(false);
+  /*
+   * PESQUISA DE LUGARES
+   *
+   * Antes daqui saía uma cascata de Estado > Município > Bairro > Rua, que
+   * só achava o que estava nas listas de CEP e obrigava a descer quatro
+   * combos para chegar num endereço. Agora é uma linha de texto e o Google
+   * Maps responde — inclusive o comércio e o ponto de referência que nenhuma
+   * base de CEP tem. Escolher bairro e rua continua existindo, no formulário
+   * de criação, que é de onde a missão nasce.
+   */
+  const [termoBusca, setTermoBusca] = useState('');
+  const [lugares, setLugares] = useState<LugarEncontrado[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const [erroBusca, setErroBusca] = useState<string | null>(null);
+  const [avisoBusca, setAvisoBusca] = useState<string | null>(null);
+  const [lugarEscolhido, setLugarEscolhido] = useState<string | null>(null);
+  /** A busca em curso, para a próxima cancelar a anterior. */
+  const buscaRef = useRef<AbortController | null>(null);
 
   // Search Results Marker State
   const searchMarkerRef = useRef<L.Marker | null>(null);
   const [searchMarkerCoords, setSearchMarkerCoords] = useState<{ lat: number; lng: number; name: string } | null>(null);
-
-  // Sincronização externa -> interna de Bairro, Rua, Estado e Cidade
-  useEffect(() => {
-    if (externalStateShortName !== undefined) setSelectedStateShortName(externalStateShortName);
-  }, [externalStateShortName]);
-
-  useEffect(() => {
-    if (externalStateName !== undefined) setSelectedStateName(externalStateName);
-  }, [externalStateName]);
-
-  useEffect(() => {
-    if (externalCityIbgeId !== undefined) setSelectedCityIbgeId(externalCityIbgeId);
-  }, [externalCityIbgeId]);
-
-  useEffect(() => {
-    if (externalCityName !== undefined) setSelectedCityName(externalCityName);
-  }, [externalCityName]);
-
-  useEffect(() => {
-    if (externalBairroName !== undefined) {
-      setSelectedBairroName(externalBairroName);
-      if (externalBairroName) {
-        setIsPanelOpen(true); // Abre o menu do mapa para feedback visual
-      }
-    }
-  }, [externalBairroName]);
-
-  useEffect(() => {
-    if (externalDistrictId !== undefined) setSelectedDistrictId(externalDistrictId);
-  }, [externalDistrictId]);
-
-  useEffect(() => {
-    if (externalRuaName !== undefined) setSelectedRuaName(externalRuaName);
-  }, [externalRuaName]);
-
-  // Load States initially when panel is open
-  useEffect(() => {
-    const loadStates = async () => {
-      setLoadingStates(true);
-      try {
-        const token = (import.meta as any).env?.VITE_BRASIL_ABERTO_TOKEN;
-        const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const response = await fetch('https://api.brasilaberto.com/v1/states', { headers });
-        if (response.ok) {
-          const res = await response.json();
-          if (res && res.result) {
-            setBrasilStates(res.result);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar estados no mapa:", err);
-      } finally {
-        setLoadingStates(false);
-      }
-    };
-    if (isPanelOpen) {
-      loadStates();
-    }
-  }, [isPanelOpen]);
-
-  // Load Cities when state selected changes
-  useEffect(() => {
-    if (!selectedStateShortName) {
-      setBrasilCities([]);
-      return;
-    }
-    const loadCities = async () => {
-      setLoadingCities(true);
-      try {
-        const token = (import.meta as any).env?.VITE_BRASIL_ABERTO_TOKEN;
-        const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const response = await fetch(`https://api.brasilaberto.com/v1/cities/${selectedStateShortName}`, { headers });
-        if (response.ok) {
-          const res = await response.json();
-          if (res && res.result) {
-            setBrasilCities(res.result);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar cidades no mapa:", err);
-      } finally {
-        setLoadingCities(false);
-      }
-    };
-    loadCities();
-  }, [selectedStateShortName]);
-
-  // Load Districts when city selected changes
-  useEffect(() => {
-    if (!selectedCityIbgeId) {
-      setBrasilDistricts([]);
-      return;
-    }
-    const loadDistricts = async () => {
-      setLoadingDistricts(true);
-      try {
-        const token = (import.meta as any).env?.VITE_BRASIL_ABERTO_TOKEN;
-        const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const response = await fetch(`https://api.brasilaberto.com/v1/districts-by-ibge-code/${selectedCityIbgeId}`, { headers });
-        if (response.ok) {
-          const res = await response.json();
-          if (res && res.result) {
-            setBrasilDistricts(res.result);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar bairros no mapa:", err);
-      } finally {
-        setLoadingDistricts(false);
-      }
-    };
-    loadDistricts();
-  }, [selectedCityIbgeId]);
-
-  // Load Streets when district selected changes.
-  // Duas fontes: a base de CEP (rápida, porém incompleta em cidades que usam CEP
-  // geral) e o OpenStreetMap (as ruas que o usuário está vendo no mapa). A lista
-  // de CEP aparece assim que chega e as ruas do mapa entram nela quando o
-  // Overpass responde, sem repetir nenhuma rua.
-  useEffect(() => {
-    if (!selectedDistrictId) {
-      setBrasilStreets([]);
-      setLoadingOsmStreets(false);
-      return;
-    }
-
-    let active = true;
-    const controller = new AbortController();
-    const bairro = selectedBairroName || '';
-    const city = selectedCityName || '';
-    const state = selectedStateShortName || '';
-
-    setLoadingStreets(true);
-    setLoadingOsmStreets(true);
-
-    (async () => {
-      const cepRequest = fetchCepStreets(selectedDistrictId, controller.signal);
-      const osmRequest = fetchOsmStreets(bairro, city, state, controller.signal);
-
-      const cepStreets = await cepRequest;
-      if (!active) return;
-      setBrasilStreets(mergeStreetLists([cepStreets]));
-      setLoadingStreets(false);
-
-      const osmStreets = await osmRequest;
-      if (!active) return;
-      setBrasilStreets(mergeStreetLists([cepStreets, osmStreets]));
-      setLoadingOsmStreets(false);
-    })();
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [selectedDistrictId, selectedBairroName, selectedCityName, selectedStateShortName]);
-
-  // Geocode address using OpenStreetMap Nominatim with multi-stage fallback strategy
-  /** Desenha o traçado exato da rua sobre o mapa. */
-  const drawStreetLines = (lines: [number, number][][], label: string) => {
-    const tooltipHtml = `
-      <div class="px-2.5 py-1 font-sans text-xs">
-        <span class="font-bold text-indigo-600">🛣️ Rua Delimitada:</span>
-        <p class="font-semibold text-slate-850 mt-0.5">${label}</p>
-      </div>
-    `;
-
-    lines.forEach((latlngs) => {
-      const glowLine = L.polyline(latlngs, { color: '#3b82f6', weight: 12, opacity: 0.35 });
-      const mainLine = L.polyline(latlngs, { color: '#4f46e5', weight: 5, opacity: 0.95 });
-
-      glowLine.bindTooltip(tooltipHtml, { sticky: true });
-      mainLine.bindTooltip(tooltipHtml, { sticky: true });
-
-      delimitationGroupRef.current?.addLayer(glowLine);
-      delimitationGroupRef.current?.addLayer(mainLine);
-    });
-  };
-
-  const geocodeAddress = async (street: string | null, bair: string, city: string, state: string) => {
-    // Clear any previous delimitation
-    delimitationGroupRef.current?.clearLayers();
-
-    // Caixa do bairro escolhido. Tudo que for procurado a partir daqui fica
-    // preso a ela: é o que impede o resultado de cair em outro bairro.
-    const area = bair && bair.trim()
-      ? await fetchNeighborhoodArea(bair, city, state)
-      : null;
-    const allowedBox = area ? expandBox(area.box, 0.005) : null;
-
-    // Caminho preciso: procura a rua pela geometria real do OpenStreetMap,
-    // por nome exato e dentro do bairro. Quando encontra, o marcador e a
-    // demarcação vêm da mesma fonte, então não há como um apontar para uma rua
-    // e o outro para outra.
-    if (street && street.trim() && area) {
-      const geometry = await fetchStreetGeometry(street, area.box);
-      if (geometry) {
-        const { lat, lng } = geometry.center;
-        mapRef.current?.flyTo([lat, lng], 16, { animate: true, duration: 1.2 });
-        setSearchMarkerCoords({ lat, lng, name: `${geometry.name}, ${bair}` });
-        drawStreetLines(geometry.lines, `${geometry.name}, ${bair}`);
-        return { lat, lng };
-      }
-    }
-
-    const queries: string[] = [];
-    if (street && street.trim()) {
-      queries.push(`${street}, ${bair}, ${city}, ${state}, Brasil`);
-      queries.push(`${street}, ${city}, ${state}, Brasil`);
-
-      // Try clean street names if they have common prefixes
-      const cleanStreet = street.replace(/^(Rua|Avenida|Av\.|Travessa|Al\.|Alameda|Rodovia|Rod\.)\s+/i, '');
-      if (cleanStreet !== street) {
-        queries.push(`${cleanStreet}, ${bair}, ${city}, ${state}, Brasil`);
-        queries.push(`${cleanStreet}, ${city}, ${state}, Brasil`);
-      }
-    }
-
-    // Quantas consultas acima são de rua. Um acerto de rua precisa cair dentro
-    // do bairro; um acerto de bairro ou município, não.
-    const streetQueryCount = queries.length;
-
-    if (bair && bair.trim()) {
-      queries.push(`${bair}, ${city}, ${state}, Brasil`);
-    }
-    queries.push(`${city}, ${state}, Brasil`);
-
-    for (let i = 0; i < queries.length; i++) {
-      const q = queries[i];
-      try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&polygon_geojson=1`
-        );
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.length > 0) {
-            const item = data[0];
-            const lat = parseFloat(item.lat);
-            const lng = parseFloat(item.lon);
-
-            // Uma rua encontrada fora do bairro escolhido é uma homônima de
-            // outro lugar, não a rua pedida. Descarta e tenta a próxima
-            // consulta, em vez de marcar o ponto errado.
-            const isStreetQuery = i < streetQueryCount;
-            if (isStreetQuery && allowedBox && !isInsideBox(allowedBox, lat, lng)) {
-              continue;
-            }
-
-            const isExactMatch = isStreetQuery;
-            
-            // Fly map to exact or neighborhood center
-            mapRef.current?.flyTo([lat, lng], isExactMatch ? 16 : 14, {
-              animate: true,
-              duration: 1.2
-            });
-            
-            // Só cita a rua quando o acerto foi de rua. Cair no centro do
-            // bairro e ainda assim rotular "Rua X" faria o sistema afirmar uma
-            // localização que ele não encontrou.
-            setSearchMarkerCoords({
-              lat,
-              lng,
-              name: isStreetQuery && street ? `${street}, ${bair}` : bair
-            });
-
-            // Traçado da rua, buscado por nome exato e restrito à vizinhança do
-            // ponto encontrado. Sem essa restrição de nome, procurar "Rua B"
-            // acabava desenhando qualquer rua com "b" no nome por perto.
-            // Quando o bairro foi localizado, o caminho preciso lá em cima já
-            // procurou o traçado; aqui só resta o caso em que ele não rodou.
-            if (street && street.trim() && !area) {
-              const searchBox = expandBox(
-                { south: lat, west: lng, north: lat, east: lng },
-                0.02,
-              );
-              (async () => {
-                const geometry = await fetchStreetGeometry(street, searchBox);
-                if (geometry) {
-                  drawStreetLines(geometry.lines, `${geometry.name}, ${bair}`);
-                }
-              })();
-            }
-
-            // Draw visual delimitation overlay (ruas e bairros)
-            if (item.geojson && (item.geojson.type === 'Polygon' || item.geojson.type === 'MultiPolygon' || item.geojson.type === 'LineString' || item.geojson.type === 'MultiLineString')) {
-              try {
-                const geojsonLayer = L.geoJSON(item.geojson, {
-                  style: {
-                    color: '#4f46e5', // Vibrant indigo
-                    weight: 4,
-                    opacity: 0.85,
-                    dashArray: item.geojson.type === 'Polygon' || item.geojson.type === 'MultiPolygon' ? '6, 6' : undefined,
-                    fillColor: '#818cf8',
-                    fillOpacity: 0.15,
-                  }
-                });
-
-                // Bind a nice tooltip detailing the delimited area
-                geojsonLayer.bindTooltip(`
-                  <div class="px-2.5 py-1 font-sans text-xs">
-                    <span class="font-bold text-indigo-600">📍 Limites de:</span>
-                    <p class="font-semibold text-slate-850 mt-0.5">${street ? `${street}, ${bair}` : bair}</p>
-                  </div>
-                `, { sticky: true });
-
-                delimitationGroupRef.current?.addLayer(geojsonLayer);
-              } catch (err) {
-                console.warn('Erro ao desenhar polígono GeoJSON:', err);
-              }
-            } else if (item.boundingbox) {
-              // Bounding box fallback delimitation
-              try {
-                const bounds = L.latLngBounds(
-                  [parseFloat(item.boundingbox[0]), parseFloat(item.boundingbox[2])],
-                  [parseFloat(item.boundingbox[1]), parseFloat(item.boundingbox[3])]
-                );
-                
-                // Draw a beautiful rectangle to define the outline limits
-                const rect = L.rectangle(bounds, {
-                  color: '#4f46e5',
-                  weight: 3,
-                  dashArray: '5, 5',
-                  fillColor: '#818cf8',
-                  fillOpacity: 0.12,
-                });
-
-                rect.bindTooltip(`
-                  <div class="px-2.5 py-1 font-sans text-xs">
-                    <span class="font-bold text-indigo-600">📍 Delimitação aproximada:</span>
-                    <p class="font-semibold text-slate-850 mt-0.5">${street ? `${street}, ${bair}` : bair}</p>
-                  </div>
-                `, { sticky: true });
-
-                delimitationGroupRef.current?.addLayer(rect);
-              } catch (err) {
-                console.warn('Erro ao desenhar boundingbox:', err);
-              }
-            }
-            
-            return { lat, lng };
-          }
-        }
-      } catch (err) {
-        console.warn(`Erro no geocoder do mapa tentativa ${i + 1} ("${q}"):`, err);
-        const errMsg = String(err).toLowerCase();
-        if (errMsg.includes('failed to fetch') || errMsg.includes('networkerror') || errMsg.includes('cors')) {
-          break;
-        }
-      }
-    }
-    return null;
-  };
 
   // Handle search result marker on Map
   useEffect(() => {
@@ -1016,131 +617,84 @@ export default function MapContainer({
     };
   }, [searchMarkerCoords]);
 
-  // Filtering lists for dropdowns
-  const filteredStates = brasilStates.filter(s =>
-    s.name.toLowerCase().includes(stateSearch.toLowerCase()) ||
-    s.shortName.toLowerCase().includes(stateSearch.toLowerCase())
-  );
+  /**
+   * Procura o que foi escrito, perto do que a pessoa está vendo.
+   *
+   * O centro do mapa vai junto de propósito: sem ele, "avenida ana karina"
+   * pode voltar uma avenida de mesmo nome em outro estado. Com ele, o Google
+   * procura onde a pessoa está olhando, que é o que ela quis dizer.
+   */
+  const pesquisarNoMapa = async (evento?: FormEvent) => {
+    evento?.preventDefault();
+    const termo = termoBusca.trim();
+    if (!termo || buscando) return;
 
-  const filteredCities = brasilCities.filter(c =>
-    c.name.toLowerCase().includes(citySearch.toLowerCase())
-  );
+    buscaRef.current?.abort();
+    const controlador = new AbortController();
+    buscaRef.current = controlador;
 
-  const districtsToUse = selectedStateShortName === 'AL' && selectedCityName === 'Maceió' && brasilDistricts.length === 0
-    ? NEIGHBORHOOD_DATA.map((b, idx) => ({ id: idx + 1000, name: b.name }))
-    : brasilDistricts;
+    setBuscando(true);
+    setErroBusca(null);
+    setAvisoBusca(null);
+    setLugarEscolhido(null);
 
-  const filteredDistricts = districtsToUse.filter(d =>
-    d.name.toLowerCase().includes(bairroSearch.toLowerCase())
-  );
+    const mapa = mapRef.current;
+    const centro = mapa
+      ? { lat: mapa.getCenter().lat, lng: mapa.getCenter().lng, zoom: mapa.getZoom() }
+      : null;
 
-  const filteredStreets = brasilStreets.filter(s =>
-    s.name.toLowerCase().includes(ruaSearch.toLowerCase())
-  );
-
-  const handleStateSelect = (stateShort: string, stateName: string) => {
-    setSelectedStateShortName(stateShort);
-    setSelectedStateName(stateName);
-    setSelectedCityIbgeId(null);
-    setSelectedCityName(null);
-    setSelectedBairroName(null);
-    setSelectedDistrictId(null);
-    setSelectedRuaName(null);
-    setSelectedStreetId(null);
-    setCitySearch('');
-    setBairroSearch('');
-    setRuaSearch('');
-    setOpenStateDropdown(false);
-
-    if (onExternalStateChange) onExternalStateChange(stateShort, stateName);
-  };
-
-  const handleCitySelect = (ibgeId: number, cityName: string) => {
-    setSelectedCityIbgeId(ibgeId);
-    setSelectedCityName(cityName);
-    setSelectedBairroName(null);
-    setSelectedDistrictId(null);
-    setSelectedRuaName(null);
-    setSelectedStreetId(null);
-    setBairroSearch('');
-    setRuaSearch('');
-    setOpenCityDropdown(false);
-
-    if (onExternalCityChange) onExternalCityChange(ibgeId, cityName);
-  };
-
-  const handleBairroSelect = async (bairroName: string, districtId: number) => {
-    setSelectedBairroName(bairroName);
-    setSelectedDistrictId(districtId);
-    setSelectedRuaName(null);
-    setSelectedStreetId(null);
-    setRuaSearch('');
-    setOpenBairroDropdown(false);
-
-    if (onExternalBairroChange) onExternalBairroChange(bairroName);
-    if (onExternalDistrictIdChange) onExternalDistrictIdChange(districtId);
-    if (onExternalRuaChange) onExternalRuaChange(null, 0, 0);
-
-    const city = selectedCityName || 'Maceió';
-    const state = selectedStateShortName || 'AL';
-    await geocodeAddress(null, bairroName, city, state);
-  };
-
-  const handleRuaSelect = async (ruaSelectedName: string, streetId?: number) => {
-    setSelectedRuaName(ruaSelectedName);
-    if (streetId) setSelectedStreetId(streetId);
-    setOpenRuaDropdown(false);
-
-    const bName = selectedBairroName || '';
-    const cName = selectedCityName || 'Maceió';
-    const sName = selectedStateShortName || 'AL';
-    const coords = await geocodeAddress(ruaSelectedName, bName, cName, sName);
-
-    if (onExternalRuaChange) {
-      if (coords) {
-        onExternalRuaChange(ruaSelectedName, coords.lat, coords.lng);
-      } else {
-        onExternalRuaChange(ruaSelectedName, 0, 0);
+    try {
+      const achado = await buscarLugares({ termo, centro, sinal: controlador.signal });
+      setLugares(achado.lugares);
+      setAvisoBusca(
+        achado.lugares.length === 0
+          ? achado.aviso ||
+              'Nada encontrado com esse nome por aqui. Tente escrever de outro jeito ou afaste o mapa.'
+          : null,
+      );
+    } catch (err: any) {
+      // Busca cancelada é a pessoa pedindo outra, não uma falha para mostrar.
+      if (err?.name === 'AbortError') return;
+      setLugares([]);
+      setErroBusca(err?.mensagem || 'Algo falhou na pesquisa. Tente de novo.');
+    } finally {
+      if (buscaRef.current === controlador) {
+        buscaRef.current = null;
+        setBuscando(false);
       }
     }
   };
 
-  const handleClearSelection = () => {
-    // Limpar devolve ao ponto de partida do candidato, não a um lugar fixo.
-    const fallback = defaultLocation ?? {
-      uf: 'AL',
-      stateName: 'Alagoas',
-      cityIbgeId: 2704302,
-      cityName: 'Maceió',
-    };
-
-    setSelectedStateShortName(fallback.uf);
-    setSelectedStateName(fallback.stateName);
-    setSelectedCityIbgeId(fallback.cityIbgeId);
-    setSelectedCityName(fallback.cityName);
-    setSelectedBairroName(null);
-    setSelectedDistrictId(null);
-    setSelectedRuaName(null);
-    setSelectedStreetId(null);
-    setBairroSearch('');
-    setRuaSearch('');
-    setStateSearch('');
-    setCitySearch('');
-    setOpenStateDropdown(false);
-    setOpenCityDropdown(false);
-    setOpenBairroDropdown(false);
-    setOpenRuaDropdown(false);
-    setSearchMarkerCoords(null);
-    delimitationGroupRef.current?.clearLayers();
-
-    if (onExternalStateChange) onExternalStateChange(fallback.uf, fallback.stateName);
-    if (onExternalCityChange) onExternalCityChange(fallback.cityIbgeId, fallback.cityName);
-    if (onExternalBairroChange) onExternalBairroChange(null);
-    if (onExternalDistrictIdChange) onExternalDistrictIdChange(null);
-    if (onExternalRuaChange) onExternalRuaChange(null, 0, 0);
+  /** Leva o mapa até o resultado e deixa o cartão de "Marcar Aqui" à mão. */
+  const irParaLugar = (lugar: LugarEncontrado) => {
+    setLugarEscolhido(lugar.id);
+    mapRef.current?.flyTo([lugar.latitude, lugar.longitude], 17, {
+      animate: true,
+      duration: 1.2,
+    });
+    setSearchMarkerCoords({
+      lat: lugar.latitude,
+      lng: lugar.longitude,
+      name: lugar.endereco ? `${lugar.titulo} — ${lugar.endereco}` : lugar.titulo,
+    });
   };
 
-  // Initialize Map
+  const limparBusca = () => {
+    buscaRef.current?.abort();
+    buscaRef.current = null;
+    setTermoBusca('');
+    setLugares([]);
+    setErroBusca(null);
+    setAvisoBusca(null);
+    setLugarEscolhido(null);
+    setBuscando(false);
+    setSearchMarkerCoords(null);
+    delimitationGroupRef.current?.clearLayers();
+  };
+
+  // Busca em curso quando a tela sai do ar é busca que ninguém vai ler.
+  useEffect(() => () => buscaRef.current?.abort(), []);
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -1187,8 +741,6 @@ export default function MapContainer({
 
     // Listeners for map coordinate picking
     map.on('click', (e: L.LeafletMouseEvent) => {
-      setOpenBairroDropdown(false);
-      setOpenRuaDropdown(false);
       if (reguaAtivaRef.current) {
         // Com a régua ligada o clique é dela: o mesmo toque não pode marcar
         // ponto e escolher coordenada ao mesmo tempo.
@@ -2570,7 +2122,7 @@ export default function MapContainer({
       {/* Map Element */}
       <div id="campaign-primary-map" ref={containerRef} className="w-full h-full bg-slate-100" />
 
-      {/* PAINEL DE NAVEGAÇÃO CASCATA (TOP SQUIRCLE) */}
+      {/* PESQUISA DE LUGARES (Google Maps, via SerpApi) */}
       {/* Ao lado do botão Voltar, que ocupa o canto esquerdo do topo. */}
       <div
         className={`absolute top-4 left-[10.5rem] z-[1000] w-76 sm:w-80 font-sans ${
@@ -2585,12 +2137,12 @@ export default function MapContainer({
           >
             <Compass className="w-4 h-4 text-indigo-600 group-hover:rotate-45 transition-transform duration-300" />
             <span>Pesquisar no mapa</span>
-            {(selectedStateShortName || selectedCityIbgeId || selectedBairroName || selectedRuaName) && (
+            {searchMarkerCoords && (
               <span className="flex h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse ml-0.5" />
             )}
           </button>
         ) : (
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 p-3.5 space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 p-3.5 space-y-3 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <div className="flex items-center gap-2 select-none">
                 <div className="p-1 bg-indigo-50 rounded-lg text-indigo-600">
@@ -2599,10 +2151,10 @@ export default function MapContainer({
                 <h4 className="font-extrabold text-[11px] text-slate-800 uppercase tracking-widest">Pesquisar no mapa</h4>
               </div>
               <div className="flex items-center gap-2">
-                {(selectedStateShortName || selectedCityIbgeId || selectedBairroName || selectedRuaName) && (
+                {(termoBusca || lugares.length > 0 || searchMarkerCoords) && (
                   <button
                     type="button"
-                    onClick={handleClearSelection}
+                    onClick={limparBusca}
                     className="text-[10px] text-red-500 hover:text-red-650 font-extrabold uppercase tracking-wider flex items-center gap-0.5 cursor-pointer hover:underline transition-all mr-1"
                   >
                     Limpar
@@ -2619,276 +2171,100 @@ export default function MapContainer({
               </div>
             </div>
 
-            {/* ESTADO SELECT */}
-            <div className="space-y-1">
-              <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400">1. Estado</label>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpenStateDropdown(!openStateDropdown);
-                    setOpenCityDropdown(false);
-                    setOpenBairroDropdown(false);
-                    setOpenRuaDropdown(false);
-                  }}
-                  className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/50 rounded-xl text-left text-xs text-slate-700 font-medium flex items-center justify-between transition-all cursor-pointer shadow-2xs"
-                >
-                  <span className="truncate flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    {selectedStateName ? `${selectedStateName} (${selectedStateShortName})` : 'Selecione o Estado...'}
-                  </span>
-                  {loadingStates ? (
-                    <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin shrink-0" />
-                  ) : (
-                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${openStateDropdown ? 'rotate-180' : ''}`} />
-                  )}
-                </button>
-
-                {openStateDropdown && (
-                  <div className="absolute left-0 right-0 mt-1.5 bg-white rounded-xl shadow-2xl border border-slate-200/60 z-[1010] max-h-56 overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5">
-                      <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <input
-                        type="text"
-                        placeholder="Pesquisar estado..."
-                        value={stateSearch}
-                        onChange={(e) => setStateSearch(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full bg-transparent border-none text-xs text-slate-700 placeholder-slate-400 focus:outline-hidden focus:ring-0 py-0.5"
-                      />
-                    </div>
-                    
-                    <div className="overflow-y-auto max-h-44 divide-y divide-slate-50">
-                      {filteredStates.map((s) => (
-                        <button
-                          key={s.shortName}
-                          type="button"
-                          onClick={() => handleStateSelect(s.shortName, s.name)}
-                          className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between text-xs text-slate-700 cursor-pointer"
-                        >
-                          <span className={selectedStateShortName === s.shortName ? "font-bold text-indigo-600" : "font-medium"}>
-                            {s.name} ({s.shortName})
-                          </span>
-                          {selectedStateShortName === s.shortName && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
-                        </button>
-                      ))}
-                      {filteredStates.length === 0 && (
-                        <p className="p-3 text-center text-xs text-slate-400 italic">Nenhum estado encontrado</p>
-                      )}
-                    </div>
-                  </div>
-                )}
+            {/*
+             * A busca sai no Enter, não a cada tecla.
+             *
+             * Cada pesquisa é uma chamada cobrada lá fora: buscar enquanto a
+             * pessoa digita gastaria uma consulta por letra para chegar no
+             * mesmo resultado. Quem digita endereço já sabe quando terminou.
+             */}
+            <form onSubmit={pesquisarNoMapa} className="space-y-1.5">
+              <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                Endereço, bairro ou lugar
+              </label>
+              <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 border border-slate-200/70 rounded-xl focus-within:border-indigo-400 focus-within:bg-white transition-colors">
+                <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <input
+                  type="text"
+                  value={termoBusca}
+                  onChange={(e) => setTermoBusca(e.target.value)}
+                  maxLength={200}
+                  placeholder="Ex.: Avenida Ana Karina, Parauapebas"
+                  className="w-full bg-transparent border-none text-xs text-slate-700 placeholder-slate-400 focus:outline-hidden focus:ring-0 py-0.5"
+                />
+                {buscando && <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin shrink-0" />}
               </div>
-            </div>
+              <button
+                type="submit"
+                disabled={!termoBusca.trim() || buscando}
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[10px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99]"
+              >
+                {buscando ? 'Procurando…' : 'Procurar'}
+              </button>
+              <p className="text-[9.5px] text-slate-400 font-semibold leading-snug pt-0.5">
+                A procura começa pelo pedaço do mapa que você está vendo.
+              </p>
+            </form>
 
-            {/* MUNICIPIO SELECT */}
-            <div className="space-y-1">
-              <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400">2. Município</label>
-              <div className="relative">
-                <button
-                  type="button"
-                  disabled={!selectedStateShortName}
-                  onClick={() => {
-                    setOpenCityDropdown(!openCityDropdown);
-                    setOpenStateDropdown(false);
-                    setOpenBairroDropdown(false);
-                    setOpenRuaDropdown(false);
-                  }}
-                  className={`w-full px-3 py-2 border rounded-xl text-left text-xs font-medium flex items-center justify-between transition-all ${
-                    selectedStateShortName
-                      ? 'bg-slate-50 hover:bg-slate-100/80 border-slate-200/50 text-slate-700 cursor-pointer shadow-2xs'
-                      : 'bg-slate-100/40 border-slate-150 text-slate-400 cursor-not-allowed opacity-70'
-                  }`}
-                >
-                  <span className="truncate flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    {selectedCityName ? selectedCityName : selectedStateShortName ? 'Selecione o Município...' : 'Selecione o estado primeiro...'}
-                  </span>
-                  {loadingCities ? (
-                    <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin shrink-0" />
-                  ) : (
-                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${openCityDropdown ? 'rotate-180' : ''}`} />
-                  )}
-                </button>
+            {erroBusca && (
+              <p className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2 leading-snug">
+                {erroBusca}
+              </p>
+            )}
 
-                {openCityDropdown && selectedStateShortName && (
-                  <div className="absolute left-0 right-0 mt-1.5 bg-white rounded-xl shadow-2xl border border-slate-200/60 z-[1010] max-h-56 overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5">
-                      <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <input
-                        type="text"
-                        placeholder="Pesquisar município..."
-                        value={citySearch}
-                        onChange={(e) => setCitySearch(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full bg-transparent border-none text-xs text-slate-700 placeholder-slate-400 focus:outline-hidden focus:ring-0 py-0.5"
-                      />
-                    </div>
-                    
-                    <div className="overflow-y-auto max-h-44 divide-y divide-slate-50">
-                      {filteredCities.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => handleCitySelect(c.ibgeId, c.name)}
-                          className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between text-xs text-slate-700 cursor-pointer"
-                        >
-                          <span className={selectedCityIbgeId === c.ibgeId ? "font-bold text-indigo-600" : "font-medium"}>
-                            {c.name}
-                          </span>
-                          {selectedCityIbgeId === c.ibgeId && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
-                        </button>
-                      ))}
-                      {filteredCities.length === 0 && (
-                        <p className="p-3 text-center text-xs text-slate-400 italic">Nenhum município encontrado</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            {!erroBusca && avisoBusca && (
+              <p className="text-[11px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 leading-snug">
+                {avisoBusca}
+              </p>
+            )}
 
-            {/* BAIRRO SELECT */}
-            <div className="space-y-1">
-              <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400">3. Bairro</label>
-              <div className="relative">
-                <button
-                  type="button"
-                  disabled={!selectedCityIbgeId}
-                  onClick={() => {
-                    setOpenBairroDropdown(!openBairroDropdown);
-                    setOpenStateDropdown(false);
-                    setOpenCityDropdown(false);
-                    setOpenRuaDropdown(false);
-                  }}
-                  className={`w-full px-3 py-2 border rounded-xl text-left text-xs font-medium flex items-center justify-between transition-all ${
-                    selectedCityIbgeId
-                      ? 'bg-slate-50 hover:bg-slate-100/80 border-slate-200/50 text-slate-700 cursor-pointer shadow-2xs'
-                      : 'bg-slate-100/40 border-slate-150 text-slate-400 cursor-not-allowed opacity-70'
-                  }`}
-                >
-                  <span className="truncate flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    {selectedBairroName ? selectedBairroName : selectedCityIbgeId ? 'Selecione o Bairro...' : 'Selecione o município primeiro...'}
-                  </span>
-                  {loadingDistricts ? (
-                    <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin shrink-0" />
-                  ) : (
-                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${openBairroDropdown ? 'rotate-180' : ''}`} />
-                  )}
-                </button>
-
-                {openBairroDropdown && selectedCityIbgeId && (
-                  <div className="absolute left-0 right-0 mt-1.5 bg-white rounded-xl shadow-2xl border border-slate-200/60 z-[1010] max-h-56 overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5">
-                      <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <input
-                        type="text"
-                        placeholder="Pesquisar bairro..."
-                        value={bairroSearch}
-                        onChange={(e) => setBairroSearch(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full bg-transparent border-none text-xs text-slate-700 placeholder-slate-400 focus:outline-hidden focus:ring-0 py-0.5"
-                      />
-                    </div>
-                    
-                    <div className="overflow-y-auto max-h-44 divide-y divide-slate-50">
-                      {filteredDistricts.map((b) => (
-                        <button
-                          key={b.id}
-                          type="button"
-                          onClick={() => handleBairroSelect(b.name, b.id)}
-                          className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between text-xs text-slate-700 cursor-pointer"
-                        >
-                          <span className={selectedBairroName === b.name ? "font-bold text-indigo-600" : "font-medium"}>{b.name}</span>
-                          {selectedBairroName === b.name && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
-                        </button>
-                      ))}
-                      {filteredDistricts.length === 0 && (
-                        <p className="p-3 text-center text-xs text-slate-400 italic">Bairro não cadastrado</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* RUA SELECT */}
-            <div className="space-y-1">
-              <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400">4. Rua</label>
-              <div className="relative">
-                <button
-                  type="button"
-                  disabled={!selectedBairroName}
-                  onClick={() => {
-                    setOpenRuaDropdown(!openRuaDropdown);
-                    setOpenStateDropdown(false);
-                    setOpenCityDropdown(false);
-                    setOpenBairroDropdown(false);
-                  }}
-                  className={`w-full px-3 py-2 border rounded-xl text-left text-xs font-medium flex items-center justify-between transition-all ${
-                    selectedBairroName
-                      ? 'bg-slate-50 hover:bg-slate-100/80 border-slate-200/50 text-slate-700 cursor-pointer shadow-2xs'
-                      : 'bg-slate-100/40 border-slate-150 text-slate-400 cursor-not-allowed opacity-70'
-                  }`}
-                >
-                  <span className="truncate flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    {selectedRuaName ? selectedRuaName : selectedBairroName ? 'Selecione a Rua...' : 'Selecione o bairro primeiro...'}
-                  </span>
-                  {loadingStreets ? (
-                    <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin shrink-0" />
-                  ) : (
-                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${openRuaDropdown ? 'rotate-180' : ''}`} />
-                  )}
-                </button>
-
-                {openRuaDropdown && selectedBairroName && (
-                  <div className="absolute left-0 right-0 mt-1.5 bg-white rounded-xl shadow-2xl border border-slate-200/60 z-[1010] max-h-64 overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5">
-                      <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <input
-                        type="text"
-                        placeholder="Pesquisar rua..."
-                        value={ruaSearch}
-                        onChange={(e) => setRuaSearch(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full bg-transparent border-none text-xs text-slate-700 placeholder-slate-400 focus:outline-hidden focus:ring-0 py-0.5"
-                      />
-                    </div>
-
-                    <div className="overflow-y-auto max-h-52 divide-y divide-slate-50">
-                      {filteredStreets.map((r) => (
-                        <button
-                          key={r.id}
-                          type="button"
-                          onClick={() => handleRuaSelect(r.name, r.id)}
-                          className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between text-xs text-slate-700 cursor-pointer"
-                        >
-                          <span className={selectedRuaName === r.name ? "font-bold text-indigo-600 truncate" : "font-medium truncate"}>
-                            {r.name}
-                          </span>
-                          {selectedRuaName === r.name && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
-                        </button>
-                      ))}
-
-                      {loadingOsmStreets && (
-                        <p className="px-3.5 py-2 flex items-center gap-1.5 text-[11px] text-slate-400 font-medium italic">
-                          <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                          Buscando mais ruas no mapa...
+            {lugares.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                  {lugares.length === 1 ? '1 lugar encontrado' : `${lugares.length} lugares encontrados`}
+                </p>
+                <div className="max-h-64 overflow-y-auto -mx-1 px-1 divide-y divide-slate-100">
+                  {lugares.map((lugar) => (
+                    <button
+                      key={lugar.id}
+                      type="button"
+                      onClick={() => irParaLugar(lugar)}
+                      className={`w-full text-left px-2.5 py-2 rounded-lg transition-colors cursor-pointer ${
+                        lugarEscolhido === lugar.id ? 'bg-indigo-50' : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      <p className={`text-xs leading-tight truncate ${
+                        lugarEscolhido === lugar.id ? 'font-bold text-indigo-700' : 'font-semibold text-slate-800'
+                      }`}>
+                        {lugar.titulo}
+                      </p>
+                      {lugar.endereco && (
+                        <p className="text-[10.5px] text-slate-500 leading-snug mt-0.5 truncate">
+                          {lugar.endereco}
                         </p>
                       )}
-
-                      {filteredStreets.length === 0 && !loadingOsmStreets && (
-                        <p className="p-4 text-center text-xs text-slate-400 font-medium italic">
-                          Rua não encontrada ou não carregada.
+                      {(lugar.categoria || lugar.avaliacao !== null) && (
+                        <p className="text-[10px] text-slate-400 font-bold mt-0.5 flex items-center gap-1.5 truncate">
+                          {lugar.categoria && <span className="truncate">{lugar.categoria}</span>}
+                          {lugar.avaliacao !== null && (
+                            <span className="flex items-center gap-0.5 shrink-0 text-amber-500">
+                              <Star className="w-2.5 h-2.5 fill-current" />
+                              {lugar.avaliacao.toFixed(1).replace('.', ',')}
+                              {lugar.totalAvaliacoes !== null && (
+                                <span className="text-slate-400 font-semibold">({lugar.totalAvaliacoes})</span>
+                              )}
+                            </span>
+                          )}
                         </p>
                       )}
-                    </div>
-                  </div>
-                )}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9.5px] text-slate-400 font-semibold leading-snug pt-0.5">
+                  Toque no resultado para o mapa ir até ele.
+                </p>
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>

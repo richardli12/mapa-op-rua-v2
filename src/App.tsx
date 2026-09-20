@@ -14053,34 +14053,6 @@ export default function App() {
           tempPlacementRadius={Number(areaRadius) || 0}
           onTempRadiusChange={(metros) => setAreaRadius(metros)}
           tempPlacementType={coordsPickingMode}
-          externalBairroName={creationBairroName}
-          externalRuaName={creationRuaName}
-          onExternalBairroChange={handleCreationBairroSelect}
-          onExternalRuaChange={handleCreationRuaSelect}
-          externalStateShortName={creationStateShortName}
-          externalStateName={creationStateName}
-          externalCityIbgeId={creationCityIbgeId}
-          externalCityName={creationCityName}
-          externalDistrictId={creationDistrictId}
-          onExternalStateChange={(short, name) => {
-            setCreationStateShortName(short);
-            setCreationStateName(name);
-            setCreationCityIbgeId(null);
-            setCreationCityName(null);
-            setCreationBairroName(null);
-            setCreationDistrictId(null);
-            setCreationRuaName(null);
-          }}
-          onExternalCityChange={(ibgeCode, name) => {
-            setCreationCityIbgeId(ibgeCode);
-            setCreationCityName(name);
-            setCreationBairroName(null);
-            setCreationDistrictId(null);
-            setCreationRuaName(null);
-          }}
-          onExternalDistrictIdChange={(id) => {
-            setCreationDistrictId(id);
-          }}
         />
       </div>
 
