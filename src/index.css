@@ -246,3 +246,17 @@
     0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
   pointer-events: none;
 }
+
+/*
+ * Trilho de ferramentas do mapa: a rolagem existe, a barra não aparece.
+ * Quem avisa que há mais conteúdo são as sombras no topo e na base — uma
+ * listra de rolagem dentro de um painel de 64px vira sujeira visual.
+ */
+.rolagem-invisivel {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.rolagem-invisivel::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
