@@ -38,6 +38,20 @@ import MapaAjuste from './MapaAjuste';
 import CheckInMidias, { MidiaItem, MidiaTipo } from './CheckInMidias';
 import CheckInObservacoes, { ObservacaoItem } from './CheckInObservacoes';
 import { MaterialDaMissao } from './MaterialDaMissao';
+import { EtiquetaDePrioridade, EtiquetaDeTurno, IconeDoTurno } from './TurnoEPrioridade';
+import {
+  CHAVE_TURNOS,
+  COR_DO_TURNO,
+  JanelaDeTurno,
+  NOME_DO_TURNO,
+  TURNOS_PADRAO,
+  TurnoId,
+  janelaDoTurno,
+  lerTurnos,
+  ordemDoTurno,
+  situacaoDoTurno,
+  turnoDeAgora
+} from '../turnos';
 
 /**
  * Missão enviada pelo comitê e mostrada no alto da conversa.
@@ -63,6 +77,10 @@ export interface MissaoDoCampo {
   semLocal?: boolean;
   /** O que o comitê mandou junto: arte, planilha, um recado gravado. */
   material?: MaterialDeApoio[];
+  /** Parte do dia em que a missão deve acontecer, quando o comitê marcou uma. */
+  turno?: TurnoId;
+  /** Id do nível de prioridade que o comitê deu à missão. */
+  priority?: string;
   createdAt?: string;
 }
 
@@ -223,6 +241,19 @@ export default function CheckInChat({
   /** Nível de prioridade escolhido, da lista que o administrador cadastrou. */
   const [prioridade, setPrioridade] = useState('');
   const [niveis, setNiveis] = useState<PriorityLevel[]>([]);
+  const [janelas, setJanelas] = useState<JanelaDeTurno[]>(TURNOS_PADRAO);
+  /**
+   * O minuto de agora, batendo de dois em dois minutos.
+   *
+   * A lista da rua diz "fecha em 12 min" e reordena sozinha quando o turno
+   * vira. Sem este pulso, quem deixa a tela aberta às 11h50 continua vendo a
+   * manhã como o turno de agora ao meio-dia e meia.
+   */
+  const [pulso, setPulso] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setPulso(Date.now()), 120000);
+    return () => window.clearInterval(t);
+  }, []);
 
   /**
    * Missão escolhida para este check-in, das que o comitê enviou.
@@ -321,6 +352,66 @@ export default function CheckInChat({
   /** A missão deste check-in, ou nada: o registro livre continua existindo. */
   const missao = missoes.find(m => m.id === missaoId) || null;
 
+  /** O turno que está acontecendo agora, recalculado a cada pulso. */
+  const turnoAgora = React.useMemo(
+    () => turnoDeAgora(janelas),
+    [janelas, pulso]
+  );
+
+  /**
+   * O quanto um nível pesa.
+   *
+   * A régua é a do administrador: quanto maior a posição na lista dele, mais
+   * grave. Missão sem prioridade fica abaixo de qualquer nível cadastrado —
+   * não é "a menos grave", é a que ninguém classificou.
+   */
+  /** O nível cadastrado com este id, se ele ainda existir. */
+  const nivelDaMissao = (id?: string) => (id ? niveis.find(n => n.id === id) : undefined);
+
+  const pesoDaPrioridade = (id?: string) => {
+    const nivel = niveis.find(n => n.id === id);
+    return nivel ? nivel.position : -1;
+  };
+
+  /**
+   * A ordem do dia.
+   *
+   * Cinco missões chegam juntas e a pessoa na rua escolhe a primeira da
+   * lista — então a primeira da lista precisa ser a certa. A ordem é a de
+   * quem está com o colete na rua às dez da manhã: primeiro o que é para
+   * agora, do mais grave para o menos; depois o que serve a qualquer hora;
+   * depois o que ainda vai abrir, na ordem do relógio; e por último o que
+   * perdeu a janela — que continua na tela, porque missão atrasada não pode
+   * sumir, mas sai da frente do que ainda dá para fazer.
+   */
+  const missoesEmOrdem = React.useMemo(() => {
+    const grupo = (m: MissaoDoCampo) => {
+      if (!m.turno) return 1;
+      if (m.turno === turnoAgora) return 0;
+      return situacaoDoTurno(janelaDoTurno(janelas, m.turno)).estado === 'passou' ? 3 : 2;
+    };
+    return [...missoes].sort((a, b) => {
+      const ga = grupo(a);
+      const gb = grupo(b);
+      if (ga !== gb) return ga - gb;
+      if (ga === 2) {
+        const oa = ordemDoTurno(janelas, a.turno);
+        const ob = ordemDoTurno(janelas, b.turno);
+        if (oa !== ob) return oa - ob;
+      }
+      const pa = pesoDaPrioridade(a.priority);
+      const pb = pesoDaPrioridade(b.priority);
+      if (pa !== pb) return pb - pa;
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missoes, janelas, niveis, turnoAgora, pulso]);
+
+  /** Quantas missões são para a hora de agora. */
+  const quantasAgora = missoesEmOrdem.filter(m => m.turno && m.turno === turnoAgora).length;
+  /** Alguma missão tem turno? Sem isso a faixa do relógio não tem o que dizer. */
+  const algumaComTurno = missoes.some(m => m.turno);
+
   /**
    * Missões novas que ainda estão de pé.
    *
@@ -396,12 +487,14 @@ export default function CheckInChat({
 
   useEffect(() => {
     (async () => {
-      const [galeriaCfg, niveisCfg] = await Promise.all([
+      const [galeriaCfg, niveisCfg, turnosCfg] = await Promise.all([
         DatabaseService.lerConfiguracao('midia_galeria'),
-        DatabaseService.fetchPriorityLevels()
+        DatabaseService.fetchPriorityLevels(),
+        DatabaseService.lerConfiguracao(CHAVE_TURNOS)
       ]);
       setPermitirGaleria(galeriaCfg.value === 'sim');
       setNiveis(niveisCfg.data);
+      if (turnosCfg.value) setJanelas(lerTurnos(turnosCfg.value));
     })();
   }, []);
 
@@ -1126,7 +1219,61 @@ export default function CheckInChat({
             <div className="flex items-end gap-2 flex-row-reverse" ref={blocoMissoesRef}>
               <span className="w-7 shrink-0" />
               <div className="max-w-[86%] w-full flex flex-col items-stretch gap-2">
-                {missoes.map(missaoDaLista => {
+                {/*
+                  A faixa do relógio.
+
+                  Quem está na rua não abre a tela de configuração para saber
+                  que a manhã vai até 11:59. Esta linha diz que horas são no
+                  vocabulário da campanha e quantas missões são para agora —
+                  e é o que explica por que a lista está nesta ordem.
+                */}
+                {algumaComTurno && (
+                  <div
+                    className="rounded-2xl px-3 py-2 flex items-center gap-2 border"
+                    style={{
+                      backgroundColor: turnoAgora ? `${COR_DO_TURNO[turnoAgora]}12` : '#F8FAFC',
+                      borderColor: turnoAgora ? `${COR_DO_TURNO[turnoAgora]}33` : '#E2E8F0'
+                    }}
+                  >
+                    {turnoAgora ? (
+                      <>
+                        <span
+                          className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                          style={{
+                            backgroundColor: `${COR_DO_TURNO[turnoAgora]}1F`,
+                            color: COR_DO_TURNO[turnoAgora]
+                          }}
+                        >
+                          <IconeDoTurno turno={turnoAgora} className="w-3.5 h-3.5" />
+                        </span>
+                        <span className="min-w-0 flex-1 leading-tight">
+                          <span
+                            className="block text-[11.5px] font-black"
+                            style={{ color: COR_DO_TURNO[turnoAgora] }}
+                          >
+                            Agora é {NOME_DO_TURNO[turnoAgora].toLowerCase()} ·{' '}
+                            {janelaDoTurno(janelas, turnoAgora).inicio}–
+                            {janelaDoTurno(janelas, turnoAgora).fim}
+                          </span>
+                          <span className="block text-[10.5px] font-bold text-slate-500 mt-0.5">
+                            {quantasAgora === 0
+                              ? 'Nenhuma missão marcada para este turno — as de cima são as mais urgentes.'
+                              : quantasAgora === 1
+                                ? '1 missão é para este turno, e ela está no topo.'
+                                : `${quantasAgora} missões são para este turno, e estão no topo.`}
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-[11px] font-bold text-slate-500 leading-snug">
+                        Fora dos turnos de trabalho da campanha. As missões
+                        continuam aqui, na ordem de urgência.
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {missoesEmOrdem.map(missaoDaLista => {
                   const escolhida = missaoDaLista.id === missaoId;
                   const eNova = novasDePe.includes(missaoDaLista.id);
                   // A distância só existe depois do GPS: antes dele, some.
@@ -1220,6 +1367,25 @@ export default function CheckInChat({
                             <p className="text-[11.5px] text-slate-500 leading-snug mt-0.5 whitespace-pre-line">
                               {missaoDaLista.description}
                             </p>
+                          )}
+                          {(missaoDaLista.turno || nivelDaMissao(missaoDaLista.priority)) && (
+                            <span className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              {missaoDaLista.turno && (
+                                <EtiquetaDeTurno
+                                  turno={missaoDaLista.turno}
+                                  janelas={janelas}
+                                  mostrarHoras={false}
+                                  aoVivo
+                                  tamanho="mini"
+                                />
+                              )}
+                              {nivelDaMissao(missaoDaLista.priority) && (
+                                <EtiquetaDePrioridade
+                                  nivel={nivelDaMissao(missaoDaLista.priority)!}
+                                  tamanho="mini"
+                                />
+                              )}
+                            </span>
                           )}
                           {detalhes && (
                             <p className="text-[10.5px] text-slate-400 font-bold mt-1.5">

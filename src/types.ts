@@ -18,6 +18,19 @@ export interface MaterialDeApoio {
   duracao?: number;
 }
 
+/**
+ * Quando, dentro do dia, e o quanto importa.
+ *
+ * Mora no mesmo jsonb do material, pelo mesmo motivo: a missão nasce com
+ * turno e prioridade em todo banco que já está no ar, sem esperar migração.
+ * `turno` é um id de `src/turnos.ts`; `priority`, o id de um nível cadastrado
+ * pelo administrador — o mesmo que o check-in usa.
+ */
+export interface QuandoDaMissao {
+  turno?: 'manha' | 'tarde' | 'noite';
+  priority?: string;
+}
+
 export interface PanfletagemArea {
   id: string;
   title: string;
@@ -28,7 +41,7 @@ export interface PanfletagemArea {
     lng: number;
     assignedDeltas?: string[];
     material?: MaterialDeApoio[];
-  };
+  } & QuandoDaMissao;
   radius: number; // in meters (default 500)
   color: string; // Hex color for circle
   active: boolean;
@@ -57,7 +70,7 @@ export interface CampaignPin {
     assignedDeltas?: string[];
     semLocal?: boolean;
     material?: MaterialDeApoio[];
-  };
+  } & QuandoDaMissao;
   color: string;
   /** Id do Tipo de Operação (ver OperationType). Fica solto de propósito: os tipos são cadastrados pelo próprio usuário. */
   iconType: string;
