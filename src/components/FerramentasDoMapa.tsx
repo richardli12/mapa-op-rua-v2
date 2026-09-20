@@ -127,16 +127,16 @@ export function FerramentasDoMapa({
         initial={false}
         animate={{ width: aberto ? LARGURA_ABERTO : LARGURA_FECHADO }}
         transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-        className="pointer-events-auto flex flex-col bg-[#0c1322]/95 backdrop-blur-md border border-slate-800/80 rounded-[26px] shadow-2xl shadow-black/40 overflow-hidden"
+        className="pointer-events-auto flex flex-col bg-[#DBE2E9]/95 backdrop-blur-md border border-slate-300/70 rounded-[26px] shadow-2xl shadow-slate-900/20 overflow-hidden"
       >
         {/* Cabeçalho: quem abre e fecha, e o que está ligado agora */}
-        <div className="shrink-0 flex items-center gap-2 h-12 px-2.5 border-b border-slate-800/70">
+        <div className="shrink-0 flex items-center gap-2 h-12 px-2.5 border-b border-slate-400/40">
           {aberto && (
             <div className="min-w-0 flex-1 pl-1.5">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 leading-none">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 leading-none">
                 Ferramentas
               </p>
-              <p className="text-[9.5px] font-bold text-slate-600 leading-none mt-1 truncate">
+              <p className="text-[9.5px] font-bold text-slate-500 leading-none mt-1 truncate">
                 {ligadas > 0
                   ? `${ligadas} ${ligadas === 1 ? 'ligada' : 'ligadas'}`
                   : 'nada ligado'}
@@ -148,7 +148,7 @@ export function FerramentasDoMapa({
             onClick={() => setAberto(v => !v)}
             aria-expanded={aberto}
             title={aberto ? 'Recolher o menu' : 'Abrir o menu'}
-            className={`group relative shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer ${
+            className={`group relative shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white/70 transition-colors cursor-pointer ${
               aberto ? '' : 'mx-auto'
             }`}
           >
@@ -184,11 +184,11 @@ export function FerramentasDoMapa({
               return (
                 <section key={grupo.id} className="space-y-1">
                   {aberto ? (
-                    <p className="px-2 pb-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-slate-600">
+                    <p className="px-2 pb-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-slate-500">
                       {grupo.titulo}
                     </p>
                   ) : (
-                    <div className="mx-auto w-7 h-px bg-slate-700/80" aria-hidden="true" />
+                    <div className="mx-auto w-7 h-px bg-slate-400/60" aria-hidden="true" />
                   )}
                   {doGrupo.map(f => (
                     // Fragment segura a chave: sem os tipos do React neste
@@ -230,8 +230,8 @@ function BordaDeRolagem({
       aria-hidden={!visivel}
       className={`absolute inset-x-0 h-10 z-20 flex items-center justify-center transition-opacity duration-200 ${
         emCima
-          ? 'top-0 bg-gradient-to-b from-[#0c1322] via-[#0c1322]/85 to-transparent'
-          : 'bottom-0 bg-gradient-to-t from-[#0c1322] via-[#0c1322]/85 to-transparent'
+          ? 'top-0 bg-gradient-to-b from-[#DBE2E9] via-[#DBE2E9]/85 to-transparent'
+          : 'bottom-0 bg-gradient-to-t from-[#DBE2E9] via-[#DBE2E9]/85 to-transparent'
       } ${visivel ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
     >
       <button
@@ -239,7 +239,7 @@ function BordaDeRolagem({
         tabIndex={visivel ? 0 : -1}
         onClick={aoRolar}
         aria-label={emCima ? 'Ver as ferramentas acima' : 'Ver as ferramentas abaixo'}
-        className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 flex items-center justify-center shadow-lg cursor-pointer transition-colors"
+        className="w-6 h-6 rounded-full bg-white border border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center justify-center shadow-md cursor-pointer transition-colors"
       >
         {emCima ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
       </button>
@@ -273,7 +273,7 @@ function Botao({ ferramenta, aberto }: { ferramenta: FerramentaDoMapa; aberto: b
       title={ajuda || rotulo}
       className={`group relative w-full flex items-center rounded-2xl cursor-pointer transition-all active:scale-[0.97] ${
         aberto ? 'gap-2.5 h-11 px-2' : 'h-11 justify-center'
-      } ${ativa ? 'text-white' : 'text-slate-300 hover:bg-white/8'}`}
+      } ${ativa ? 'text-white' : 'text-slate-700 hover:bg-white/70'}`}
       style={
         ativa
           ? { backgroundColor: cor, boxShadow: `0 6px 18px -8px ${cor}` }
@@ -290,12 +290,12 @@ function Botao({ ferramenta, aberto }: { ferramenta: FerramentaDoMapa; aberto: b
         style={
           ativa
             ? { backgroundColor: 'rgba(255,255,255,0.16)', color: '#fff' }
-            : { backgroundColor: `${cor}1F`, color: cor }
+            : { backgroundColor: `${cor}2E`, color: cor }
         }
       >
         {icone}
         {!aberto && !!contador && contador > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-[#F58220] border-2 border-[#0c1322] text-white text-[8.5px] font-black flex items-center justify-center">
+          <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-[#F58220] border-2 border-[#DBE2E9] text-white text-[8.5px] font-black flex items-center justify-center">
             {contador}
           </span>
         )}
@@ -319,8 +319,8 @@ function Botao({ ferramenta, aberto }: { ferramenta: FerramentaDoMapa; aberto: b
             <kbd
               className={`shrink-0 px-1.5 py-0.5 rounded-md text-[8.5px] font-black border ${
                 ativa
-                  ? 'bg-white/15 border-white/20 text-white'
-                  : 'bg-white/5 border-white/10 text-slate-500'
+                  ? 'bg-white/20 border-white/25 text-white'
+                  : 'bg-white/70 border-slate-300 text-slate-500'
               }`}
             >
               {atalho}
