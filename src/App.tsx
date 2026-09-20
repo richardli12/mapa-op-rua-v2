@@ -48,6 +48,12 @@ import {
   Megaphone,
   Star,
   Crosshair,
+  Maximize2,
+  Navigation,
+  TrendingUp,
+  Activity,
+  AlertTriangle,
+  Trophy,
   Home,
   Plus,
   Trash2,
@@ -579,6 +585,11 @@ export default function App() {
   >("todos");
   const [paginaCheckIns, setPaginaCheckIns] = useState(1);
   const [checkInAberto, setCheckInAberto] = useState<string | null>(null);
+  /** Recortes do mapa da visão geral: período e nível de prioridade. */
+  const [periodoMapaGeral, setPeriodoMapaGeral] = useState<
+    "hoje" | "7" | "30" | "tudo"
+  >("hoje");
+  const [prioridadeMapaGeral, setPrioridadeMapaGeral] = useState("todas");
   /** Lixeira dos check-ins aberta na aba do cliente. */
   const [lixeiraAberta, setLixeiraAberta] = useState(false);
   const [fichaDoCheckIn, setFichaDoCheckIn] = useState<any>(null);
@@ -8298,6 +8309,76 @@ export default function App() {
               });
             });
 
+            /* ------------------------------------------- visão geral ---
+             * Os números do topo comparam hoje com ontem, e o mapa da aba
+             * tem os próprios recortes — o painel da direita continua vendo
+             * o cliente inteiro.
+             */
+            const ontem = new Date(Date.now() - 86400000).toDateString();
+            const checkInsDeOntem = checkInsDoCliente.filter(
+              (c: any) => new Date(c.createdAt).toDateString() === ontem,
+            );
+            const variacaoVsOntem =
+              checkInsDeOntem.length === 0
+                ? checkInsDeHoje.length > 0
+                  ? 100
+                  : 0
+                : Math.round(
+                    ((checkInsDeHoje.length - checkInsDeOntem.length) /
+                      checkInsDeOntem.length) *
+                      100,
+                  );
+
+            /** Bairro que mais aparece hoje: o "onde está pegando fogo". */
+            const porBairro: { [nome: string]: number } = {};
+            checkInsDeHoje.forEach((c: any) => {
+              const bairro = (c.bairro || "").trim();
+              if (!bairro) return;
+              porBairro[bairro] = (porBairro[bairro] || 0) + 1;
+            });
+            const maiorConcentracao = Object.keys(porBairro).sort(
+              (a, b) => porBairro[b] - porBairro[a],
+            )[0];
+
+            const inicioDoRecorte =
+              periodoMapaGeral === "tudo"
+                ? 0
+                : periodoMapaGeral === "hoje"
+                  ? new Date().setHours(0, 0, 0, 0)
+                  : Date.now() - Number(periodoMapaGeral) * 86400000;
+
+            /** Check-ins que o cartão do mapa desenha, já com os recortes. */
+            const doRecorte = checkInsDoCliente.filter((c: any) => {
+              const quando = new Date(c.createdAt).getTime();
+              if (inicioDoRecorte && (Number.isNaN(quando) || quando < inicioDoRecorte))
+                return false;
+              if (
+                prioridadeMapaGeral !== "todas" &&
+                c.priority !== prioridadeMapaGeral
+              )
+                return false;
+              return true;
+            });
+            const idsDoRecorte = doRecorte.map((c: any) => c.id);
+            const pontosDoRecorte = pontosDoMapa.filter((_, indice) => {
+              const origem = checkInsDoCliente.filter(
+                (c: any) => c.coordinates?.lat && c.coordinates?.lng,
+              )[indice];
+              return origem && idsDoRecorte.includes(origem.id);
+            });
+
+            /** Níveis que aparecem na legenda, na ordem do administrador. */
+            const niveisDaLegenda = opcoesDePrioridade.filter((nivel) =>
+              checkInsDoCliente.some((c: any) => c.priority === nivel.value),
+            );
+
+            const rotuloDoPeriodo =
+              periodoMapaGeral === "hoje"
+                ? "Hoje"
+                : periodoMapaGeral === "tudo"
+                  ? "Todo o período"
+                  : `${periodoMapaGeral} dias`;
+
             const abas = [
               { id: "geral" as const, rotulo: "Visão geral" },
               { id: "equipe" as const, rotulo: "Equipe" },
@@ -8400,83 +8481,156 @@ export default function App() {
 
             {/* VISÃO GERAL */}
             {abaCliente === "geral" && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                {/* COLUNA DA ESQUERDA */}
-                <div className="lg:col-span-2 flex flex-col gap-5">
-                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
-                    <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2.5">
-                        <Map className="w-5 h-5 text-[#015FC9]" />
-                        <div>
-                          <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
+              <div className="grid grid-cols-1 xl:grid-cols-[1.62fr_1fr] gap-4 items-start">
+                {/* ================= COLUNA DA ESQUERDA ================= */}
+                <div className="flex flex-col gap-4 min-w-0">
+                  {/* MAPA OPERACIONAL */}
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                    <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-9 h-9 rounded-xl bg-[#EFF4FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                          <Map className="w-4.5 h-4.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <h3 className="text-[14px] font-black text-[#0D233A] leading-tight">
                             Mapa operacional
                           </h3>
-                          <p className="text-[11px] text-slate-400 font-semibold">
-                            Localização dos registros em{" "}
+                          <p className="text-[11px] text-slate-400 font-semibold truncate">
+                            Ocorrências registradas em{" "}
                             {inspectedCandidate.city || "campo"}
                           </p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => {
-                          setSelectedCandidateFilter(inspectedCandidate.id);
-                          setAdminTab("map");
-                        }}
-                        className="h-9 px-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shrink-0"
-                      >
-                        Entrar no mapa
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="relative">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <select
+                            value={periodoMapaGeral}
+                            onChange={(e) =>
+                              setPeriodoMapaGeral(e.target.value as any)
+                            }
+                            className="appearance-none h-8 pl-7 pr-7 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-600 cursor-pointer focus:outline-hidden hover:border-slate-300"
+                          >
+                            <option value="hoje">Hoje</option>
+                            <option value="7">7 dias</option>
+                            <option value="30">30 dias</option>
+                            <option value="tudo">Todo o período</option>
+                          </select>
+                          <ChevronDown className="w-3 h-3 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        </div>
+
+                        <div className="relative">
+                          <select
+                            value={prioridadeMapaGeral}
+                            onChange={(e) => setPrioridadeMapaGeral(e.target.value)}
+                            className="appearance-none h-8 pl-2.5 pr-7 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-600 cursor-pointer focus:outline-hidden hover:border-slate-300"
+                          >
+                            <option value="todas">Todas as prioridades</option>
+                            {opcoesDePrioridade.map((nivel) => (
+                              <option key={nivel.value} value={nivel.value}>
+                                {nivel.label}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="w-3 h-3 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setSelectedCandidateFilter(inspectedCandidate.id);
+                            setAdminTab("map");
+                          }}
+                          className="h-8 px-2.5 bg-white hover:bg-slate-50 border border-slate-200 hover:border-[#015FC9] text-slate-600 hover:text-[#015FC9] text-[11px] font-bold rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5" />
+                          Tela cheia
+                        </button>
+                      </div>
                     </div>
 
-                    {centro ? (
-                      <MiniMapa
-                        lat={centro.lat}
-                        lng={centro.lng}
-                        pontos={pontosDoMapa}
-                        height={260}
-                      />
-                    ) : (
-                      <div className="h-[260px] bg-slate-50 flex items-center justify-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
-                        Sem registros para mostrar
-                      </div>
-                    )}
+                    {/* O mapa fica embutido, com cantos próprios e a etiqueta
+                        do resumo flutuando por cima do canto de cima. */}
+                    <div className="px-4">
+                      <div className="relative rounded-xl overflow-hidden border border-slate-200">
+                        {centro ? (
+                          <MiniMapa
+                            lat={centro.lat}
+                            lng={centro.lng}
+                            pontos={pontosDoRecorte}
+                            height={252}
+                          />
+                        ) : (
+                          <div className="h-[252px] bg-slate-50 flex items-center justify-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                            Sem registros para mostrar
+                          </div>
+                        )}
 
-                    {legendaDoMapa.length > 0 && (
-                      <div className="px-5 py-3 flex flex-wrap gap-2 border-t border-slate-100">
-                        {legendaDoMapa.map((item) => (
+                        <div className="absolute top-3 left-3 z-[500] bg-white rounded-xl shadow-lg border border-slate-200/80 px-3 py-2 flex items-center gap-2.5 pointer-events-none">
+                          <span className="w-8 h-8 rounded-lg bg-[#EFF4FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                            <BarChart3 className="w-4 h-4" />
+                          </span>
+                          <div>
+                            <p className="text-[12.5px] font-black text-[#0D233A] leading-none">
+                              {doRecorte.length}{" "}
+                              <span className="font-bold text-slate-500">
+                                {doRecorte.length === 1 ? "registro" : "registros"}
+                              </span>
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                              {maiorConcentracao
+                                ? `Maior concentração: ${maiorConcentracao}`
+                                : rotuloDoPeriodo}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* LEGENDA DAS PRIORIDADES */}
+                    <div className="px-4 py-3 flex items-center gap-4 flex-wrap">
+                      {/* Do mais grave para o mais leve: é nessa ordem que
+                          se lê uma legenda de urgência. */}
+                      {(niveisDaLegenda.length > 0
+                        ? niveisDaLegenda
+                        : opcoesDePrioridade
+                      )
+                        .slice()
+                        .reverse()
+                        .map((nivel) => (
                           <span
-                            key={item.chave}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-50 border border-slate-200 text-slate-600"
+                            key={nivel.value}
+                            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-500"
                           >
                             <span
-                              className="w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: item.cor }}
+                              className="w-2 h-2 rounded-full"
+                              style={{ backgroundColor: nivel.color }}
                             />
-                            {item.rotulo}
+                            {nivel.label}
                           </span>
                         ))}
-                      </div>
-                    )}
+                    </div>
                   </div>
 
                   {/* CHECK-INS RECENTES */}
-                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
-                    <div className="flex items-center justify-between gap-3 mb-3">
-                      <div className="flex items-center gap-2.5">
-                        <Clock className="w-5 h-5 text-[#015FC9]" />
-                        <div>
-                          <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                    <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-9 h-9 rounded-xl bg-[#EFF4FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                          <Clock className="w-4.5 h-4.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <h3 className="text-[14px] font-black text-[#0D233A] leading-tight">
                             Check-ins recentes
                           </h3>
-                          <p className="text-[11px] text-slate-400 font-semibold">
+                          <p className="text-[11px] text-slate-400 font-semibold truncate">
                             Últimos registros realizados pela equipe
                           </p>
                         </div>
                       </div>
                       <button
                         onClick={() => setAbaCliente("checkins")}
-                        className="text-[11px] font-black text-[#015FC9] hover:text-blue-700 flex items-center gap-1 cursor-pointer shrink-0"
+                        className="text-[11.5px] font-black text-[#015FC9] hover:text-blue-700 flex items-center gap-1 cursor-pointer shrink-0"
                       >
                         Ver todos
                         <ArrowRight className="w-3.5 h-3.5" />
@@ -8484,270 +8638,281 @@ export default function App() {
                     </div>
 
                     {checkInsDoCliente.length === 0 ? (
-                      <div className="py-10 text-center text-slate-400 font-bold text-[11px] uppercase tracking-widest bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                      <div className="mx-4 mb-4 py-10 text-center text-slate-400 font-bold text-[11px] uppercase tracking-widest bg-slate-50/60 rounded-xl border border-dashed border-slate-200">
                         Nenhum check-in registrado ainda
                       </div>
                     ) : (
-                      <div className="divide-y divide-slate-100">
-                        {checkInsDoCliente.slice(0, 5).map((ci: any) => (
-                          <div
-                            key={ci.id}
-                            className="py-3 flex items-center gap-3 flex-wrap"
-                          >
-                            <span className="w-9 h-9 rounded-full bg-slate-100 overflow-hidden flex items-center justify-center shrink-0">
-                              {ci.memberPhoto ? (
-                                <img
-                                  src={ci.memberPhoto}
-                                  alt={ci.name}
-                                  referrerPolicy="no-referrer"
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <Users className="w-4 h-4 text-slate-400" />
-                              )}
-                            </span>
-                            <span className="text-[13px] font-bold text-slate-800 min-w-0 truncate">
-                              {ci.name}
-                            </span>
-                            {ci.operationTypeLabel && (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-50 border border-slate-200 text-slate-600">
-                                {ci.operationTypeLabel}
+                      <div className="px-4 pb-4 flex flex-col gap-2">
+                        {checkInsDoCliente.slice(0, 4).map((ci: any) => {
+                          const tipo = operationTypes.find(
+                            (t) =>
+                              t.id === ci.operationTypeId ||
+                              t.label === ci.operationTypeLabel,
+                          );
+                          const cor = tipo?.color || "#94A3B8";
+                          const capa =
+                            (ci.media || []).find((m: any) => m.type !== "video")
+                              ?.url || ci.photo;
+                          return (
+                            <div
+                              key={ci.id}
+                              onClick={() => {
+                                setAbaCliente("checkins");
+                                setCheckInAberto(ci.id);
+                              }}
+                              className="flex items-center gap-2.5 p-2 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50/60 cursor-pointer transition-all"
+                            >
+                              <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 text-[9.5px] font-black text-[#015FC9] uppercase">
+                                {ci.memberPhoto ? (
+                                  <img
+                                    src={ci.memberPhoto}
+                                    alt=""
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  (ci.name || "DT").substring(0, 2)
+                                )}
                               </span>
-                            )}
-                            <span className="text-[11px] text-slate-400 font-semibold flex items-center gap-1 min-w-0 truncate">
-                              <MapPin className="w-3 h-3 shrink-0" />
-                              {[ci.rua, ci.bairro].filter(Boolean).join(", ") ||
-                                "Sem endereço"}
-                            </span>
-                            <span className="text-[11px] text-slate-400 font-semibold flex items-center gap-1 ml-auto shrink-0">
-                              <Clock className="w-3 h-3" />
-                              {new Date(ci.createdAt).toLocaleTimeString("pt-BR", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
-                          </div>
-                        ))}
+
+                              <span className="text-[12.5px] font-black text-slate-800 truncate max-w-[155px] shrink-0">
+                                {ci.name}
+                              </span>
+
+                              <span
+                                className="px-2 py-1 rounded-lg text-[10.5px] font-black truncate max-w-[135px] shrink-0"
+                                style={{
+                                  backgroundColor: `${cor}1A`,
+                                  color: cor,
+                                }}
+                              >
+                                {ci.operationTypeLabel || "Sem tipo"}
+                              </span>
+
+                              <span className="text-[11px] text-slate-400 font-semibold flex items-center gap-1 min-w-0 flex-1 truncate">
+                                <MapPin className="w-3 h-3 shrink-0" />
+                                <span className="truncate">
+                                  {[ci.rua, ci.bairro].filter(Boolean).join(", ") ||
+                                    "Sem endereço"}
+                                </span>
+                              </span>
+
+                              <span className="text-[11px] text-slate-400 font-semibold flex items-center gap-1 shrink-0">
+                                <Clock className="w-3 h-3" />
+                                {new Date(ci.createdAt).toLocaleTimeString("pt-BR", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+
+                              <span className="w-14 h-9 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                                {capa ? (
+                                  <img
+                                    src={capa}
+                                    alt=""
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <Camera className="w-3.5 h-3.5 text-slate-300" />
+                                )}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* COLUNA DA DIREITA */}
-                <div className="flex flex-col gap-5">
-                  <div className="grid grid-cols-3 gap-3">
+                {/* ================== COLUNA DA DIREITA ================== */}
+                <div className="flex flex-col gap-4 min-w-0">
+                  {/* QUATRO NÚMEROS DO TOPO */}
+                  <div className="grid grid-cols-4 gap-2.5">
                     {[
                       {
-                        rotulo: "Equipe",
-                        valor: equipeDoCliente.length,
+                        chave: "equipe",
+                        valor: String(equipeDoCliente.length),
                         apoio: "membros",
                         icone: <Users className="w-4 h-4" />,
-                        cor: "text-blue-600 bg-blue-50",
+                        cor: "text-[#015FC9] bg-[#EFF4FB]",
                       },
                       {
-                        rotulo: "Check-ins",
-                        valor: checkInsDeHoje.length,
-                        apoio: "hoje",
-                        icone: <MapPin className="w-4 h-4" />,
-                        cor: "text-purple-600 bg-purple-50",
+                        chave: "checkins",
+                        valor: String(checkInsDeHoje.length),
+                        apoio: "check-ins hoje",
+                        icone: <ClipboardList className="w-4 h-4" />,
+                        cor: "text-violet-600 bg-violet-50",
                       },
                       {
-                        rotulo: "Em campo",
-                        valor: emCampo.size,
-                        apoio: "ativo",
-                        icone: <Compass className="w-4 h-4" />,
+                        chave: "campo",
+                        valor: String(emCampo.size),
+                        apoio: "em campo",
+                        icone: <Navigation className="w-4 h-4" />,
                         cor: "text-emerald-600 bg-emerald-50",
+                      },
+                      {
+                        chave: "variacao",
+                        valor: `${variacaoVsOntem >= 0 ? "+" : ""}${variacaoVsOntem}%`,
+                        apoio: "vs. ontem",
+                        icone: <TrendingUp className="w-4 h-4" />,
+                        cor:
+                          variacaoVsOntem >= 0
+                            ? "text-emerald-600 bg-emerald-50"
+                            : "text-rose-600 bg-rose-50",
+                        destaque:
+                          variacaoVsOntem >= 0
+                            ? "text-emerald-600"
+                            : "text-rose-600",
                       },
                     ].map((item) => (
                       <div
-                        key={item.rotulo}
-                        className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs"
+                        key={item.chave}
+                        className="bg-white border border-slate-200 rounded-2xl px-2.5 py-3 shadow-xs flex flex-col items-start gap-1.5"
                       >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${item.cor}`}
-                          >
-                            {item.icone}
-                          </span>
-                          <span className="text-[9px] font-extrabold uppercase tracking-widest text-[#8492A6] leading-tight">
-                            {item.rotulo}
-                          </span>
-                        </div>
-                        <p className="text-xl font-black text-[#0D233A] leading-none mt-2">
+                        <span
+                          className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${item.cor}`}
+                        >
+                          {item.icone}
+                        </span>
+                        <p
+                          className={`text-[19px] font-black leading-none ${
+                            item.destaque || "text-[#0D233A]"
+                          }`}
+                        >
                           {item.valor}
                         </p>
-                        <p className="text-[10px] text-slate-400 font-semibold">
+                        <p className="text-[10px] text-slate-400 font-bold leading-tight">
                           {item.apoio}
                         </p>
                       </div>
                     ))}
                   </div>
 
-                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
-                    <div className="flex items-center gap-2.5 mb-3">
-                      <AlertCircle className="w-5 h-5 text-[#015FC9]" />
-                      <div>
-                        <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
-                          Ranking de problemas
+                  {/* PULSO DA OPERAÇÃO */}
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+                    <div className="flex items-center justify-between gap-2 mb-3.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-9 h-9 rounded-xl bg-[#EFF4FB] text-[#015FC9] flex items-center justify-center shrink-0">
+                          <Activity className="w-4.5 h-4.5" />
+                        </span>
+                        <h3 className="text-[14px] font-black text-[#0D233A] leading-tight truncate">
+                          Pulso da operação
                         </h3>
-                        <p className="text-[11px] text-slate-400 font-semibold">
-                          O que mais aparece nos check-ins
-                        </p>
                       </div>
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-400 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        Atualizado agora
+                      </span>
                     </div>
 
-                    {rankingProblemas.length === 0 ? (
-                      <div className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
-                        Nenhum problema registrado ainda
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2.5 max-h-[320px] overflow-y-auto pr-1">
-                        {rankingProblemas.map((item, posicao) => (
-                          <div
-                            key={item.chave}
-                            className="flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100"
-                          >
+                    {/* PRIORIDADES */}
+                    <h4 className="text-[11.5px] font-black text-[#0D233A] mb-2">
+                      Prioridades
+                    </h4>
+                    <div className="flex flex-col gap-2">
+                      {rankingPrioridades.map((item) => (
+                        <div key={item.chave} className="flex items-center gap-2">
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: item.cor }}
+                          />
+                          <span className="text-[11.5px] font-bold text-slate-600 w-[58px] shrink-0 truncate">
+                            {item.rotulo}
+                          </span>
+                          <span className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden min-w-0">
                             <span
-                              className={`w-6 h-6 rounded-lg text-[11px] font-black flex items-center justify-center shrink-0 ${
-                                posicao === 0
-                                  ? "bg-amber-100 text-amber-700"
-                                  : posicao === 1
-                                    ? "bg-slate-200 text-slate-600"
-                                    : posicao === 2
-                                      ? "bg-orange-100 text-orange-700"
-                                      : "bg-slate-50 text-slate-400"
-                              }`}
-                            >
-                              {posicao + 1}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[13px] font-black text-slate-800 truncate leading-tight flex items-center gap-1.5">
-                                <span
-                                  className="w-2.5 h-2.5 rounded-full shrink-0"
-                                  style={{ backgroundColor: item.cor }}
-                                />
-                                <span className="truncate">{item.rotulo}</span>
-                              </p>
-                              {/* A barra compara com o problema mais registrado. */}
-                              <span className="mt-1 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                                <span
-                                  className="block h-full rounded-full"
-                                  style={{
-                                    width: `${(item.total / maiorDosProblemas) * 100}%`,
-                                    backgroundColor: item.cor,
-                                  }}
-                                />
-                              </span>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p className="text-[15px] font-black text-[#0D233A] leading-none">
-                                {item.total}
-                              </p>
-                              <p className="text-[10px] text-slate-400 font-bold">
-                                {item.total === 1 ? "registro" : "registros"}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
-                    <div className="flex items-center gap-2.5 mb-3">
-                      <Flag className="w-5 h-5 text-[#F58220]" />
-                      <div>
-                        <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
-                          Ranking de prioridades
-                        </h3>
-                        <p className="text-[11px] text-slate-400 font-semibold">
-                          Como a equipe classificou a urgência
-                        </p>
-                      </div>
+                              className="block h-full rounded-full transition-all"
+                              style={{
+                                width: `${(item.total / maiorDasPrioridades) * 100}%`,
+                                backgroundColor: item.cor,
+                              }}
+                            />
+                          </span>
+                          <span className="text-[12px] font-black text-[#0D233A] w-6 text-right shrink-0">
+                            {item.total}
+                          </span>
+                        </div>
+                      ))}
                     </div>
 
-                    {totalPriorizado === 0 ? (
-                      <div className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
-                        Nenhuma prioridade registrada ainda
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2.5 max-h-[320px] overflow-y-auto pr-1">
-                        {rankingPrioridades.map((item, posicao) => (
-                          <div
-                            key={item.chave}
-                            className="flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100"
-                          >
-                            <span
-                              className={`w-6 h-6 rounded-lg text-[11px] font-black flex items-center justify-center shrink-0 ${
-                                posicao === 0
-                                  ? "bg-amber-100 text-amber-700"
-                                  : posicao === 1
-                                    ? "bg-slate-200 text-slate-600"
-                                    : posicao === 2
-                                      ? "bg-orange-100 text-orange-700"
-                                      : "bg-slate-50 text-slate-400"
-                              }`}
+                    {/* PROBLEMAS MAIS REPORTADOS */}
+                    <div className="mt-4 pt-3.5 border-t border-slate-100">
+                      <h4 className="text-[11.5px] font-black text-[#0D233A] mb-2 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-[#F58220]" />
+                        Problemas mais reportados
+                      </h4>
+
+                      {rankingProblemas.length === 0 ? (
+                        <p className="py-4 text-center text-[10.5px] font-bold uppercase tracking-widest text-slate-300">
+                          Nada registrado ainda
+                        </p>
+                      ) : (
+                        <div className="flex flex-col gap-2">
+                          {rankingProblemas.slice(0, 4).map((item, posicao) => (
+                            <div
+                              key={item.chave}
+                              className="flex items-center gap-2"
                             >
-                              {posicao + 1}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[13px] font-black text-slate-800 truncate leading-tight flex items-center gap-1.5">
-                                <span
-                                  className="w-2.5 h-2.5 rounded-full shrink-0"
-                                  style={{ backgroundColor: item.cor }}
-                                />
-                                <span className="truncate">{item.rotulo}</span>
-                              </p>
-                              {/* A barra compara com o nível mais registrado. */}
-                              <span className="mt-1 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                                <span
-                                  className="block h-full rounded-full"
-                                  style={{
-                                    width: `${(item.total / maiorDasPrioridades) * 100}%`,
-                                    backgroundColor: item.cor,
-                                  }}
-                                />
+                              <span
+                                className={`w-5 h-5 rounded-md text-[10px] font-black flex items-center justify-center shrink-0 ${
+                                  posicao === 0
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-slate-100 text-slate-500"
+                                }`}
+                              >
+                                {posicao + 1}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[11.5px] font-bold text-slate-700 truncate leading-tight">
+                                  {item.rotulo}
+                                </p>
+                                <span className="mt-1 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                  <span
+                                    className="block h-full rounded-full"
+                                    style={{
+                                      width: `${(item.total / maiorDosProblemas) * 100}%`,
+                                      backgroundColor: item.cor,
+                                    }}
+                                  />
+                                </span>
+                              </div>
+                              <span className="text-[12px] font-black text-[#0D233A] w-6 text-right shrink-0">
+                                {item.total}
                               </span>
                             </div>
-                            <div className="text-right shrink-0">
-                              <p className="text-[15px] font-black text-[#0D233A] leading-none">
-                                {item.total}
-                              </p>
-                              <p className="text-[10px] text-slate-400 font-bold">
-                                {totalPriorizado > 0
-                                  ? `${Math.round((item.total / totalPriorizado) * 100)}%`
-                                  : "0%"}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5">
-                    <div className="flex items-center gap-2.5 mb-3">
-                      <Star className="w-5 h-5 text-emerald-600" />
-                      <div>
-                        <h3 className="text-[15px] font-black text-[#0D233A] leading-tight">
+                  {/* RANKING DA EQUIPE */}
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+                    <div className="flex items-center gap-2.5 mb-3.5">
+                      <span className="w-9 h-9 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center shrink-0">
+                        <Trophy className="w-4.5 h-4.5" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-[14px] font-black text-[#0D233A] leading-tight">
                           Ranking da equipe
                         </h3>
                         <p className="text-[11px] text-slate-400 font-semibold">
-                          Quem mais registrou em campo
+                          Desempenho de hoje
                         </p>
                       </div>
                     </div>
 
                     {ranking.length === 0 ? (
-                      <div className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                      <p className="py-6 text-center text-[10.5px] font-bold uppercase tracking-widest text-slate-300">
                         Nenhum check-in registrado ainda
-                      </div>
+                      </p>
                     ) : (
-                      <div className="flex flex-col gap-2.5 max-h-[320px] overflow-y-auto pr-1">
-                        {ranking.map((item, posicao) => (
+                      <div className="flex flex-col gap-2.5">
+                        {ranking.slice(0, 3).map((item, posicao) => (
                           <div
                             key={item.chave}
-                            className="flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100"
+                            className="flex items-center gap-2.5"
                           >
                             <span
                               className={`w-6 h-6 rounded-lg text-[11px] font-black flex items-center justify-center shrink-0 ${
@@ -8755,32 +8920,29 @@ export default function App() {
                                   ? "bg-amber-100 text-amber-700"
                                   : posicao === 1
                                     ? "bg-slate-200 text-slate-600"
-                                    : posicao === 2
-                                      ? "bg-orange-100 text-orange-700"
-                                      : "bg-slate-50 text-slate-400"
+                                    : "bg-orange-100 text-orange-700"
                               }`}
                             >
                               {posicao + 1}
                             </span>
-                            <span className="w-9 h-9 rounded-full bg-slate-100 overflow-hidden flex items-center justify-center shrink-0">
+
+                            <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 text-[9.5px] font-black text-[#015FC9] uppercase">
                               {item.foto ? (
                                 <img
                                   src={item.foto}
-                                  alt={item.nome}
+                                  alt=""
                                   referrerPolicy="no-referrer"
                                   className="w-full h-full object-cover"
                                 />
                               ) : (
-                                <span className="text-[10px] font-black text-slate-500">
-                                  {item.nome.slice(0, 2).toUpperCase()}
-                                </span>
+                                item.nome.substring(0, 2)
                               )}
                             </span>
+
                             <div className="min-w-0 flex-1">
-                              <p className="text-[13px] font-black text-slate-800 truncate leading-tight">
+                              <p className="text-[12px] font-black text-slate-800 truncate leading-tight">
                                 {item.nome}
                               </p>
-                              {/* A barra compara com o primeiro colocado. */}
                               <span className="mt-1 block h-1.5 rounded-full bg-slate-100 overflow-hidden">
                                 <span
                                   className="block h-full rounded-full bg-emerald-500"
@@ -8790,12 +8952,13 @@ export default function App() {
                                 />
                               </span>
                             </div>
+
                             <div className="text-right shrink-0">
-                              <p className="text-[15px] font-black text-[#0D233A] leading-none">
+                              <p className="text-[13px] font-black text-[#0D233A] leading-none">
                                 {item.total}
                               </p>
-                              <p className="text-[10px] text-slate-400 font-bold">
-                                {item.total === 1 ? "check-in" : "check-ins"}
+                              <p className="text-[9.5px] text-slate-400 font-bold">
+                                check-ins
                               </p>
                             </div>
                           </div>
