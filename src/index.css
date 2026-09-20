@@ -260,3 +260,79 @@
   width: 0;
   height: 0;
 }
+
+/*
+ * Pino do resultado da pesquisa no mapa.
+ *
+ * O mapa voava até o lugar e não marcava nada: quem procurou tinha que
+ * adivinhar qual ponto da tela era o resultado. O pulso existe porque o
+ * mapa chega em movimento — sem ele, o pino se perde entre os outros
+ * marcadores no instante em que a animação termina.
+ */
+.pino-busca {
+  position: relative;
+  width: 34px;
+  height: 44px;
+}
+.pino-busca__pulso {
+  position: absolute;
+  left: 17px;
+  bottom: 3px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: rgba(79, 70, 229, 0.45);
+  animation: pino-busca-pulso 1.9s ease-out infinite;
+}
+.pino-busca__corpo {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: #4f46e5;
+  border: 3px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.35);
+}
+.pino-busca__corpo svg {
+  transform: rotate(45deg);
+}
+@keyframes pino-busca-pulso {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  70% {
+    transform: scale(3.4);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(3.4);
+    opacity: 0;
+  }
+}
+
+/* O nome do lugar encontrado, preso ao pino. */
+.rotulo-busca {
+  background: #ffffff;
+  border: 1px solid rgba(79, 70, 229, 0.35);
+  border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
+  color: #1e293b;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 9px;
+  white-space: nowrap;
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rotulo-busca::before {
+  border-top-color: rgba(79, 70, 229, 0.35);
+}
