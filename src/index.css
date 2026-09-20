@@ -212,19 +212,5 @@
   cursor: none !important;
 }
 
-/* Pulso lento do halo: o ponto respira, sem virar pisca-pisca. */
-@keyframes laser-pulso {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.18); opacity: .82; }
-}
-
-.laser-halo {
-  animation: laser-pulso 1.6s ease-in-out infinite;
-}
-
-/* Quem pediu menos animação no sistema não leva pulso nenhum. */
-@media (prefers-reduced-motion: reduce) {
-  .laser-halo {
-    animation: none;
-  }
-}
+/* O ponto e o rastro são desenhados num canvas, não em elementos: o pulso do
+   halo e o respeito a prefers-reduced-motion moram no próprio componente. */
