@@ -21,6 +21,8 @@ import {
 import OperationTypeSelect from "./components/OperationTypeSelect";
 import FiltroCheckIns, { PessoaDoFiltro } from "./components/FiltroCheckIns";
 import LaserPointer from "./components/LaserPointer";
+import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
+import { Estabelecimento } from "./services/estabelecimentos";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat from "./components/CheckInChat";
 import { lerDispositivo } from "./services/dispositivo";
@@ -48,6 +50,7 @@ import {
   Megaphone,
   Star,
   Crosshair,
+  Store,
   Maximize2,
   Navigation,
   TrendingUp,
@@ -867,6 +870,25 @@ export default function App() {
    * encontrá-lo ligado ao abrir o mapa.
    */
   const [laserLigado, setLaserLigado] = useState(false);
+
+  /* ----------------------------------------- estabelecimentos (CCO) ---
+   * A pesquisa vem de fora e não vira cadastro: os resultados existem
+   * enquanto a pesquisa está em tela, como referência do terreno.
+   */
+  const [pesquisaLojasAberta, setPesquisaLojasAberta] = useState(false);
+  const [estabelecimentos, setEstabelecimentos] = useState<Estabelecimento[]>([]);
+  const [lojaEmFoco, setLojaEmFoco] = useState<string | null>(null);
+  /** Leitura do centro e do zoom do mapa, entregue pelo próprio mapa. */
+  const lerVistaDoMapaRef = React.useRef<
+    (() => { lat: number; lng: number; zoom: number } | null) | null
+  >(null);
+  /** O mapa entrega aqui como ler a vista dele; guardar é tudo o que fazemos. */
+  const registrarVistaDoMapa = React.useCallback(
+    (ler: () => { lat: number; lng: number; zoom: number } | null) => {
+      lerVistaDoMapaRef.current = ler;
+    },
+    [],
+  );
 
   const [filtroCheckInsAberto, setFiltroCheckInsAberto] = useState(false);
   const [filtroPessoas, setFiltroPessoas] = useState<string[]>([]);
@@ -11825,6 +11847,36 @@ export default function App() {
 
         <div className="w-8 h-[1px] bg-slate-800/50" />
 
+        {/* Pesquisa de estabelecimentos: o que existe no terreno em volta */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setPesquisaLojasAberta((v) => !v);
+            setFiltroCheckInsAberto(false);
+            setIsFilterDropdownOpen(false);
+          }}
+          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
+            estabelecimentos.length > 0
+              ? "bg-violet-600 border-violet-700 text-white shadow-lg shadow-violet-500/20"
+              : pesquisaLojasAberta
+                ? "bg-indigo-700 border-indigo-600 text-white"
+                : "bg-indigo-900/80 hover:bg-indigo-800 border-indigo-700 text-indigo-200"
+          }`}
+          title="Pesquisar estabelecimentos na região"
+        >
+          <Store className="w-5 h-5" />
+          {estabelecimentos.length > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-[#F58220] border-2 border-[#0c1322] text-white text-[9px] font-black flex items-center justify-center">
+              {estabelecimentos.length}
+            </span>
+          )}
+          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
+            Estabelecimentos
+          </span>
+        </button>
+
+        <div className="w-8 h-[1px] bg-slate-800/50" />
+
         {/* Filtro dos check-ins: por pessoa, período, prioridade e tipo */}
         <button
           onClick={(e) => {
@@ -12144,6 +12196,19 @@ export default function App() {
 
       {/* Ponteiro laser: segue ligado quando o painel abre o mapa */}
       <LaserPointer ativo={laserLigado} />
+
+      {/* PESQUISA DE ESTABELECIMENTOS */}
+      <PesquisaEstabelecimentos
+        aberto={pesquisaLojasAberta}
+        onFechar={() => setPesquisaLojasAberta(false)}
+        centroDoMapa={() => lerVistaDoMapaRef.current?.() || null}
+        onResultados={(lugares) => {
+          setEstabelecimentos(lugares);
+          setLojaEmFoco(null);
+        }}
+        onEscolher={(lugar) => setLojaEmFoco(lugar.id)}
+        emFoco={lojaEmFoco}
+      />
 
       {/* PAINEL DE FILTRO DOS CHECK-INS */}
       <FiltroCheckIns
@@ -13630,6 +13695,13 @@ export default function App() {
           candidates={candidates}
           mapFilter={mapFilter}
           onMapFilterChange={setMapFilter}
+          estabelecimentos={estabelecimentos}
+          estabelecimentoEmFoco={lojaEmFoco}
+          onEstabelecimentoSelecionado={(id) => {
+            setLojaEmFoco(id);
+            setPesquisaLojasAberta(true);
+          }}
+          aoRegistrarVista={registrarVistaDoMapa}
           onToggleCheckInFavorite={alternarFavoritoCheckIn}
           onDeleteCheckIn={excluirCheckIn}
           onSelectItem={(id, type) => {
