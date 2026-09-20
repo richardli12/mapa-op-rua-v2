@@ -229,3 +229,20 @@
 
 /* O ponto e o rastro são desenhados num canvas, não em elementos: o pulso do
    halo e o respeito a prefers-reduced-motion moram no próprio componente. */
+
+/* ------------------------------------------------- território no mapa ---
+   Nome do bairro escrito sobre a mancha, como num mapa temático impresso: o
+   contorno branco garante leitura tanto no tom claro quanto no escuro da
+   escala, sem precisar de caixa colorida atrás. */
+.rotulo-territorio span {
+  display: block;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  color: #0f172a;
+  text-shadow:
+    0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
+  pointer-events: none;
+}

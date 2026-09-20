@@ -210,11 +210,98 @@ export const lerMunicipios = (uf: string, inicio = 0) =>
 export const lerMunicipio = (uf: string, codigo: string) =>
   chamar<{ municipio: MunicipioDoTerritorio }>("municipio", { uf, codigo });
 
-export const lerBairros = (uf: string, municipio: string, inicio = 0) =>
+/**
+ * Bairros de um município.
+ *
+ * `comGeometria` liga o polígono — e o teto de linhas por página cai de 1000
+ * para 200, porque a geometria é o dado mais pesado da base. Por isso ela só
+ * é pedida quando o mapa vai desenhar; para somar e ordenar números, o
+ * polígono só atrasa.
+ */
+export const lerBairros = (
+  uf: string,
+  municipio: string,
+  inicio = 0,
+  comGeometria = false,
+) =>
   chamar<{
     paginacao: { proximoInicio: number | null; total: number };
     bairros: BairroDoTerritorio[];
-  }>("bairros", { uf, municipio, inicio, limite: 1000 });
+  }>("bairros", {
+    uf,
+    municipio,
+    inicio,
+    limite: comGeometria ? 200 : 1000,
+    geometria: comGeometria ? "true" : undefined,
+  });
+
+export interface SetorDoTerritorio {
+  codigo: string;
+  municipioCodigo: string;
+  bairroCodigo: string | null;
+  areaKm2: number | null;
+  populacao: number | null;
+  domicilios: number | null;
+  domiciliosParticularesOcupados: number | null;
+  mediaMoradoresPorDomicilioOcupado: number | null;
+  /** Quanto do setor foi estimado pelo instituto em vez de coletado. */
+  percentualDomiciliosImputados: number | null;
+  geometria: any | null;
+}
+
+/**
+ * Setores de um bairro — o recorte mais fino que existe.
+ *
+ * Só de um bairro por vez, de propósito: com geometria o teto é de 100 por
+ * página, e uma cidade grande tem mais de mil setores. Puxar todos seria
+ * dezenas de megabytes para desenhar um mapa que ninguém consegue ler inteiro.
+ */
+export const lerSetores = (
+  uf: string,
+  municipio: string,
+  bairro?: string,
+  inicio = 0,
+  comGeometria = false,
+) =>
+  chamar<{
+    paginacao: { proximoInicio: number | null; total: number };
+    setores: SetorDoTerritorio[];
+  }>("setores", {
+    uf,
+    municipio,
+    bairro,
+    inicio,
+    limite: comGeometria ? 100 : 500,
+    geometria: comGeometria ? "true" : undefined,
+  });
+
+/**
+ * Percorre todas as páginas de uma listagem.
+ *
+ * O fim é sempre o `proximoInicio` vindo `null` — nunca uma conta nossa de
+ * quantos vêm por página, que o CCO não garante. O teto de páginas existe
+ * para um engano não virar uma sessão de download sem fim.
+ */
+export async function todasAsPaginas<T>(
+  buscar: (inicio: number) => Promise<{
+    paginacao: { proximoInicio: number | null };
+  } & { [chave: string]: any }>,
+  campo: string,
+  maximoDePaginas = 20,
+): Promise<T[]> {
+  const tudo: T[] = [];
+  let inicio: number | null = 0;
+  let paginas = 0;
+
+  while (inicio !== null && paginas < maximoDePaginas) {
+    const pagina = await buscar(inicio);
+    tudo.push(...((pagina as any)[campo] || []));
+    inicio = pagina.paginacao?.proximoInicio ?? null;
+    paginas += 1;
+  }
+
+  return tudo;
+}
 
 export const lerIndicadores = (uf: string, nivel: string, codigo: string) =>
   chamar<IndicadoresDoRecorte>("indicadores", { uf, nivel, codigo });

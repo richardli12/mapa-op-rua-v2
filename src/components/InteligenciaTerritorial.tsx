@@ -9,7 +9,8 @@ import {
   Target,
   Search,
   Info,
-  ChevronRight
+  ChevronRight,
+  Map as MapIcon
 } from 'lucide-react';
 import {
   lerUfs,
@@ -18,6 +19,9 @@ import {
   lerBairros,
   lerIndicadores,
   analisarRaio,
+  lerSetores,
+  todasAsPaginas,
+  SetorDoTerritorio,
   BairroDoTerritorio,
   MunicipioDoTerritorio,
   IndicadoresDoRecorte,
@@ -37,6 +41,21 @@ interface InteligenciaTerritorialProps {
   onCirculoAnalisado: (
     circulo: { lat: number; lng: number; raio: number } | null
   ) => void;
+  /** Entrega ao mapa os polígonos a desenhar e a escala que os pinta. */
+  onRecortes: (
+    recortes: {
+      id: string;
+      nome: string;
+      geometria: any;
+      valor: number | null;
+      resumo: string;
+      tipo: 'bairro' | 'setor';
+    }[],
+    escala: { corte: number; cor: string }[]
+  ) => void;
+  /** Recorte que o mapa está destacando, para a lista acompanhar. */
+  recorteEmFoco?: string | null;
+  onRecorteEmFoco?: (id: string | null) => void;
 }
 
 type Aba = 'raio' | 'bairros' | 'censo';
@@ -81,7 +100,10 @@ export default function InteligenciaTerritorial({
   ufDoCliente,
   cidadeDoCliente,
   centroDoMapa,
-  onCirculoAnalisado
+  onCirculoAnalisado,
+  onRecortes,
+  recorteEmFoco,
+  onRecorteEmFoco
 }: InteligenciaTerritorialProps) {
   const [aba, setAba] = useState<Aba>('raio');
   const [erro, setErro] = useState<ErroDoTerritorio | null>(null);
@@ -112,6 +134,18 @@ export default function InteligenciaTerritorial({
   const [censo, setCenso] = useState<IndicadoresDoRecorte | null>(null);
   const [carregandoCenso, setCarregandoCenso] = useState(false);
   const [grupoAberto, setGrupoAberto] = useState<string | null>(null);
+
+  /* ---------------------------------------------------------- desenho --- */
+  const [desenharNoMapa, setDesenharNoMapa] = useState(true);
+  const [metrica, setMetrica] = useState<'populacao' | 'densidade' | 'domicilios'>(
+    'populacao'
+  );
+  const [carregandoDesenho, setCarregandoDesenho] = useState(false);
+  /** Bairro cujos setores estão abertos: o recorte mais fino, um por vez. */
+  const [bairroDosSetores, setBairroDosSetores] = useState<BairroDoTerritorio | null>(
+    null
+  );
+  const [setores, setSetores] = useState<SetorDoTerritorio[]>([]);
 
   /* ------------------------------------------------------------- raio --- */
   const [raio, setRaio] = useState(1000);
@@ -203,19 +237,64 @@ export default function InteligenciaTerritorial({
     }
   };
 
-  const carregarBairros = async () => {
+  /**
+   * Bairros do município.
+   *
+   * A geometria só é pedida quando o mapa vai desenhar — ela é o dado mais
+   * pesado da base, e para ordenar uma lista por população o polígono não
+   * serve para nada. Com ela ligada, a página cai para 200 linhas, então as
+   * páginas são percorridas até o `proximoInicio` vir nulo.
+   */
+  const carregarBairros = async (comGeometria = desenharNoMapa) => {
     if (!municipio || carregandoBairros) return;
     setCarregandoBairros(true);
+    if (comGeometria) setCarregandoDesenho(true);
     setErro(null);
     try {
-      // Sem geometria de propósito: para somar e ordenar números, o polígono
-      // só pesa. Ele é para desenhar mapa.
-      const dados = await lerBairros(uf, municipio.codigo);
-      setBairros(dados.bairros || []);
+      const lista = await todasAsPaginas<BairroDoTerritorio>(
+        (inicio) => lerBairros(uf, municipio.codigo, inicio, comGeometria),
+        'bairros',
+      );
+      setBairros(lista);
+      // Setores abertos pertenciam ao desenho anterior; trocar de município
+      // ou recarregar a lista os invalida.
+      setBairroDosSetores(null);
+      setSetores([]);
     } catch (falha: any) {
       setErro(falha);
     } finally {
       setCarregandoBairros(false);
+      setCarregandoDesenho(false);
+    }
+  };
+
+  /**
+   * Setores de um bairro.
+   *
+   * Um bairro por vez, de propósito: com geometria o teto é de 100 por página,
+   * e um município grande passa de mil setores. Puxar a cidade inteira seriam
+   * dezenas de megabytes para desenhar um mapa que ninguém lê de uma vez.
+   */
+  const abrirSetores = async (bairro: BairroDoTerritorio) => {
+    if (!municipio) return;
+    if (bairroDosSetores?.codigo === bairro.codigo) {
+      setBairroDosSetores(null);
+      setSetores([]);
+      return;
+    }
+    setCarregandoDesenho(true);
+    setErro(null);
+    try {
+      const lista = await todasAsPaginas<SetorDoTerritorio>(
+        (inicio) => lerSetores(uf, municipio.codigo, bairro.codigo, inicio, true),
+        'setores',
+      );
+      setBairroDosSetores(bairro);
+      setSetores(lista);
+    } catch (falha: any) {
+      setErro(falha);
+    } finally {
+      setCarregandoDesenho(false);
     }
   };
 
@@ -253,6 +332,101 @@ export default function InteligenciaTerritorial({
       setAnalisando(false);
     }
   };
+
+  /**
+   * O que o mapa desenha, e com que cores.
+   *
+   * Com um bairro aberto, o desenho é dos setores dele — o recorte mais fino
+   * responde melhor à pergunta "onde dentro deste bairro". Sem bairro aberto,
+   * são os bairros do município.
+   *
+   * A escala é por quantis, não por fatias iguais do intervalo: com um bairro
+   * de 51 mil habitantes e dez de 3 mil, fatiar o intervalo em cinco partes
+   * pintaria quase tudo com a mesma cor e esconderia justamente a diferença
+   * entre os dez.
+   */
+  useEffect(() => {
+    if (!aberto || !desenharNoMapa) {
+      onRecortes([], []);
+      return;
+    }
+
+    const doSetor = bairroDosSetores && setores.length > 0;
+    const fonte: { id: string; nome: string; geometria: any; valor: number | null; resumo: string; tipo: 'bairro' | 'setor' }[] =
+      doSetor
+        ? setores.map((setor) => {
+            const valor =
+              metrica === 'densidade'
+                ? setor.areaKm2 && setor.populacao !== null
+                  ? Math.round(setor.populacao / setor.areaKm2)
+                  : null
+                : metrica === 'domicilios'
+                  ? setor.domicilios
+                  : setor.populacao;
+            return {
+              id: setor.codigo,
+              nome: `Setor ${setor.codigo.slice(-6)}`,
+              geometria: setor.geometria,
+              valor,
+              resumo: [
+                `${numero(setor.populacao)} hab · ${numero(setor.domicilios)} dom`,
+                setor.percentualDomiciliosImputados !== null &&
+                setor.percentualDomiciliosImputados > 0
+                  ? `${setor.percentualDomiciliosImputados.toFixed(1)}% estimado pelo instituto`
+                  : ''
+              ]
+                .filter(Boolean)
+                .join(' · '),
+              tipo: 'setor' as const
+            };
+          })
+        : bairros.map((bairro) => {
+            const densidade =
+              bairro.areaKm2 && bairro.populacao !== null
+                ? Math.round(bairro.populacao / bairro.areaKm2)
+                : null;
+            const valor =
+              metrica === 'densidade'
+                ? densidade
+                : metrica === 'domicilios'
+                  ? bairro.domicilios
+                  : bairro.populacao;
+            return {
+              id: bairro.codigo,
+              nome: bairro.nome,
+              geometria: bairro.geometria,
+              valor,
+              resumo: `${numero(bairro.populacao)} hab · ${numero(bairro.domicilios)} dom${
+                densidade !== null ? ` · ${numero(densidade)} hab/km²` : ''
+              }`,
+              tipo: 'bairro' as const
+            };
+          });
+
+    const comGeometria = fonte.filter((r) => r.geometria);
+
+    // Só os valores medidos entram na escala: um `null` no meio dos cortes
+    // empurraria a régua inteira para baixo.
+    const valores = comGeometria
+      .map((r) => r.valor)
+      .filter((v): v is number => v !== null && v !== undefined)
+      .sort((a, b) => a - b);
+
+    const TONS = ['#DBEAFE', '#93C5FD', '#60A5FA', '#2563EB', '#1E3A8A'];
+    const escala =
+      valores.length === 0
+        ? []
+        : TONS.map((cor, i) => ({
+            corte: valores[Math.min(
+              valores.length - 1,
+              Math.floor(((i + 1) / TONS.length) * (valores.length - 1))
+            )],
+            cor
+          }));
+
+    onRecortes(comGeometria, escala);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto, desenharNoMapa, metrica, bairros, setores, bairroDosSetores]);
 
   if (!aberto) return null;
 
@@ -584,6 +758,64 @@ export default function InteligenciaTerritorial({
                   </select>
                 </div>
 
+                {/* Desenho no mapa: a mancha é o que a lista não mostra. */}
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ligando = !desenharNoMapa;
+                      setDesenharNoMapa(ligando);
+                      // Ligar depois de carregar sem polígono exige recarregar:
+                      // a geometria não vem por padrão, e não dá para inventá-la.
+                      if (ligando && bairros.length > 0 && !bairros[0].geometria) {
+                        carregarBairros(true);
+                      }
+                    }}
+                    className={`h-8 px-2.5 rounded-lg border text-[10.5px] font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                      desenharNoMapa
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                    title="Pintar os bairros no mapa pela métrica escolhida"
+                  >
+                    <MapIcon className="w-3.5 h-3.5" />
+                    No mapa
+                  </button>
+
+                  <select
+                    value={metrica}
+                    onChange={(e) => setMetrica(e.target.value as any)}
+                    disabled={!desenharNoMapa}
+                    className="h-8 px-2 bg-white border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden disabled:opacity-50"
+                  >
+                    <option value="populacao">Pintar por população</option>
+                    <option value="densidade">Pintar por densidade</option>
+                    <option value="domicilios">Pintar por domicílios</option>
+                  </select>
+
+                  {carregandoDesenho && (
+                    <Loader2 className="w-3.5 h-3.5 text-emerald-600 animate-spin shrink-0" />
+                  )}
+                </div>
+
+                {bairroDosSetores && (
+                  <p className="mt-2 text-[10.5px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5 leading-snug flex items-center justify-between gap-2">
+                    <span>
+                      Mostrando {setores.length} setores de {bairroDosSetores.nome}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBairroDosSetores(null);
+                        setSetores([]);
+                      }}
+                      className="text-[10px] font-black uppercase tracking-wider text-emerald-700 hover:underline cursor-pointer shrink-0"
+                    >
+                      Voltar aos bairros
+                    </button>
+                  </p>
+                )}
+
                 {/* Somar bairros não dá o município, e a tela diz por quê. */}
                 {municipio.setoresSemBairro !== undefined &&
                   municipio.setoresSemBairro > 0 && (
@@ -608,13 +840,18 @@ export default function InteligenciaTerritorial({
                           ? Math.round(bairro.populacao / bairro.areaKm2)
                           : null;
                       return (
-                        <button
+                        <div
                           key={bairro.codigo}
-                          type="button"
+                          onMouseEnter={() => onRecorteEmFoco?.(bairro.codigo)}
+                          onMouseLeave={() => onRecorteEmFoco?.(null)}
+                          className={`w-full p-2.5 rounded-xl border cursor-pointer transition-all flex items-center gap-2.5 ${
+                            recorteEmFoco === bairro.codigo
+                              ? 'border-[#015FC9]/40 bg-[#EFF4FB]'
+                              : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50/60'
+                          }`}
                           onClick={() =>
                             carregarCenso('bairro', bairro.codigo, bairro.nome)
                           }
-                          className="w-full text-left p-2.5 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50/60 cursor-pointer transition-all flex items-center gap-2.5"
                         >
                           <span className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10.5px] font-black flex items-center justify-center shrink-0">
                             {posicao + 1}
@@ -629,8 +866,29 @@ export default function InteligenciaTerritorial({
                               {densidade !== null && ` · ${numero(densidade)} hab/km²`}
                             </span>
                           </span>
+                          {/* Descer ao setor é outra pergunta, então é outro
+                              botão: clicar no bairro abre o Censo dele. */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              abrirSetores(bairro);
+                            }}
+                            title={
+                              bairroDosSetores?.codigo === bairro.codigo
+                                ? 'Esconder os setores deste bairro'
+                                : 'Ver os setores censitários deste bairro'
+                            }
+                            className={`h-7 px-2 rounded-lg border text-[9.5px] font-black uppercase tracking-wider cursor-pointer transition-all shrink-0 ${
+                              bairroDosSetores?.codigo === bairro.codigo
+                                ? 'bg-emerald-600 border-emerald-600 text-white'
+                                : 'bg-white border-slate-200 text-slate-500 hover:border-emerald-400 hover:text-emerald-700'
+                            }`}
+                          >
+                            Setores
+                          </button>
                           <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                        </button>
+                        </div>
                       );
                     })}
                     {bairrosNaTela.length === 0 && (

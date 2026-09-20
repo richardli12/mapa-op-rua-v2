@@ -292,6 +292,24 @@ interface MapContainerProps {
   estabelecimentoDestacado?: string | null;
   /** Círculo que a inteligência territorial mediu, desenhado no mapa. */
   circuloAnalisado?: { lat: number; lng: number; raio: number } | null;
+  /** Bairros e setores desenhados por cima do mapa, pintados por intensidade. */
+  recortesTerritoriais?: {
+    id: string;
+    nome: string;
+    geometria: any;
+    /** O número que pinta a área. `null` é ausência de dado, não zero. */
+    valor: number | null;
+    /** Texto pronto para o balão, montado por quem tem os dados completos. */
+    resumo: string;
+    tipo: 'bairro' | 'setor';
+  }[];
+  /** Faixas da escala de cor, do mais claro ao mais escuro. */
+  escalaTerritorial?: { corte: number; cor: string }[];
+  recorteEmFoco?: string | null;
+  onRecorteClicado?: (id: string) => void;
+  onRecorteSobOCursor?: (id: string | null) => void;
+  /** Enquadra o mapa nos recortes assim que eles chegam. */
+  enquadrarRecortes?: boolean;
   /** Clique num marcador de estabelecimento. */
   onEstabelecimentoSelecionado?: (id: string) => void;
   /** Entrega ao painel o centro e o zoom de agora, para a busca por área. */
@@ -418,6 +436,12 @@ export default function MapContainer({
   estabelecimentoEmFoco,
   estabelecimentoDestacado,
   circuloAnalisado,
+  recortesTerritoriais,
+  escalaTerritorial,
+  recorteEmFoco,
+  onRecorteClicado,
+  onRecorteSobOCursor,
+  enquadrarRecortes,
   onEstabelecimentoSelecionado,
   aoRegistrarVista,
   onCoordsPicked,
@@ -498,6 +522,11 @@ export default function MapContainer({
   const escolasGroupRef = useRef<L.LayerGroup | null>(null);
   const lojasGroupRef = useRef<L.LayerGroup | null>(null);
   const analiseGroupRef = useRef<L.LayerGroup | null>(null);
+  const recortesGroupRef = useRef<L.LayerGroup | null>(null);
+  /** Camadas por id, para acender a do item que a lista apontar. */
+  const recortesPorIdRef = useRef<{ [id: string]: any }>({});
+  /** Assinatura do último enquadramento, para não reenquadrar à toa. */
+  const ultimoRecorteRef = useRef<string>('');
   /** Marcadores por id, para destacar o que a lista escolheu. */
   const lojasPorIdRef = useRef<{ [id: string]: any }>({});
   // Guarda se a camada ja estava ligada: o enquadramento acontece na virada,
@@ -1142,6 +1171,7 @@ export default function MapContainer({
     const escolasGroup = L.layerGroup().addTo(map);
     const lojasGroup = L.layerGroup().addTo(map);
     const analiseGroup = L.layerGroup().addTo(map);
+    const recortesGroup = L.layerGroup().addTo(map);
     const delimitationGroup = L.layerGroup().addTo(map);
 
     circlesGroupRef.current = circlesGroup;
@@ -1151,6 +1181,7 @@ export default function MapContainer({
     escolasGroupRef.current = escolasGroup;
     lojasGroupRef.current = lojasGroup;
     analiseGroupRef.current = analiseGroup;
+    recortesGroupRef.current = recortesGroup;
     delimitationGroupRef.current = delimitationGroup;
     mapRef.current = map;
 
@@ -1837,6 +1868,120 @@ export default function MapContainer({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aoRegistrarVista]);
+
+  /**
+   * Bairros e setores desenhados por cima do mapa.
+   *
+   * O painel dá os números; esta camada dá o território — e é vendo a mancha
+   * que se descobre o que uma lista ordenada esconde: que os três bairros mais
+   * populosos são vizinhos, ou que a equipe nunca pisou na metade norte.
+   *
+   * Três cuidados guiam o desenho:
+   *
+   * 1. **Sem dado não é zero.** Recorte com população `null` sai hachurado em
+   *    cinza, nunca no tom mais claro da escala — pintá-lo como "pouca gente"
+   *    seria inventar uma medida que o instituto não publicou.
+   * 2. **O preenchimento é transparente.** A mancha informa, mas o mapa e os
+   *    pinos de operação continuam legíveis por baixo: esta camada é contexto,
+   *    não substituição.
+   * 3. **Um clique é uma pergunta.** Clicar num bairro abre o Censo dele, que
+   *    é o passo seguinte natural de quem reparou na cor.
+   */
+  useEffect(() => {
+    const grupo = recortesGroupRef.current;
+    const map = mapRef.current;
+    if (!grupo || !map) return;
+
+    grupo.clearLayers();
+    recortesPorIdRef.current = {};
+
+    const recortes = recortesTerritoriais || [];
+    if (recortes.length === 0) {
+      ultimoRecorteRef.current = '';
+      return;
+    }
+
+    const escala = escalaTerritorial || [];
+    /** Cor da faixa em que o valor cai. Sem dado tem cor própria. */
+    const corDe = (valor: number | null) => {
+      if (valor === null || valor === undefined) return '#CBD5E1';
+      const faixa = escala.find((f) => valor <= f.corte);
+      return faixa?.cor || escala[escala.length - 1]?.cor || '#1E3A8A';
+    };
+
+    const limites: any[] = [];
+
+    recortes.forEach((recorte) => {
+      if (!recorte.geometria) return;
+      const semDado = recorte.valor === null || recorte.valor === undefined;
+      const emFoco = recorteEmFoco === recorte.id;
+
+      const camada = L.geoJSON(
+        { type: 'Feature', properties: {}, geometry: recorte.geometria } as any,
+        {
+          style: {
+            color: emFoco ? '#0F172A' : '#1E293B',
+            weight: emFoco ? 2.5 : recorte.tipo === 'setor' ? 0.6 : 1,
+            opacity: emFoco ? 0.9 : 0.45,
+            fillColor: corDe(recorte.valor),
+            // Transparente de propósito: a mancha é contexto, e o que está
+            // embaixo dela continua sendo o trabalho.
+            fillOpacity: semDado ? 0.25 : emFoco ? 0.72 : 0.55,
+            dashArray: semDado ? '4, 4' : undefined
+          }
+        }
+      );
+
+      camada.bindTooltip(
+        `<div class="px-2.5 py-1.5 font-sans min-w-[130px]">
+           <p class="font-bold text-slate-900 text-[12px] leading-tight">${recorte.nome}</p>
+           <p class="text-[10px] text-slate-500 font-semibold mt-0.5 leading-snug">${recorte.resumo}</p>
+         </div>`,
+        { sticky: true, direction: 'top' }
+      );
+
+      camada.on('mouseover', () => onRecorteSobOCursor?.(recorte.id));
+      camada.on('mouseout', () => onRecorteSobOCursor?.(null));
+      camada.on('click', () => onRecorteClicado?.(recorte.id));
+
+      grupo.addLayer(camada);
+      recortesPorIdRef.current[recorte.id] = camada;
+      limites.push(camada.getBounds());
+    });
+
+    // O nome do bairro fica no mapa, como num mapa temático de verdade. O do
+    // setor não: são códigos de quinze dígitos, e cem deles viram poluição.
+    recortes
+      .filter((r) => r.tipo === 'bairro' && r.geometria)
+      .forEach((recorte) => {
+        const camada = recortesPorIdRef.current[recorte.id];
+        if (!camada) return;
+        const centro = camada.getBounds().getCenter();
+        L.marker(centro, {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({
+            className: 'rotulo-territorio',
+            html: `<span>${recorte.nome}</span>`,
+            iconSize: [0, 0]
+          })
+        }).addTo(grupo);
+      });
+
+    // Enquadrar uma vez por conjunto: refazer isso a cada quadro tiraria o
+    // mapa da mão de quem está navegando.
+    const assinatura = `${recortes.length}:${recortes[0]?.id}`;
+    if (enquadrarRecortes && limites.length > 0 && ultimoRecorteRef.current !== assinatura) {
+      ultimoRecorteRef.current = assinatura;
+      try {
+        const total = limites.reduce((acc, b) => acc.extend(b), limites[0].clone());
+        map.fitBounds(total, { padding: [40, 40], maxZoom: 15 });
+      } catch {
+        // Geometria estranha não pode derrubar a tela.
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recortesTerritoriais, escalaTerritorial, recorteEmFoco]);
 
   /**
    * Círculo da análise territorial.
