@@ -13932,6 +13932,7 @@ export default function App() {
             onRulerPoint={(coords) => setPontosRegua((p) => [...p, coords])}
           tempPlacementCoords={pickedCoords}
           itemEmEdicaoId={itemEmEdicaoId}
+          equipe={supporters}
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor
           }

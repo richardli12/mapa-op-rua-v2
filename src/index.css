@@ -336,3 +336,213 @@
 .rotulo-busca::before {
   border-top-color: rgba(79, 70, 229, 0.35);
 }
+
+/* ---------------------------------------------------------------- missão ---
+ * O pino da missão.
+ *
+ * Ele não é mais um ponto no mapa: é a ordem que alguém tem para cumprir, e
+ * precisa se achar no meio de dezenas de marcadores, rótulos de rua e
+ * manchas de bairro. Por isso a onda que sai de baixo dele — o olho vai
+ * direto no que se mexe — e por isso a gota flutua de leve, em vez de ficar
+ * pregada no chão como o resto do mapa.
+ *
+ * A cor vem de `--cor`, definida no próprio elemento: cada missão pinta a
+ * sua, e nada aqui precisa saber quais cores existem.
+ */
+.pino-missao {
+  position: relative;
+  width: var(--tamanho, 44px);
+  height: calc(var(--tamanho, 44px) * 1.207 + 6px);
+}
+
+/* As ondas: dois anéis que nascem no pé do pino e se abrem. O segundo entra
+   na metade do ciclo, para o batimento não ter buraco. */
+.pino-missao__onda {
+  position: absolute;
+  left: 50%;
+  /* A ponta da gota não fica no pé da caixa: a gota é um quadrado girado
+     45°, e o bico cai em 1.207 vezes o lado. É desse ponto — o lugar de
+     verdade no mapa — que a onda sai. */
+  top: calc(var(--tamanho, 44px) * 1.207);
+  width: calc(var(--tamanho, 44px) * 0.5);
+  height: calc(var(--tamanho, 44px) * 0.5);
+  margin-left: calc(var(--tamanho, 44px) * -0.25);
+  margin-top: calc(var(--tamanho, 44px) * -0.25);
+  border-radius: 50%;
+  background: var(--cor, #ea580c);
+  opacity: 0;
+  animation: pino-missao-onda 2.4s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+  pointer-events: none;
+}
+.pino-missao__onda--2 {
+  animation-delay: 1.2s;
+}
+
+/*
+ * A gota: cheia da cor da missão, ícone branco, aro branco por fora.
+ *
+ * Branca com borda colorida ela sumia — no mapa claro o miolo virava mais
+ * uma mancha clara, e o desenho de dentro ficava fino demais para ser lido
+ * de longe. Cheia, ela lê como o marcador de check-in lê: um bloco de cor
+ * com um símbolo dentro. O aro branco garante contraste também sobre mata,
+ * água e avenida escura.
+ */
+.pino-missao__gota {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tamanho, 44px);
+  height: var(--tamanho, 44px);
+  background: var(--cor, #ea580c);
+  border: var(--borda, 3px) solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow:
+    0 7px 16px rgba(15, 23, 42, 0.35),
+    0 0 14px color-mix(in srgb, var(--cor, #ea580c) 55%, transparent);
+  animation: pino-missao-flutua 2.4s ease-in-out infinite;
+}
+.pino-missao__icone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--tamanho, 44px) * 0.5);
+  height: calc(var(--tamanho, 44px) * 0.5);
+  color: #ffffff;
+  transform: rotate(45deg);
+}
+
+/* A sombra no chão encolhe quando a gota sobe: é ela que faz o flutuar
+   parecer altura, e não um pino tremendo. */
+.pino-missao__sombra {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--tamanho, 44px) * 1.207);
+  width: calc(var(--tamanho, 44px) * 0.3);
+  height: calc(var(--tamanho, 44px) * 0.11);
+  margin-left: calc(var(--tamanho, 44px) * -0.15);
+  margin-top: calc(var(--tamanho, 44px) * -0.055);
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.3);
+  filter: blur(1.5px);
+  animation: pino-missao-sombra 2.4s ease-in-out infinite;
+}
+
+/* Selo do canto: quantas pessoas receberam, se tem material, se tem prazo. */
+.pino-missao__selo {
+  position: absolute;
+  top: -3px;
+  right: -5px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #0f172a;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.35);
+  color: #ffffff;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  z-index: 3;
+}
+.pino-missao__selo--prazo {
+  right: auto;
+  left: -7px;
+  background: #b45309;
+  padding: 0 3px;
+}
+
+/* Missão escolhida na lista ou aberta na ficha: anel fixo em volta, batida
+   mais rápida. Ela precisa ficar óbvia mesmo num mapa cheio. */
+.pino-missao--ativa .pino-missao__gota {
+  animation-duration: 1.4s;
+  box-shadow:
+    0 9px 20px rgba(15, 23, 42, 0.4),
+    0 0 0 6px color-mix(in srgb, var(--cor, #ea580c) 26%, transparent),
+    0 0 18px color-mix(in srgb, var(--cor, #ea580c) 65%, transparent);
+}
+.pino-missao--ativa .pino-missao__onda,
+.pino-missao--ativa .pino-missao__sombra {
+  animation-duration: 1.4s;
+}
+
+@keyframes pino-missao-onda {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.5;
+  }
+  65% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.9);
+    opacity: 0;
+  }
+}
+@keyframes pino-missao-flutua {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -4px;
+  }
+}
+@keyframes pino-missao-sombra {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.32;
+  }
+  50% {
+    transform: scaleX(0.7);
+    opacity: 0.18;
+  }
+}
+
+/* Quem pediu menos movimento no sistema recebe o pino parado: o destaque
+   passa a ser o anel, que não depende de animação. */
+@media (prefers-reduced-motion: reduce) {
+  .pino-missao__onda {
+    display: none;
+  }
+  .pino-missao__gota,
+  .pino-missao__sombra {
+    animation: none;
+  }
+  .pino-missao__gota {
+    box-shadow:
+      0 7px 16px rgba(15, 23, 42, 0.35),
+      0 0 0 5px color-mix(in srgb, var(--cor, #ea580c) 24%, transparent);
+  }
+}
+
+/* O balão que aparece ao passar o cursor: cartão, não caixinha de texto. */
+.balao-missao {
+  padding: 0;
+  border: none;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.22);
+  /* O balão do Leaflet nasce numa linha só; aqui ele é um cartão, e texto
+     de missão não cabe numa linha. */
+  white-space: normal;
+  width: max-content;
+  max-width: 260px;
+}
+/* A faixa de cor se arredonda sozinha: recortar o cartão inteiro com
+   `overflow:hidden` comia a setinha que aponta para o pino. */
+.balao-missao .balao-missao__faixa {
+  border-radius: 14px 14px 0 0;
+}
+.balao-missao::before {
+  border-top-color: #ffffff;
+}
