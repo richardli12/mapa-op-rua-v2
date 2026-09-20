@@ -5,6 +5,8 @@ import {
   ArrowDown,
   ArrowUp,
   CalendarClock,
+  CalendarDays,
+  ChevronDown,
   ClipboardList,
   Clock,
   Crosshair,
@@ -55,6 +57,20 @@ const diasEntre = (a: string, b: string) =>
   );
 
 const curto = (iso: string) => iso.split('-').reverse().slice(0, 2).join('/');
+
+/** O dia em que um check-in entrou, no fuso de quem está olhando. */
+const diaDoCheckIn = (c: any) => {
+  const d = new Date(c.createdAt);
+  return Number.isNaN(d.getTime()) ? '' : diaISO(d);
+};
+
+/** A hora do registro, que é o que separa dois check-ins do mesmo dia. */
+const horaDoCheckIn = (c: any) => {
+  const d = new Date(c.createdAt);
+  return Number.isNaN(d.getTime())
+    ? '--:--'
+    : d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+};
 
 /** "há 3 dias", "hoje", "ontem" — o jeito que a pessoa conta tempo. */
 const desdeQuando = (dias: number) => {
@@ -169,6 +185,316 @@ function Variacao({ agora, antes }: { agora: number; antes: number }) {
   );
 }
 
+/* --------------------------------------------------- atividades da pessoa ---
+ * O recorte de tempo de quem está sendo olhado.
+ *
+ * A barra de cima manda no painel inteiro, e é assim que tem de ser: todos os
+ * números precisam falar do mesmo intervalo. Mas ao abrir uma pessoa a
+ * pergunta muda de escala — "o que ele fez ontem?", "e na semana passada?" —
+ * e mexer no período geral para responder isso reescreve o painel inteiro e
+ * faz perder o lugar. Por isso a ficha da pessoa tem relógio próprio: começa
+ * no período do painel e volta para ele num clique.
+ */
+const ATALHOS_DA_PESSOA: { rotulo: string; calcular: () => { de: string; ate: string } }[] = [
+  { rotulo: 'Hoje', calcular: () => ({ de: diaISO(new Date()), ate: diaISO(new Date()) }) },
+  {
+    rotulo: 'Ontem',
+    calcular: () => {
+      const d = somarDias(diaISO(new Date()), -1);
+      return { de: d, ate: d };
+    }
+  },
+  {
+    rotulo: '7 dias',
+    calcular: () => ({ de: somarDias(diaISO(new Date()), -6), ate: diaISO(new Date()) })
+  },
+  {
+    rotulo: '30 dias',
+    calcular: () => ({ de: somarDias(diaISO(new Date()), -29), ate: diaISO(new Date()) })
+  },
+  {
+    rotulo: 'Este mês',
+    calcular: () => {
+      const agora = new Date();
+      return {
+        de: diaISO(new Date(agora.getFullYear(), agora.getMonth(), 1)),
+        ate: diaISO(agora)
+      };
+    }
+  },
+  { rotulo: 'Tudo', calcular: () => ({ de: '', ate: '' }) }
+];
+
+function AtividadesDaPessoa({
+  chave,
+  nome,
+  checkIns,
+  pessoaDoCheckIn,
+  operationTypes,
+  priorityLevels,
+  dePainel,
+  atePainel,
+  rotuloDoPeriodo,
+  onIrParaCheckIn
+}: {
+  chave: string;
+  nome: string;
+  checkIns: any[];
+  pessoaDoCheckIn: (c: any) => PessoaResolvida;
+  operationTypes: OperationType[];
+  priorityLevels: PriorityLevel[];
+  dePainel: string;
+  atePainel: string;
+  rotuloDoPeriodo: string;
+  onIrParaCheckIn: (id: string) => void;
+}) {
+  const [recorte, setRecorte] = React.useState({ de: dePainel, ate: atePainel });
+  /** Mexeu na barra de cima: a ficha volta a acompanhar o painel. */
+  React.useEffect(() => {
+    setRecorte({ de: dePainel, ate: atePainel });
+  }, [dePainel, atePainel]);
+
+  const seguindoOPainel = recorte.de === dePainel && recorte.ate === atePainel;
+
+  const { dias, total, graves, ultimo } = useMemo(() => {
+    const hoje = diaISO(new Date());
+    const niveisOrdenados = [...priorityLevels].sort((a, b) => b.position - a.position);
+    const idsGraves = niveisOrdenados.slice(0, 2).map(n => n.id);
+
+    const meus = checkIns.filter(c => pessoaDoCheckIn(c).chave === chave);
+    const dentro = meus.filter(c => {
+      const d = diaDoCheckIn(c);
+      if (!d) return false;
+      if (recorte.de && d < recorte.de) return false;
+      if (recorte.ate && d > recorte.ate) return false;
+      return true;
+    });
+
+    const porDia = new Map<string, any[]>();
+    dentro.forEach(c => {
+      const d = diaDoCheckIn(c);
+      if (!porDia.has(d)) porDia.set(d, []);
+      porDia.get(d)!.push(c);
+    });
+
+    const ordenados = [...porDia.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([dia, registros]) => ({
+        dia,
+        distancia: diasEntre(dia, hoje),
+        registros: registros
+          .slice()
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )
+          .map(c => ({
+            id: c.id,
+            hora: horaDoCheckIn(c),
+            titulo:
+              c.operationTypeLabel ||
+              operationTypes.find(t => t.id === c.operationTypeId)?.label ||
+              c.name ||
+              'Check-in',
+            endereco: [c.rua, c.bairro].filter(Boolean).join(', '),
+            nivel: priorityLevels.find(n => n.id === c.priority),
+            grave: idsGraves.includes(c.priority || '')
+          }))
+      }));
+
+    const todosOsDias = meus.map(diaDoCheckIn).filter(Boolean).sort();
+
+    return {
+      dias: ordenados,
+      total: dentro.length,
+      graves: dentro.filter(c => idsGraves.includes(c.priority || '')).length,
+      ultimo: todosOsDias.length ? todosOsDias[todosOsDias.length - 1] : ''
+    };
+  }, [checkIns, chave, pessoaDoCheckIn, operationTypes, priorityLevels, recorte]);
+
+  const rotuloDoRecorte = seguindoOPainel
+    ? rotuloDoPeriodo
+    : !recorte.de && !recorte.ate
+      ? 'Todo o período'
+      : recorte.de && recorte.ate
+        ? recorte.de === recorte.ate
+          ? curto(recorte.de)
+          : `${curto(recorte.de)} – ${curto(recorte.ate)}`
+        : recorte.de
+          ? `De ${curto(recorte.de)}`
+          : `Até ${curto(recorte.ate)}`;
+
+  const ligado = (calcular: () => { de: string; ate: string }) => {
+    const v = calcular();
+    return v.de === recorte.de && v.ate === recorte.ate;
+  };
+
+  return (
+    <div className="px-3 pb-3 pt-1 border-t border-slate-100 bg-slate-50/50 rounded-b-xl">
+      {/* O relógio da ficha */}
+      <div className="flex items-center justify-between gap-2 mt-2 mb-1.5">
+        <h5 className="text-[9.5px] uppercase tracking-widest font-black text-slate-400 flex items-center gap-1.5 min-w-0">
+          <CalendarDays className="w-3 h-3 shrink-0" />
+          <span className="truncate">Atividades de {nome.split(' ')[0]}</span>
+        </h5>
+        <span className="text-[9.5px] font-black text-[#015FC9] shrink-0">
+          {rotuloDoRecorte}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap gap-1 mb-2">
+        <button
+          type="button"
+          onClick={() => setRecorte({ de: dePainel, ate: atePainel })}
+          className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all border ${
+            seguindoOPainel
+              ? 'bg-[#015FC9] border-[#015FC9] text-white'
+              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+          }`}
+          title="Voltar para o período da barra de cima"
+        >
+          Período do painel
+        </button>
+        {ATALHOS_DA_PESSOA.map(a => (
+          <button
+            key={a.rotulo}
+            type="button"
+            onClick={() => setRecorte(a.calcular())}
+            className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all border ${
+              ligado(a.calcular) && !seguindoOPainel
+                ? 'bg-[#015FC9] border-[#015FC9] text-white'
+                : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            {a.rotulo}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mb-2.5">
+        <label className="block">
+          <span className="block text-[9px] uppercase tracking-wider font-black text-slate-400 mb-1">
+            De
+          </span>
+          <input
+            type="date"
+            value={recorte.de}
+            max={recorte.ate || undefined}
+            onChange={e => setRecorte(r => ({ ...r, de: e.target.value }))}
+            className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+          />
+        </label>
+        <label className="block">
+          <span className="block text-[9px] uppercase tracking-wider font-black text-slate-400 mb-1">
+            Até
+          </span>
+          <input
+            type="date"
+            value={recorte.ate}
+            min={recorte.de || undefined}
+            onChange={e => setRecorte(r => ({ ...r, ate: e.target.value }))}
+            className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+          />
+        </label>
+      </div>
+
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-[10.5px] font-bold text-slate-500">
+          <span className="text-[13px] font-black text-[#0D233A] tabular-nums mr-1">
+            {total}
+          </span>
+          registro{total === 1 ? '' : 's'}
+        </span>
+        {graves > 0 && (
+          <span
+            className="text-[10px] font-black px-1.5 py-0.5 rounded"
+            style={{ color: SITUACAO.atrasada, backgroundColor: `${SITUACAO.atrasada}14` }}
+          >
+            {graves} grave{graves === 1 ? '' : 's'}
+          </span>
+        )}
+        <span className="text-[10px] font-bold text-slate-400">
+          {dias.length} dia{dias.length === 1 ? '' : 's'} com trabalho
+        </span>
+      </div>
+
+      {/* A agenda: um bloco por dia, do mais recente para trás. */}
+      {dias.length === 0 ? (
+        <p className="text-[11px] font-semibold text-slate-400 py-3 text-center">
+          Nada registrado neste recorte.
+          {ultimo && (
+            <span className="block text-[10px] font-bold text-slate-400 mt-1">
+              O último registro desta pessoa foi em {curto(ultimo)}.
+            </span>
+          )}
+        </p>
+      ) : (
+        <div className="space-y-2 max-h-[280px] overflow-y-auto pr-0.5">
+          {dias.map(d => (
+            <div key={d.dia}>
+              <div className="flex items-baseline justify-between gap-2 mb-1">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  {curto(d.dia)}
+                  <span className="text-slate-300 font-bold ml-1.5 normal-case tracking-normal">
+                    {desdeQuando(d.distancia)}
+                  </span>
+                </span>
+                <span className="text-[10px] font-black text-slate-400 tabular-nums shrink-0">
+                  {d.registros.length}
+                </span>
+              </div>
+              <div className="space-y-1">
+                {d.registros.map(r => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => onIrParaCheckIn(r.id)}
+                    title="Levar o mapa até este registro"
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:border-[#015FC9]/40 hover:bg-blue-50/40 transition-all cursor-pointer flex items-center gap-2"
+                  >
+                    <span
+                      className="w-1 h-7 rounded-full shrink-0"
+                      style={{ backgroundColor: r.nivel?.color || '#cbd5e1' }}
+                    />
+                    <span className="text-[10px] font-black text-slate-400 tabular-nums shrink-0">
+                      {r.hora}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[11px] font-bold text-slate-800 truncate">
+                        {r.titulo}
+                      </span>
+                      <span className="block text-[9.5px] font-semibold text-slate-400 truncate">
+                        {r.endereco || 'Sem endereço'}
+                      </span>
+                    </span>
+                    {r.grave && (
+                      <span
+                        className="text-[8.5px] font-black uppercase tracking-wider px-1 py-0.5 rounded shrink-0"
+                        style={{
+                          color: SITUACAO.atrasada,
+                          backgroundColor: `${SITUACAO.atrasada}14`
+                        }}
+                      >
+                        grave
+                      </span>
+                    )}
+                    <Crosshair className="w-3 h-3 text-slate-300 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[9px] font-semibold text-slate-400 leading-snug mt-2">
+        Este recorte vale só para esta ficha. O resto do painel e o mapa seguem
+        o período da barra de cima.
+      </p>
+    </div>
+  );
+}
+
 /**
  * A sala de situação do mapa.
  *
@@ -209,6 +535,14 @@ export default function PainelDeCheckIns({
 }: Props) {
   /** Só aparece com equipe grande: até oito pessoas a lista inteira é a busca. */
   const [buscaDePessoa, setBuscaDePessoa] = React.useState('');
+  /**
+   * A ficha aberta.
+   *
+   * Clicar no nome filtra o mapa; abrir a ficha é outra pergunta — o que essa
+   * pessoa fez, dia a dia. Uma de cada vez: duas fichas abertas viram uma
+   * rolagem sem fim e ninguém compara nada.
+   */
+  const [pessoaExpandida, setPessoaExpandida] = React.useState<string | null>(null);
   const dados = useMemo(() => {
     const hoje = diaISO(new Date());
     const diaDoRegistro = (c: any) => {
@@ -697,6 +1031,174 @@ export default function PainelDeCheckIns({
               ))}
             </div>
 
+            {/* ------------------------------------------------ EQUIPE ---
+                Primeira seção do painel, antes dos números da cidade: a
+                pergunta que abre o dia é quem está em campo e quem parou. */}
+            <Secao
+              titulo="Desempenho da equipe"
+              Icone={Users}
+              aviso={`${emCampo} de ${pessoas.length} em campo`}
+            >
+              {pessoas.length === 0 ? (
+                <p className="text-[11.5px] font-semibold text-slate-400 py-3 text-center">
+                  Nenhum integrante cadastrado.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {pessoas.length > 8 && (
+                    <input
+                      type="text"
+                      value={buscaDePessoa}
+                      onChange={e => setBuscaDePessoa(e.target.value)}
+                      placeholder="Buscar integrante..."
+                      className="w-full mb-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11.5px] font-semibold text-slate-700 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  )}
+                  {pessoas
+                    .filter(p =>
+                      p.nome.toLowerCase().includes(buscaDePessoa.trim().toLowerCase())
+                    )
+                    .map((p, i) => {
+                    const marcado = pessoasSelecionadas.includes(p.chave);
+                    const aberta = pessoaExpandida === p.chave;
+                    const paradaHa = p.ultimo ? diasEntre(p.ultimo, dados.hoje) : -1;
+                    const medalha = p.total > 0 && i < 3;
+                    return (
+                      <div
+                        key={p.chave}
+                        className={`rounded-xl border transition-all ${
+                          marcado
+                            ? 'bg-blue-50/70 border-[#015FC9]/40'
+                            : aberta
+                              ? 'bg-white border-[#015FC9]/30'
+                              : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-stretch">
+                          <button
+                            type="button"
+                            onClick={() => onPessoa(p.chave)}
+                            title="Filtrar o mapa por esta pessoa"
+                            className="flex-1 min-w-0 text-left px-2.5 py-2 cursor-pointer flex items-center gap-2.5"
+                          >
+                            <span className="relative shrink-0">
+                              <span className="w-9 h-9 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center">
+                                {p.foto ? (
+                                  <img
+                                    src={p.foto}
+                                    alt={p.nome}
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                    onError={e => {
+                                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                ) : (
+                                  <Users className="w-4 h-4 text-slate-400" />
+                                )}
+                              </span>
+                              {medalha && (
+                                <span
+                                  className="absolute -top-1 -left-1 w-4.5 h-4.5 rounded-full text-[9px] font-black text-white flex items-center justify-center border-2 border-white"
+                                  style={{
+                                    backgroundColor:
+                                      i === 0 ? '#eda100' : i === 1 ? '#94a3b8' : '#b45309'
+                                  }}
+                                >
+                                  {i + 1}
+                                </span>
+                              )}
+                            </span>
+
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center justify-between gap-2">
+                                <span className="text-[11.5px] font-bold text-slate-800 truncate">
+                                  {p.nome}
+                                </span>
+                                <span className="flex items-center gap-1.5 shrink-0">
+                                  {temRecorte && (
+                                    <Variacao agora={p.total} antes={p.antes} />
+                                  )}
+                                  <span className="text-[12px] font-black text-[#0D233A] tabular-nums w-6 text-right">
+                                    {p.total}
+                                  </span>
+                                </span>
+                              </span>
+                              <span className="block h-1.5 rounded-full bg-slate-100 overflow-hidden mt-1.5">
+                                <span
+                                  className="block h-full rounded-full"
+                                  style={{
+                                    width: `${(p.total / picoDePessoa) * 100}%`,
+                                    backgroundColor: p.total > 0 ? AZUL : 'transparent'
+                                  }}
+                                />
+                              </span>
+                              <span className="flex items-center gap-2 mt-1">
+                                {p.total === 0 ? (
+                                  <span className="text-[9.5px] font-black uppercase tracking-wider text-rose-600">
+                                    {p.ultimo
+                                      ? `sem registro no período · último ${desdeQuando(paradaHa)}`
+                                      : 'nunca registrou'}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9.5px] font-bold text-slate-400">
+                                    último {desdeQuando(paradaHa)}
+                                    {p.graves > 0 && ` · ${p.graves} grave${p.graves === 1 ? '' : 's'}`}
+                                  </span>
+                                )}
+                                {!p.daEquipe && (
+                                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-300">
+                                    fora da equipe
+                                  </span>
+                                )}
+                              </span>
+                            </span>
+                          </button>
+
+                          {/* Abrir a ficha é outra ação que filtrar o mapa, e
+                              por isso tem botão próprio. */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPessoaExpandida(atual => (atual === p.chave ? null : p.chave))
+                            }
+                            title={aberta ? 'Fechar as atividades' : 'Ver as atividades desta pessoa'}
+                            className={`shrink-0 px-2 border-l flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-all ${
+                              aberta
+                                ? 'border-[#015FC9]/20 text-[#015FC9] bg-blue-50/60'
+                                : 'border-slate-100 text-slate-400 hover:text-[#015FC9] hover:bg-slate-50'
+                            }`}
+                          >
+                            <ChevronDown
+                              className={`w-4 h-4 transition-transform ${aberta ? 'rotate-180' : ''}`}
+                            />
+                            <span className="text-[7.5px] font-black uppercase tracking-wider leading-none">
+                              {aberta ? 'fechar' : 'ver'}
+                            </span>
+                          </button>
+                        </div>
+
+                        {aberta && (
+                          <AtividadesDaPessoa
+                            chave={p.chave}
+                            nome={p.nome}
+                            checkIns={checkIns}
+                            pessoaDoCheckIn={pessoaDoCheckIn}
+                            operationTypes={operationTypes}
+                            priorityLevels={priorityLevels}
+                            dePainel={de}
+                            atePainel={ate}
+                            rotuloDoPeriodo={rotuloDoPeriodo}
+                            onIrParaCheckIn={onIrParaCheckIn}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Secao>
+
             {/* ------------------------------------------------- RITMO --- */}
             <Secao
               titulo="Ritmo do período"
@@ -1028,126 +1530,6 @@ export default function PainelDeCheckIns({
                 </div>
               </Secao>
             )}
-
-            {/* ------------------------------------------------ EQUIPE --- */}
-            <Secao
-              titulo="Desempenho da equipe"
-              Icone={Users}
-              aviso={`${emCampo} de ${pessoas.length} em campo`}
-            >
-              {pessoas.length === 0 ? (
-                <p className="text-[11.5px] font-semibold text-slate-400 py-3 text-center">
-                  Nenhum integrante cadastrado.
-                </p>
-              ) : (
-                <div className="space-y-1.5">
-                  {pessoas.length > 8 && (
-                    <input
-                      type="text"
-                      value={buscaDePessoa}
-                      onChange={e => setBuscaDePessoa(e.target.value)}
-                      placeholder="Buscar integrante..."
-                      className="w-full mb-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11.5px] font-semibold text-slate-700 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  )}
-                  {pessoas
-                    .filter(p =>
-                      p.nome.toLowerCase().includes(buscaDePessoa.trim().toLowerCase())
-                    )
-                    .map((p, i) => {
-                    const marcado = pessoasSelecionadas.includes(p.chave);
-                    const paradaHa = p.ultimo ? diasEntre(p.ultimo, dados.hoje) : -1;
-                    const medalha = p.total > 0 && i < 3;
-                    return (
-                      <button
-                        key={p.chave}
-                        type="button"
-                        onClick={() => onPessoa(p.chave)}
-                        title="Filtrar o mapa por esta pessoa"
-                        className={`w-full text-left px-2.5 py-2 rounded-xl border transition-all cursor-pointer flex items-center gap-2.5 ${
-                          marcado
-                            ? 'bg-blue-50/70 border-[#015FC9]/40'
-                            : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        <span className="relative shrink-0">
-                          <span className="w-9 h-9 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center">
-                            {p.foto ? (
-                              <img
-                                src={p.foto}
-                                alt={p.nome}
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover"
-                                onError={e => {
-                                  (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                }}
-                              />
-                            ) : (
-                              <Users className="w-4 h-4 text-slate-400" />
-                            )}
-                          </span>
-                          {medalha && (
-                            <span
-                              className="absolute -top-1 -left-1 w-4.5 h-4.5 rounded-full text-[9px] font-black text-white flex items-center justify-center border-2 border-white"
-                              style={{
-                                backgroundColor:
-                                  i === 0 ? '#eda100' : i === 1 ? '#94a3b8' : '#b45309'
-                              }}
-                            >
-                              {i + 1}
-                            </span>
-                          )}
-                        </span>
-
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="text-[11.5px] font-bold text-slate-800 truncate">
-                              {p.nome}
-                            </span>
-                            <span className="flex items-center gap-1.5 shrink-0">
-                              {temRecorte && (
-                                <Variacao agora={p.total} antes={p.antes} />
-                              )}
-                              <span className="text-[12px] font-black text-[#0D233A] tabular-nums w-6 text-right">
-                                {p.total}
-                              </span>
-                            </span>
-                          </span>
-                          <span className="block h-1.5 rounded-full bg-slate-100 overflow-hidden mt-1.5">
-                            <span
-                              className="block h-full rounded-full"
-                              style={{
-                                width: `${(p.total / picoDePessoa) * 100}%`,
-                                backgroundColor: p.total > 0 ? AZUL : 'transparent'
-                              }}
-                            />
-                          </span>
-                          <span className="flex items-center gap-2 mt-1">
-                            {p.total === 0 ? (
-                              <span className="text-[9.5px] font-black uppercase tracking-wider text-rose-600">
-                                {p.ultimo
-                                  ? `sem registro no período · último ${desdeQuando(paradaHa)}`
-                                  : 'nunca registrou'}
-                              </span>
-                            ) : (
-                              <span className="text-[9.5px] font-bold text-slate-400">
-                                último {desdeQuando(paradaHa)}
-                                {p.graves > 0 && ` · ${p.graves} grave${p.graves === 1 ? '' : 's'}`}
-                              </span>
-                            )}
-                            {!p.daEquipe && (
-                              <span className="text-[9px] font-black uppercase tracking-wider text-slate-300">
-                                fora da equipe
-                              </span>
-                            )}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </Secao>
 
             {/* ----------------------------------------------- MISSÕES --- */}
             <Secao
