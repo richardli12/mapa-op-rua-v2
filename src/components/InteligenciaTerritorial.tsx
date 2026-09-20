@@ -58,7 +58,7 @@ interface InteligenciaTerritorialProps {
   onRecorteEmFoco?: (id: string | null) => void;
 }
 
-type Aba = 'raio' | 'bairros' | 'censo';
+type Aba = 'raio' | 'bairros' | 'setores' | 'censo';
 
 const RAIOS = [500, 1000, 2000, 5000];
 
@@ -284,6 +284,7 @@ export default function InteligenciaTerritorial({
     }
     setCarregandoDesenho(true);
     setErro(null);
+    setAba('setores');
     try {
       const lista = await todasAsPaginas<SetorDoTerritorio>(
         (inicio) => lerSetores(uf, municipio.codigo, bairro.codigo, inicio, true),
@@ -454,6 +455,7 @@ export default function InteligenciaTerritorial({
   const abas: { id: Aba; rotulo: string }[] = [
     { id: 'raio', rotulo: 'Raio' },
     { id: 'bairros', rotulo: 'Bairros' },
+    { id: 'setores', rotulo: 'Setores' },
     { id: 'censo', rotulo: 'Censo' }
   ];
 
@@ -898,6 +900,133 @@ export default function InteligenciaTerritorial({
                     )}
                   </div>
                 )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* --------------------------------------------------- SETORES --- */}
+        {aba === 'setores' && (
+          <div>
+            {!bairroDosSetores ? (
+              <div className="py-6 text-center">
+                <p className="text-[11.5px] font-semibold text-slate-500 leading-snug px-2">
+                  O setor censitário é a unidade fundamental do Censo: algumas
+                  centenas de domicílios. Tudo o mais é soma deles.
+                </p>
+                <p className="mt-2 text-[10.5px] font-semibold text-slate-400 leading-snug px-2">
+                  Escolha um bairro na aba anterior e toque em{' '}
+                  <span className="font-black text-slate-500">Setores</span>. É
+                  um bairro por vez de propósito: uma cidade grande passa de
+                  mil setores, e o polígono de todos eles são dezenas de
+                  megabytes.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAba('bairros');
+                    if (bairros.length === 0) carregarBairros();
+                  }}
+                  className="mt-3 h-8 px-3.5 bg-[#015FC9] hover:bg-[#0150ab] text-white text-[10.5px] font-black uppercase tracking-wider rounded-lg cursor-pointer"
+                >
+                  Escolher um bairro
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] font-black text-[#0D233A] truncate">
+                      {bairroDosSetores.nome}
+                    </p>
+                    <p className="text-[10.5px] font-semibold text-slate-400">
+                      {setores.length}{' '}
+                      {setores.length === 1 ? 'setor' : 'setores'} ·{' '}
+                      {numero(
+                        setores.reduce(
+                          // null é ausência: entra fora da soma, não como zero.
+                          (soma, s) => soma + (s.populacao ?? 0),
+                          0,
+                        ),
+                      )}{' '}
+                      hab somados
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBairroDosSetores(null);
+                      setSetores([]);
+                      setAba('bairros');
+                    }}
+                    className="h-8 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 text-[10px] font-black uppercase tracking-wider cursor-pointer shrink-0"
+                  >
+                    Trocar
+                  </button>
+                </div>
+
+                {/* Setor com dado faltando na lista: avisar é melhor que somar. */}
+                {setores.some((s) => s.populacao === null) && (
+                  <p className="mt-2 text-[10px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug flex items-start gap-1.5">
+                    <Info className="w-3 h-3 shrink-0 mt-0.5" />
+                    {setores.filter((s) => s.populacao === null).length} setor(es)
+                    sem dado divulgado. A soma acima é parcial — ausência não é
+                    zero.
+                  </p>
+                )}
+
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {setores.map((setor) => {
+                    const densidade =
+                      setor.areaKm2 && setor.populacao !== null
+                        ? Math.round(setor.populacao / setor.areaKm2)
+                        : null;
+                    // Acima de 10%, boa parte do setor foi estimada pelo
+                    // instituto: o número existe, mas é menos firme.
+                    const muitoImputado =
+                      setor.percentualDomiciliosImputados !== null &&
+                      setor.percentualDomiciliosImputados >= 10;
+                    return (
+                      <div
+                        key={setor.codigo}
+                        onMouseEnter={() => onRecorteEmFoco?.(setor.codigo)}
+                        onMouseLeave={() => onRecorteEmFoco?.(null)}
+                        onClick={() =>
+                          carregarCenso(
+                            'setor',
+                            setor.codigo,
+                            `Setor ${setor.codigo.slice(-6)}`,
+                          )
+                        }
+                        title={setor.codigo}
+                        className={`w-full p-2.5 rounded-xl border cursor-pointer transition-all flex items-center gap-2.5 ${
+                          recorteEmFoco === setor.codigo
+                            ? 'border-[#015FC9]/40 bg-[#EFF4FB]'
+                            : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50/60'
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[12px] font-black text-slate-800 truncate leading-tight font-mono">
+                            …{setor.codigo.slice(-6)}
+                          </span>
+                          <span className="block text-[10.5px] font-semibold text-slate-400 mt-0.5">
+                            {numero(setor.populacao)} hab ·{' '}
+                            {numero(setor.domicilios)} dom
+                            {densidade !== null &&
+                              ` · ${numero(densidade)} hab/km²`}
+                          </span>
+                          {muitoImputado && (
+                            <span className="block text-[9.5px] font-black uppercase tracking-wider text-amber-600 mt-0.5">
+                              {setor.percentualDomiciliosImputados!.toFixed(1)}%
+                              estimado pelo instituto
+                            </span>
+                          )}
+                        </span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                      </div>
+                    );
+                  })}
+                </div>
               </>
             )}
           </div>
