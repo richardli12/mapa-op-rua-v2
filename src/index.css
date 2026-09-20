@@ -212,5 +212,20 @@
   cursor: none !important;
 }
 
+/* Riscar o rastro é arrastar com o botão apertado, e arrastar sobre texto
+   seleciona meia tela de azul. Com o laser ligado a seleção sai do caminho —
+   menos dentro dos campos, onde ela é o próprio trabalho. */
+.laser-ligado {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.laser-ligado input,
+.laser-ligado textarea,
+.laser-ligado [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* O ponto e o rastro são desenhados num canvas, não em elementos: o pulso do
    halo e o respeito a prefers-reduced-motion moram no próprio componente. */
