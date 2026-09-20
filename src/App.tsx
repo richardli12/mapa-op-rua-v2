@@ -20,6 +20,11 @@ import {
   CLIENT_CARD_COVER,
 } from "./mediaUrls";
 import OperationTypeSelect from "./components/OperationTypeSelect";
+import FiltroDePeriodo, {
+  EstadoDoPeriodo,
+  diaDaMissao,
+  passaNoPrazo,
+} from "./components/FiltroDePeriodo";
 import FiltroCheckIns, { PessoaDoFiltro } from "./components/FiltroCheckIns";
 import LaserPointer from "./components/LaserPointer";
 import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
@@ -949,8 +954,22 @@ export default function App() {
 
   const [filtroCheckInsAberto, setFiltroCheckInsAberto] = useState(false);
   const [filtroPessoas, setFiltroPessoas] = useState<string[]>([]);
+  /**
+   * O recorte de tempo do mapa inteiro.
+   *
+   * Mora aqui, e não dentro do painel de check-ins, porque vale para as duas
+   * camadas: o que a equipe registrou e o que o comitê mandou fazer. `de` e
+   * `ate` continuam com os mesmos nomes de antes — eram só dos check-ins e
+   * agora cortam também as missões.
+   */
+  const [periodoAberto, setPeriodoAberto] = useState(false);
   const [filtroDe, setFiltroDe] = useState("");
   const [filtroAte, setFiltroAte] = useState("");
+  const [periodoEmCheckIns, setPeriodoEmCheckIns] = useState(true);
+  const [periodoEmMissoes, setPeriodoEmMissoes] = useState(true);
+  const [filtroPrazos, setFiltroPrazos] = useState<
+    EstadoDoPeriodo["prazos"]
+  >([]);
   const [filtroNiveis, setFiltroNiveis] = useState<string[]>([]);
   const [filtroTiposAcao, setFiltroTiposAcao] = useState<string[]>([]);
 
@@ -4233,6 +4252,30 @@ export default function App() {
    * Leaflet apagar e redesenhar as camadas — e reenquadrar a vista — a cada
    * tecla digitada ou aviso na tela.
    */
+  /**
+   * O corte de tempo da missão.
+   *
+   * Só vale no painel: o aplicativo de campo mostra à equipe tudo que foi
+   * mandado para ela, e sumir com a missão de alguém porque o comitê
+   * escolheu olhar "os últimos 7 dias" seria um jeito silencioso de cancelar
+   * trabalho.
+   */
+  const missaoNoRecorte = React.useCallback(
+    (prazo: string | undefined, criadaEm: string | undefined) => {
+      if (currentUrlView === "checkin") return true;
+      if (!passaNoPrazo(prazo, filtroPrazos)) return false;
+      if (!periodoEmMissoes || (!filtroDe && !filtroAte)) return true;
+      const dia = diaDaMissao(prazo, criadaEm);
+      // Missão sem data nenhuma não se esconde: some do mapa quem a gente
+      // sabe que está fora, não quem a gente não sabe datar.
+      if (!dia) return true;
+      if (filtroDe && dia < filtroDe) return false;
+      if (filtroAte && dia > filtroAte) return false;
+      return true;
+    },
+    [currentUrlView, filtroPrazos, periodoEmMissoes, filtroDe, filtroAte],
+  );
+
   const filteredAreas = React.useMemo(() => areas.filter((a) => {
     const activeCandidate =
       currentUrlView === "checkin"
@@ -4255,6 +4298,8 @@ export default function App() {
         return false;
       }
     }
+    // A área não tem prazo próprio: ela entra pelo dia em que foi criada.
+    if (!missaoNoRecorte(undefined, a.createdAt)) return false;
     return (
       a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       a.bairro.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -4267,6 +4312,7 @@ export default function App() {
     selectedCandidateFilter,
     authenticatedSupporter,
     searchQuery,
+    missaoNoRecorte,
   ]);
 
   const filteredPins = React.useMemo(() => pins.filter((p) => {
@@ -4291,6 +4337,7 @@ export default function App() {
         return false;
       }
     }
+    if (!missaoNoRecorte(p.date, p.createdAt)) return false;
     return (
       p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.description.toLowerCase().includes(searchQuery.toLowerCase())
@@ -4302,6 +4349,7 @@ export default function App() {
     selectedCandidateFilter,
     authenticatedSupporter,
     searchQuery,
+    missaoNoRecorte,
   ]);
 
   /**
@@ -4385,7 +4433,7 @@ export default function App() {
    */
   const passaNosCortes = React.useCallback(
     (c: any) => {
-      if (filtroDe || filtroAte) {
+      if (periodoEmCheckIns && (filtroDe || filtroAte)) {
         const dia = new Date(c.createdAt);
         if (Number.isNaN(dia.getTime())) return false;
         const iso = dia.toLocaleDateString("sv-SE");
@@ -4406,7 +4454,14 @@ export default function App() {
       }
       return true;
     },
-    [filtroDe, filtroAte, filtroNiveis, filtroTiposAcao, operationTypes],
+    [
+      filtroDe,
+      filtroAte,
+      periodoEmCheckIns,
+      filtroNiveis,
+      filtroTiposAcao,
+      operationTypes,
+    ],
   );
 
   /**
@@ -4472,20 +4527,52 @@ export default function App() {
     [checkInsDoMapa, passaNosCortes, filtroPessoas, pessoaDoCheckIn],
   );
 
+  /**
+   * Missões do cliente em foco antes do recorte de tempo.
+   *
+   * A barra precisa dizer "4 de 9": sem o total de antes, ela só saberia
+   * contar o que sobrou, e quem olha não descobre quanto ficou de fora.
+   */
+  const missoesNoFoco = React.useMemo(() => {
+    const doCliente = (dono?: string) =>
+      !clienteEmFoco || clienteEmFoco === "all" || dono === clienteEmFoco;
+    return (
+      pins.filter((p) => doCliente(p.candidateId)).length +
+      areas.filter((a) => doCliente(a.candidateId)).length
+    );
+  }, [pins, areas, clienteEmFoco]);
+
+  const contagemDoPeriodo = {
+    checkInsVisiveis: filteredCheckIns.length,
+    checkInsTotal: checkInsDoMapa.length,
+    missoesVisiveis: filteredPins.length + filteredAreas.length,
+    missoesTotal: missoesNoFoco,
+  };
+
+  const estadoDoPeriodo: EstadoDoPeriodo = {
+    de: filtroDe,
+    ate: filtroAte,
+    emCheckIns: periodoEmCheckIns,
+    emMissoes: periodoEmMissoes,
+    prazos: filtroPrazos,
+  };
+
+  const mudarPeriodo = (novo: EstadoDoPeriodo) => {
+    setFiltroDe(novo.de);
+    setFiltroAte(novo.ate);
+    setPeriodoEmCheckIns(novo.emCheckIns);
+    setPeriodoEmMissoes(novo.emMissoes);
+    setFiltroPrazos(novo.prazos);
+  };
+
   /** Quantos filtros do painel estão ligados, para o aviso no botão do mapa. */
   const filtrosDeCheckInLigados =
-    filtroPessoas.length +
-    filtroNiveis.length +
-    filtroTiposAcao.length +
-    (filtroDe ? 1 : 0) +
-    (filtroAte ? 1 : 0);
+    filtroPessoas.length + filtroNiveis.length + filtroTiposAcao.length;
 
   const limparFiltrosDeCheckIn = () => {
     setFiltroPessoas([]);
     setFiltroNiveis([]);
     setFiltroTiposAcao([]);
-    setFiltroDe("");
-    setFiltroAte("");
   };
 
   // Statistics Computations
@@ -12075,6 +12162,25 @@ export default function App() {
         </div>
       )}
 
+      {/*
+        O RECORTE DE TEMPO, na barra de cima.
+
+        Fica ao lado da busca e nunca dentro de um menu: é ele que explica
+        um mapa com menos coisa do que ontem. Em tela estreita ele desce uma
+        linha em vez de brigar por espaço com a busca.
+      */}
+      {adminUser && adminTab === "map" && !clickToPickCoords && !definindoRaio && (
+        <div className="absolute top-[4.25rem] left-[15.5rem] xl:top-4 xl:left-[32.5rem] z-[1001]">
+          <FiltroDePeriodo
+            aberto={periodoAberto}
+            onAbrir={setPeriodoAberto}
+            valor={estadoDoPeriodo}
+            onMudar={mudarPeriodo}
+            contagem={contagemDoPeriodo}
+          />
+        </div>
+      )}
+
       {/* RÉGUA: controle pequeno no canto, só o necessário para medir */}
       {reguaLigada && (
         <div className="absolute top-4 right-4 z-[1002] font-sans w-[190px] bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200/70 p-3 animate-in slide-in-from-top duration-200">
@@ -12679,10 +12785,6 @@ export default function App() {
         onPessoas={setFiltroPessoas}
         de={filtroDe}
         ate={filtroAte}
-        onPeriodo={(de, ate) => {
-          setFiltroDe(de);
-          setFiltroAte(ate);
-        }}
         niveis={opcoesDePrioridade.map((o) => ({
           id: o.value,
           label: o.label,
@@ -13572,7 +13674,7 @@ export default function App() {
               <div className="space-y-3">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5 select-none">
                   <MapPin className="w-3.5 h-3.5 text-orange-500" /> Pins
-                  Estratégicos ({pins.length})
+                  Estratégicos ({filteredPins.length})
                 </h4>
 
                 <div className="space-y-2.5">

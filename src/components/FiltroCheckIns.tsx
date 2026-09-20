@@ -28,10 +28,12 @@ interface FiltroCheckInsProps {
   pessoasSelecionadas: string[];
   onPessoas: (chaves: string[]) => void;
 
-  /** Datas no formato do <input type="date">: aaaa-mm-dd. */
+  /**
+   * O recorte de tempo ligado na barra de cima, só para este painel avisar
+   * que ele existe. Quem o muda é a barra, não este painel.
+   */
   de: string;
   ate: string;
-  onPeriodo: (de: string, ate: string) => void;
 
   niveis: NivelDoFiltro[];
   niveisSelecionados: string[];
@@ -50,13 +52,6 @@ interface FiltroCheckInsProps {
 /** Liga ou desliga um item numa lista de selecionados. */
 const alternar = (lista: string[], valor: string) =>
   lista.includes(valor) ? lista.filter(v => v !== valor) : [...lista, valor];
-
-/** Data de hoje, ou de N dias atrás, no formato do input. */
-const diaEm = (diasAtras: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - diasAtras);
-  return d.toLocaleDateString('sv-SE');
-};
 
 /**
  * Filtro dos check-ins do mapa.
@@ -78,7 +73,6 @@ export default function FiltroCheckIns({
   onPessoas,
   de,
   ate,
-  onPeriodo,
   niveis,
   niveisSelecionados,
   onNiveis,
@@ -105,25 +99,14 @@ export default function FiltroCheckIns({
   }, [pessoas, busca]);
 
   const semRegistro = pessoas.filter(p => p.total === 0).length;
+  // A data não entra na conta: quem a liga e desliga é a barra de cima, e o
+  // "Limpar" daqui não a alcança.
   const filtrosLigados =
     pessoasSelecionadas.length +
     niveisSelecionados.length +
-    tiposSelecionados.length +
-    (de ? 1 : 0) +
-    (ate ? 1 : 0);
+    tiposSelecionados.length;
 
   if (!aberto) return null;
-
-  const atalho = (dias: number | null) => {
-    if (dias === null) {
-      onPeriodo('', '');
-      return;
-    }
-    onPeriodo(diaEm(dias), diaEm(0));
-  };
-
-  const periodoAtivo = (dias: number | null) =>
-    dias === null ? !de && !ate : de === diaEm(dias) && ate === diaEm(0);
 
   return (
     <div className="absolute left-[5.5rem] top-1/2 -translate-y-1/2 z-[1200] w-[340px] max-h-[86vh] bg-white rounded-3xl shadow-2xl border border-slate-200/80 flex flex-col font-sans animate-in fade-in slide-in-from-left-2 duration-150">
@@ -165,62 +148,28 @@ export default function FiltroCheckIns({
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3.5 space-y-4">
-        {/* PERÍODO */}
-        <section>
-          <h4 className="text-[10px] uppercase tracking-widest font-black text-slate-400 flex items-center gap-1.5 mb-2">
-            <CalendarDays className="w-3.5 h-3.5" />
-            Período
-          </h4>
-
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {[
-              { rotulo: 'Tudo', dias: null as number | null },
-              { rotulo: 'Hoje', dias: 0 },
-              { rotulo: '7 dias', dias: 6 },
-              { rotulo: '30 dias', dias: 29 }
-            ].map(op => (
-              <button
-                key={op.rotulo}
-                type="button"
-                onClick={() => atalho(op.dias)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all border ${
-                  periodoAtivo(op.dias)
-                    ? 'bg-[#015FC9] border-[#015FC9] text-white'
-                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}
-              >
-                {op.rotulo}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="block text-[9.5px] uppercase tracking-wider font-black text-slate-400 mb-1">
-                De
+        {/*
+          O período mora na barra de cima, não aqui.
+          Ele corta check-in e missão ao mesmo tempo, e dois controles para a
+          mesma data é o jeito mais rápido de alguém filtrar num e estranhar
+          o resultado no outro.
+        */}
+        {(de || ate) && (
+          <section className="bg-blue-50/60 border border-[#015FC9]/25 rounded-2xl px-3 py-2.5 flex items-start gap-2">
+            <CalendarDays className="w-3.5 h-3.5 text-[#015FC9] shrink-0 mt-0.5" />
+            <p className="text-[11px] font-bold text-[#0D233A] leading-snug">
+              Recorte de{' '}
+              <span className="text-[#015FC9]">
+                {de ? de.split('-').reverse().join('/') : '…'} a{' '}
+                {ate ? ate.split('-').reverse().join('/') : '…'}
+              </span>{' '}
+              ligado.
+              <span className="block font-semibold text-slate-500 mt-0.5">
+                A data fica na barra de cima e vale para o mapa inteiro.
               </span>
-              <input
-                type="date"
-                value={de}
-                max={ate || undefined}
-                onChange={e => onPeriodo(e.target.value, ate)}
-                className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-[11.5px] font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
-              />
-            </label>
-            <label className="block">
-              <span className="block text-[9.5px] uppercase tracking-wider font-black text-slate-400 mb-1">
-                Até
-              </span>
-              <input
-                type="date"
-                value={ate}
-                min={de || undefined}
-                onChange={e => onPeriodo(de, e.target.value)}
-                className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-[11.5px] font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
-              />
-            </label>
-          </div>
-        </section>
+            </p>
+          </section>
+        )}
 
         {/* PRIORIDADE */}
         {niveis.length > 0 && (
