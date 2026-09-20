@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
+  Download,
   FileText,
   Image as ImagemIcone,
   Loader2,
@@ -8,7 +10,8 @@ import {
   Play,
   Square,
   Trash2,
-  Video
+  Video,
+  X
 } from 'lucide-react';
 import { DatabaseService } from '../databaseClient';
 import { MaterialDeApoio } from '../types';
@@ -409,20 +412,151 @@ export function EditorDeMaterial({ itens, onMudar, notificar, ligado }: EditorPr
 
 // ------------------------------------------------------------------ campo
 
+/** PDF o próprio navegador abre embutido; o resto do Office, não. */
+const ePdf = (item: MaterialDeApoio) =>
+  /\.pdf($|[?#])/i.test(item.url) || /\.pdf$/i.test(item.nome || '');
+
+/**
+ * O material aberto sem sair do sistema.
+ *
+ * Abrir em outra aba tirava quem está na rua de dentro do check-in no meio
+ * do preenchimento -- em celular, voltar nem sempre devolve o formulário do
+ * jeito que estava. Aqui a imagem, o vídeo, o áudio e o PDF abrem por cima
+ * da própria conversa, e fechar devolve exatamente a tela de antes.
+ */
+function VisorDoMaterial({
+  item,
+  aoFechar
+}: {
+  item: MaterialDeApoio;
+  aoFechar: () => void;
+}) {
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => e.key === 'Escape' && aoFechar();
+    window.addEventListener('keydown', tecla);
+    return () => window.removeEventListener('keydown', tecla);
+  }, [aoFechar]);
+
+  const corpo =
+    item.tipo === 'imagem' ? (
+      <img
+        src={item.url}
+        alt={item.nome}
+        className="max-w-full max-h-full object-contain"
+        onClick={e => e.stopPropagation()}
+      />
+    ) : item.tipo === 'video' ? (
+      <video
+        src={item.url}
+        controls
+        autoPlay
+        playsInline
+        className="max-w-full max-h-full"
+        onClick={e => e.stopPropagation()}
+      />
+    ) : item.tipo === 'audio' ? (
+      <div
+        className="w-full max-w-md bg-white rounded-2xl px-4 py-5 space-y-3"
+        onClick={e => e.stopPropagation()}
+      >
+        <p className="text-[12px] font-black text-slate-700 text-center">
+          {item.nome}
+          {item.duracao ? ` · ${relogio(item.duracao)}` : ''}
+        </p>
+        <audio src={item.url} controls autoPlay className="w-full" />
+      </div>
+    ) : ePdf(item) ? (
+      <iframe
+        src={item.url}
+        title={item.nome}
+        className="w-full h-full bg-white rounded-xl"
+        onClick={e => e.stopPropagation()}
+      />
+    ) : (
+      /*
+       * Planilha e documento do Office o navegador não desenha. Em vez de
+       * jogar a pessoa para fora, o arquivo desce para o aparelho e ela
+       * continua exatamente onde estava.
+       */
+      <div
+        className="w-full max-w-sm bg-white rounded-2xl px-5 py-6 text-center space-y-3"
+        onClick={e => e.stopPropagation()}
+      >
+        <FileText className="w-8 h-8 text-slate-400 mx-auto" />
+        <p className="text-[12.5px] font-black text-slate-700 break-words">{item.nome}</p>
+        <p className="text-[11px] text-slate-400 leading-snug">
+          Este formato não abre aqui dentro. Baixe para ver no aplicativo do
+          seu aparelho — o check-in continua aberto.
+        </p>
+        <a
+          href={item.url}
+          download={item.nome}
+          className="inline-flex items-center justify-center gap-1.5 w-full px-3 py-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Baixar arquivo
+        </a>
+      </div>
+    );
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[5000] bg-black/90 flex flex-col p-3 pt-14 font-sans"
+      onClick={aoFechar}
+    >
+      <div className="absolute top-0 inset-x-0 h-12 flex items-center gap-2 px-3">
+        <span className="min-w-0 flex-1 text-[11.5px] font-bold text-white/90 truncate">
+          {item.nome}
+        </span>
+        <a
+          href={item.url}
+          download={item.nome}
+          onClick={e => e.stopPropagation()}
+          aria-label="Baixar"
+          title="Baixar"
+          className="w-9 h-9 rounded-full bg-white/15 text-white flex items-center justify-center shrink-0"
+        >
+          <Download className="w-4 h-4" />
+        </a>
+        <button
+          type="button"
+          onClick={aoFechar}
+          aria-label="Fechar"
+          className="w-9 h-9 rounded-full bg-white/15 text-white flex items-center justify-center cursor-pointer shrink-0"
+        >
+          <X className="w-4.5 h-4.5" />
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 flex items-center justify-center">{corpo}</div>
+    </div>,
+    document.body
+  );
+}
+
 /**
  * O material como quem está na rua vê.
  *
  * Nada toca sozinho e nada carrega sem pedido: é o aparelho dela e o pacote
  * de dados dela. Imagem e vídeo viram miniatura, o áudio ganha um tocador
- * parado e o documento é um chip que abre onde o aparelho souber abrir.
+ * parado e o documento é um chip -- e tudo abre dentro do sistema, por cima
+ * da conversa do check-in, sem mandar ninguém para outra aba.
  */
 export function MaterialDaMissao({ itens }: { itens: MaterialDeApoio[] }) {
+  const [aberto, setAberto] = useState<MaterialDeApoio | null>(null);
   const prontos = itens.filter(i => i.url);
   if (prontos.length === 0) return null;
 
   const visuais = prontos.filter(i => i.tipo === 'imagem' || i.tipo === 'video');
   const audios = prontos.filter(i => i.tipo === 'audio');
   const documentos = prontos.filter(i => i.tipo === 'documento');
+
+  const abrir = (e: React.MouseEvent, item: MaterialDeApoio) => {
+    // O cartão da missão escuta o clique: abrir o material não pode
+    // escolher ou desmarcar a missão por tabela.
+    e.preventDefault();
+    e.stopPropagation();
+    setAberto(item);
+  };
 
   return (
     <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-2">
@@ -433,14 +567,12 @@ export function MaterialDaMissao({ itens }: { itens: MaterialDeApoio[] }) {
       {visuais.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {visuais.map(item => (
-            <a
+            <button
               key={item.id}
-              href={item.url}
-              target="_blank"
-              rel="noreferrer"
-              onClick={e => e.stopPropagation()}
+              type="button"
+              onClick={e => abrir(e, item)}
               title={item.nome}
-              className="relative w-14 h-14 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 shrink-0 block"
+              className="relative w-14 h-14 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 shrink-0 block cursor-pointer"
             >
               {item.tipo === 'imagem' ? (
                 <img src={item.url} alt={item.nome} className="w-full h-full object-cover" />
@@ -452,7 +584,7 @@ export function MaterialDaMissao({ itens }: { itens: MaterialDeApoio[] }) {
                   <Play className="w-4 h-4 text-white fill-white" />
                 </span>
               )}
-            </a>
+            </button>
           ))}
         </div>
       )}
@@ -469,22 +601,23 @@ export function MaterialDaMissao({ itens }: { itens: MaterialDeApoio[] }) {
       {documentos.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {documentos.map(item => (
-            <a
+            <button
               key={item.id}
-              href={item.url}
-              target="_blank"
-              rel="noreferrer"
-              onClick={e => e.stopPropagation()}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 max-w-full"
+              type="button"
+              onClick={e => abrir(e, item)}
+              title={item.nome}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 max-w-full cursor-pointer"
             >
               <FileText className="w-3 h-3 text-slate-500 shrink-0" />
               <span className="text-[10.5px] font-bold text-slate-600 truncate max-w-[150px]">
                 {item.nome}
               </span>
-            </a>
+            </button>
           ))}
         </div>
       )}
+
+      {aberto && <VisorDoMaterial item={aberto} aoFechar={() => setAberto(null)} />}
     </div>
   );
 }
