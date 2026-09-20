@@ -12165,10 +12165,10 @@ export default function App() {
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: -15, scale: 0.95 }}
               transition={{ duration: 0.15, ease: "easeOut" }}
-              className="ml-3 bg-[#0c1322]/98 backdrop-blur-md border border-slate-800/90 rounded-3xl p-3 shadow-2xl flex flex-col gap-1 w-60 min-w-[220px] pointer-events-auto text-left z-[2000]"
+              className="ml-3 bg-[#DBE2E9]/98 backdrop-blur-md border border-slate-300/80 rounded-3xl p-3 shadow-2xl shadow-slate-900/20 flex flex-col gap-1 w-60 min-w-[220px] pointer-events-auto text-left z-[2000]"
             >
-              <div className="px-2.5 py-1.5 border-b border-slate-800/80 mb-1 flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-sans">
+              <div className="px-2.5 py-1.5 border-b border-slate-400/40 mb-1 flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 font-sans">
                   Exibir no Mapa
                 </span>
                 <button
@@ -12176,7 +12176,7 @@ export default function App() {
                     e.stopPropagation();
                     setIsFilterDropdownOpen(false);
                   }}
-                  className="text-slate-500 hover:text-slate-300 p-0.5 rounded-lg transition-colors cursor-pointer"
+                  className="text-slate-500 hover:text-slate-800 p-0.5 rounded-lg transition-colors cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -12196,7 +12196,7 @@ export default function App() {
                   className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
                     mapFilter === "all"
                       ? "bg-indigo-600 text-white shadow-md"
-                      : "text-slate-300 hover:bg-slate-800/65 hover:text-white"
+                      : "text-slate-700 hover:bg-white/70 hover:text-slate-900"
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -12220,7 +12220,7 @@ export default function App() {
                   className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
                     mapFilter === "checkins"
                       ? "bg-emerald-600 text-white shadow-md"
-                      : "text-slate-300 hover:bg-slate-800/65 hover:text-white"
+                      : "text-slate-700 hover:bg-white/70 hover:text-slate-900"
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -12246,7 +12246,7 @@ export default function App() {
                   className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
                     mapFilter === "favoritos"
                       ? "bg-amber-500 text-white shadow-md"
-                      : "text-slate-300 hover:bg-slate-800/65 hover:text-white"
+                      : "text-slate-700 hover:bg-white/70 hover:text-slate-900"
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -12270,7 +12270,7 @@ export default function App() {
                   className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
                     mapFilter === "markers"
                       ? "bg-[#F58220] text-white shadow-md"
-                      : "text-slate-300 hover:bg-slate-800/65 hover:text-white"
+                      : "text-slate-700 hover:bg-white/70 hover:text-slate-900"
                   }`}
                 >
                   <div className="flex items-center gap-2 font-sans">
