@@ -274,6 +274,23 @@ interface MapContainerProps {
   clickToPickCoords: boolean;
   /** Esconde o painel de busca enquanto um ponto está sendo colocado. */
   esconderBusca?: boolean;
+  /** Estabelecimentos achados na pesquisa do CCO, desenhados como lojinhas. */
+  estabelecimentos?: {
+    id: string;
+    nome: string;
+    latitude: number;
+    longitude: number;
+    endereco: string | null;
+    categoria: string | null;
+    avaliacao: number | null;
+    situacao: string | null;
+  }[];
+  /** Qual deles está em foco: o mapa voa até ele e destaca o marcador. */
+  estabelecimentoEmFoco?: string | null;
+  /** Clique num marcador de estabelecimento. */
+  onEstabelecimentoSelecionado?: (id: string) => void;
+  /** Entrega ao painel o centro e o zoom de agora, para a busca por área. */
+  aoRegistrarVista?: (ler: () => { lat: number; lng: number; zoom: number } | null) => void;
   onCoordsPicked: (coords: { lat: number; lng: number }) => void;
   tempPlacementCoords: { lat: number; lng: number } | null;
   tempPlacementColor: string;
@@ -392,6 +409,10 @@ export default function MapContainer({
   onSelectItem,
   clickToPickCoords,
   esconderBusca = false,
+  estabelecimentos,
+  estabelecimentoEmFoco,
+  onEstabelecimentoSelecionado,
+  aoRegistrarVista,
   onCoordsPicked,
   tempPlacementCoords,
   tempPlacementColor,
@@ -468,6 +489,9 @@ export default function MapContainer({
   raioRef.current = tempPlacementRadius;
   const checkInsGroupRef = useRef<L.LayerGroup | null>(null);
   const escolasGroupRef = useRef<L.LayerGroup | null>(null);
+  const lojasGroupRef = useRef<L.LayerGroup | null>(null);
+  /** Marcadores por id, para destacar o que a lista escolheu. */
+  const lojasPorIdRef = useRef<{ [id: string]: any }>({});
   // Guarda se a camada ja estava ligada: o enquadramento acontece na virada,
   // e nao a cada vez que a lista de escolas e recalculada.
   const camadaEscolasLigadaRef = useRef(false);
@@ -1108,6 +1132,7 @@ export default function MapContainer({
     const tempGroup = L.layerGroup().addTo(map);
     const checkInsGroup = L.layerGroup().addTo(map);
     const escolasGroup = L.layerGroup().addTo(map);
+    const lojasGroup = L.layerGroup().addTo(map);
     const delimitationGroup = L.layerGroup().addTo(map);
 
     circlesGroupRef.current = circlesGroup;
@@ -1115,6 +1140,7 @@ export default function MapContainer({
     tempGroupRef.current = tempGroup;
     checkInsGroupRef.current = checkInsGroup;
     escolasGroupRef.current = escolasGroup;
+    lojasGroupRef.current = lojasGroup;
     delimitationGroupRef.current = delimitationGroup;
     mapRef.current = map;
 
@@ -1655,6 +1681,91 @@ export default function MapContainer({
       checkInsGroup.addLayer(marker);
     });
   }, [checkIns, mapFilter]);
+
+  /**
+   * Estabelecimentos da pesquisa.
+   *
+   * Eles não são pontos da campanha: são referência do terreno, então saem
+   * num marcador diferente — uma pastilha branca com a inicial — para não se
+   * confundir com pino, área ou check-in. O que está em foco cresce e ganha
+   * anel, que é como a lista e o mapa conversam.
+   */
+  useEffect(() => {
+    const grupo = lojasGroupRef.current;
+    const map = mapRef.current;
+    if (!grupo || !map) return;
+
+    grupo.clearLayers();
+    lojasPorIdRef.current = {};
+
+    (estabelecimentos || []).forEach(lugar => {
+      if (typeof lugar.latitude !== 'number' || typeof lugar.longitude !== 'number') return;
+      const emFoco = estabelecimentoEmFoco === lugar.id;
+      const inicial = (lugar.nome || '?').trim().charAt(0).toUpperCase();
+
+      const marcador = L.marker([lugar.latitude, lugar.longitude], {
+        icon: L.divIcon({
+          className: '',
+          html:
+            `<span style="display:flex;align-items:center;justify-content:center;` +
+            `width:${emFoco ? 34 : 26}px;height:${emFoco ? 34 : 26}px;border-radius:50%;` +
+            `background:#fff;border:${emFoco ? 3 : 2}px solid #7C3AED;` +
+            `box-shadow:0 2px 6px rgba(0,0,0,.3)${emFoco ? ',0 0 0 6px rgba(124,58,237,.22)' : ''};` +
+            `color:#5B21B6;font-weight:900;font-size:${emFoco ? 14 : 11}px;font-family:sans-serif">` +
+            `${inicial}</span>`,
+          iconSize: [emFoco ? 34 : 26, emFoco ? 34 : 26],
+          iconAnchor: [emFoco ? 17 : 13, emFoco ? 17 : 13]
+        }),
+        zIndexOffset: emFoco ? 1000 : 0
+      });
+
+      marcador.bindTooltip(
+        `<div class="px-2.5 py-2 font-sans text-xs min-w-[150px] max-w-[230px]">
+           <p class="font-extrabold uppercase tracking-wider text-[9px] mb-0.5 text-violet-600">
+             ${lugar.categoria || 'Estabelecimento'}
+           </p>
+           <p class="font-bold text-slate-900 text-sm leading-tight">${lugar.nome}</p>
+           ${lugar.endereco ? `<p class="text-[10px] text-slate-500 font-semibold mt-1 leading-snug">📍 ${lugar.endereco}</p>` : ''}
+           ${lugar.avaliacao !== null && lugar.avaliacao !== undefined ? `<p class="text-[10px] text-amber-600 font-bold mt-1">★ ${lugar.avaliacao}</p>` : ''}
+           ${lugar.situacao ? `<p class="text-[10px] font-bold mt-0.5 text-slate-500">${lugar.situacao}</p>` : ''}
+         </div>`,
+        { direction: 'top', offset: [0, -12] }
+      );
+
+      marcador.on('click', () => onEstabelecimentoSelecionado?.(lugar.id));
+
+      grupo.addLayer(marcador);
+      lojasPorIdRef.current[lugar.id] = marcador;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estabelecimentos, estabelecimentoEmFoco]);
+
+  // O escolhido na lista chama o mapa até ele, sem mudar o zoom de quem está
+  // olhando de perto.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !estabelecimentoEmFoco) return;
+    const lugar = (estabelecimentos || []).find(e => e.id === estabelecimentoEmFoco);
+    if (!lugar) return;
+    map.setView([lugar.latitude, lugar.longitude], Math.max(map.getZoom(), 16), {
+      animate: true
+    });
+    lojasPorIdRef.current[lugar.id]?.openTooltip?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estabelecimentoEmFoco]);
+
+  // Entrega para cima a leitura do centro e do zoom de agora: é o que a
+  // pesquisa por área precisa saber, e só o mapa sabe.
+  useEffect(() => {
+    if (!aoRegistrarVista) return;
+    aoRegistrarVista(() => {
+      const map = mapRef.current;
+      if (!map) return null;
+      const centro = map.getCenter();
+      return { lat: centro.lat, lng: centro.lng, zoom: map.getZoom() };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aoRegistrarVista]);
 
   // Camada de escolas do municipio: so desenha quando ligada no dock.
   useEffect(() => {
