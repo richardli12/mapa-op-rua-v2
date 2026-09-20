@@ -898,6 +898,19 @@ export default function App() {
     lng: number;
     raio: number;
   } | null>(null);
+  /** Bairros ou setores desenhados no mapa, e a escala que os pinta. */
+  const [recortesTerritoriais, setRecortesTerritoriais] = useState<any[]>([]);
+  const [escalaTerritorial, setEscalaTerritorial] = useState<
+    { corte: number; cor: string }[]
+  >([]);
+  const [recorteEmFoco, setRecorteEmFoco] = useState<string | null>(null);
+  const receberRecortes = React.useCallback(
+    (lista: any[], escala: { corte: number; cor: string }[]) => {
+      setRecortesTerritoriais(lista);
+      setEscalaTerritorial(escala);
+    },
+    [],
+  );
   /** Leitura do centro e do zoom do mapa, entregue pelo próprio mapa. */
   const lerVistaDoMapaRef = React.useRef<
     (() => { lat: number; lng: number; zoom: number } | null) | null
@@ -12274,6 +12287,39 @@ export default function App() {
       {/* Ponteiro laser: segue ligado quando o painel abre o mapa */}
       <LaserPointer ativo={laserLigado} />
 
+      {/* LEGENDA DA ESCALA — cor sem régua é enfeite, não informação */}
+      {recortesTerritoriais.length > 0 && escalaTerritorial.length > 0 && (
+        <div className="absolute bottom-6 right-4 z-[1100] bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl border border-slate-200/80 px-3.5 py-3 font-sans pointer-events-none">
+          <p className="text-[10px] uppercase tracking-widest font-black text-slate-400">
+            {recortesTerritoriais[0]?.tipo === "setor" ? "Setores" : "Bairros"}
+          </p>
+          <div className="flex items-center gap-0.5 mt-1.5">
+            {escalaTerritorial.map((faixa) => (
+              <span
+                key={faixa.cor}
+                className="w-7 h-3 first:rounded-l-sm last:rounded-r-sm"
+                style={{ backgroundColor: faixa.cor }}
+              />
+            ))}
+          </div>
+          <div className="flex items-center justify-between mt-1 text-[9.5px] font-bold text-slate-500">
+            <span>menos</span>
+            <span>
+              {escalaTerritorial[escalaTerritorial.length - 1]?.corte.toLocaleString(
+                "pt-BR",
+              )}
+            </span>
+          </div>
+          {/* Sem dado tem cor própria: cinza hachurado nunca é "pouca gente". */}
+          <div className="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-slate-100">
+            <span className="w-3 h-3 rounded-sm bg-slate-300 border border-dashed border-slate-400" />
+            <span className="text-[9.5px] font-bold text-slate-500">
+              sem dado divulgado
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* INTELIGÊNCIA TERRITORIAL */}
       <InteligenciaTerritorial
         aberto={territorioAberto}
@@ -12300,6 +12346,9 @@ export default function App() {
         }
         centroDoMapa={() => lerVistaDoMapaRef.current?.() || null}
         onCirculoAnalisado={setCirculoAnalisado}
+        onRecortes={receberRecortes}
+        recorteEmFoco={recorteEmFoco}
+        onRecorteEmFoco={setRecorteEmFoco}
       />
 
       {/* PESQUISA DE ESTABELECIMENTOS */}
@@ -13815,6 +13864,15 @@ export default function App() {
           estabelecimentoEmFoco={lojaEmFoco}
           estabelecimentoDestacado={lojaDestacada}
           circuloAnalisado={circuloAnalisado}
+          recortesTerritoriais={recortesTerritoriais}
+          escalaTerritorial={escalaTerritorial}
+          recorteEmFoco={recorteEmFoco}
+          onRecorteSobOCursor={setRecorteEmFoco}
+          enquadrarRecortes={territorioAberto}
+          onRecorteClicado={(id) => {
+            setRecorteEmFoco(id);
+            setTerritorioAberto(true);
+          }}
           onEstabelecimentoSelecionado={(id) => {
             setLojaEmFoco(id);
             // O pino abre a ficha inteira; a lista fica aberta atrás, com o
