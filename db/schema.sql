@@ -144,6 +144,12 @@ create table if not exists public.operation_types (
 -- center guarda { lat, lng, assignedDeltas } e "assignedDeltas" guarda a mesma
 -- lista no nivel de cima - o app manda os dois no mesmo upsert, entao as duas
 -- colunas precisam existir.
+-- center tambem carrega o que a missao tem de extra e nao e coordenada:
+--   material  - arquivos de apoio
+--   turno     - 'manha' | 'tarde' | 'noite' (faixas em app_settings)
+--   priority  - id de priority_levels
+-- Fica no jsonb de proposito: missao nova funciona em banco que ja esta no ar,
+-- sem depender de migracao.
 create table if not exists public.panfletagem_areas (
   id                text primary key,
   title             text not null,
@@ -168,7 +174,9 @@ create table if not exists public.campaign_pins (
   id                text primary key,
   title             text not null,
   description       text,
-  position          jsonb not null,   -- { lat, lng, assignedDeltas }
+  -- { lat, lng, assignedDeltas, semLocal, material, turno, priority }
+  -- Ver a nota em panfletagem_areas.center: o extra da missao mora no jsonb.
+  position          jsonb not null,
   color             text,
   "iconType"        text,             -- id em operation_types
   active            boolean default true,
@@ -327,6 +335,13 @@ create unique index if not exists idx_member_devices_unico
 -- ----------------------------------------------------------------------------
 -- 8.5 app_settings - ajustes que o administrador muda em tela
 -- ----------------------------------------------------------------------------
+-- Chaves em uso:
+--   redirect_sem_link  - para onde vai quem abre o dominio sem link
+--   midia_galeria      - 'sim' libera a galeria do celular no check-in
+--   turnos_missao      - JSON com as faixas de manha, tarde e noite:
+--                        [{"id":"manha","inicio":"08:30","fim":"11:59"}, ...]
+--                        O fim entra no turno, e fim menor que inicio quer
+--                        dizer que a janela atravessa a meia-noite.
 create table if not exists public.app_settings (
   key        text primary key,
   value      text,

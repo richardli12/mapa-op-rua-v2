@@ -5,7 +5,13 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import { DatabaseService } from '../databaseClient';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2 } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, corDaDependencia, getCheckInPriority } from '../types';
-import { VisorDoMaterial } from './MaterialDaMissao';
+import {
+  VisorDoMaterial,
+  formatoDoMaterial,
+  rotuloDoMaterial
+} from './MaterialDaMissao';
+import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
+import { JanelaDeTurno, TURNOS_PADRAO, TurnoId } from '../turnos';
 import { buildOperationIconSvg } from '../operationIcons';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
@@ -362,6 +368,8 @@ interface MapContainerProps {
   operationTypes?: OperationType[];
   /** Níveis de prioridade criados pelo administrador. */
   priorityLevels?: PriorityLevel[];
+  /** O relógio da campanha, para a ficha dizer se o turno é agora. */
+  janelasDeTurno?: JanelaDeTurno[];
 
   /* ------------------------------------------------------------- régua ---
    * A régua é comandada pelo menu lateral: aqui o mapa só desenha o que
@@ -564,6 +572,7 @@ export default function MapContainer({
   onDeleteCheckIn,
   operationTypes = [],
   priorityLevels = [],
+  janelasDeTurno = TURNOS_PADRAO,
   rulerActive = false,
   rulerPoints = [],
   rulerColor = '#F58220',
@@ -1282,6 +1291,8 @@ export default function MapContainer({
         criadaEm: pin.createdAt,
         coords: { lat: pin.position.lat, lng: pin.position.lng },
         semLocal: !!pin.position?.semLocal,
+        turno: pin.position?.turno as TurnoId | undefined,
+        prioridade: pin.position?.priority,
         material: (pin.position?.material || []) as MaterialDeApoio[],
         pessoas: equipeDaMissao(ids),
         totalDesignados: ids.length,
@@ -1306,6 +1317,8 @@ export default function MapContainer({
       criadaEm: area.createdAt,
       coords: { lat: area.center.lat, lng: area.center.lng },
       semLocal: false,
+      turno: area.center?.turno as TurnoId | undefined,
+      prioridade: area.center?.priority,
       material: (area.center?.material || []) as MaterialDeApoio[],
       pessoas: equipeDaMissao(ids),
       totalDesignados: ids.length,
@@ -2793,6 +2806,21 @@ export default function MapContainer({
                   {missaoAberta.tipo === 'pin' ? 'Missão em ponto' : 'Missão em área'}
                 </span>
 
+                {missaoAberta.turno && (
+                  <EtiquetaDeTurno
+                    turno={missaoAberta.turno}
+                    janelas={janelasDeTurno}
+                    aoVivo
+                  />
+                )}
+
+                {(() => {
+                  const nivel = (priorityLevels || []).find(
+                    n => n.id === missaoAberta.prioridade
+                  );
+                  return nivel ? <EtiquetaDePrioridade nivel={nivel} /> : null;
+                })()}
+
                 {missaoAberta.prazo && (
                   <span
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider border ${
@@ -2924,13 +2952,13 @@ export default function MapContainer({
                         key={item.id}
                         type="button"
                         onClick={() => setMaterialAberto(indice)}
-                        title={`Abrir ${item.nome}`}
+                        title={`Abrir ${rotuloDoMaterial(item, indice + 1)}`}
                         className="group relative aspect-square rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 cursor-pointer transition-all hover:border-slate-300 hover:shadow-md active:scale-95"
                       >
                         {item.tipo === 'imagem' ? (
                           <img
                             src={item.url}
-                            alt={item.nome}
+                            alt={rotuloDoMaterial(item, indice + 1)}
                             referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
                           />
@@ -2948,8 +2976,9 @@ export default function MapContainer({
                             ) : (
                               <FileText className="w-6 h-6" style={{ color: missaoAberta.cor }} />
                             )}
-                            <span className="text-[9.5px] font-bold text-slate-500 leading-tight text-center line-clamp-2 break-all">
-                              {item.nome}
+                            <span className="text-[9.5px] font-bold text-slate-500 leading-tight text-center line-clamp-2">
+                              {rotuloDoMaterial(item, indice + 1)}
+                              {formatoDoMaterial(item) ? ` · ${formatoDoMaterial(item)}` : ''}
                             </span>
                           </span>
                         )}
@@ -3063,6 +3092,10 @@ export default function MapContainer({
       {missaoAberta && materialAberto !== null && missaoAberta.material[materialAberto] && (
         <VisorDoMaterial
           item={missaoAberta.material[materialAberto]}
+          rotulo={rotuloDoMaterial(
+            missaoAberta.material[materialAberto],
+            materialAberto + 1
+          )}
           aoFechar={() => setMaterialAberto(null)}
           posicao={{ atual: materialAberto + 1, total: missaoAberta.material.length }}
           aoAnterior={() =>

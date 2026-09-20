@@ -21,6 +21,17 @@ import {
   X
 } from 'lucide-react';
 import { CampaignPin, PanfletagemArea, OperationType, PriorityLevel } from '../types';
+import { IconeDoTurno } from './TurnoEPrioridade';
+import {
+  COR_DO_TURNO,
+  JanelaDeTurno,
+  NOME_DO_TURNO,
+  TURNOS,
+  TURNOS_PADRAO,
+  TurnoId,
+  janelaDoTurno,
+  turnoDeAgora
+} from '../turnos';
 
 /* ------------------------------------------------------------------ cores ---
  * A régua de cor do painel.
@@ -103,6 +114,9 @@ interface Props {
   operationTypes: OperationType[];
   priorityLevels: PriorityLevel[];
   pessoaDoCheckIn: (c: any) => PessoaResolvida;
+
+  /** O relógio da campanha, para a conta de missões falar em turnos. */
+  janelasDeTurno?: JanelaDeTurno[];
 
   /** Recorte ligado na barra de cima. Vazio quer dizer "desde sempre". */
   de: string;
@@ -498,6 +512,7 @@ export default function PainelDeCheckIns({
   operationTypes,
   priorityLevels,
   pessoaDoCheckIn,
+  janelasDeTurno = TURNOS_PADRAO,
   de,
   ate,
   rotuloDoPeriodo,
@@ -743,12 +758,21 @@ export default function PainelDeCheckIns({
       checkIns.filter(c => c.missionId).map(c => String(c.missionId))
     );
     const missoes = [
-      ...pins.map(p => ({ id: p.id, titulo: p.title, prazo: p.date, criada: p.createdAt })),
+      ...pins.map(p => ({
+        id: p.id,
+        titulo: p.title,
+        prazo: p.date,
+        criada: p.createdAt,
+        turno: p.position?.turno as TurnoId | undefined,
+        prioridade: p.position?.priority
+      })),
       ...areas.map(a => ({
         id: a.id,
         titulo: a.title,
         prazo: undefined as string | undefined,
-        criada: a.createdAt
+        criada: a.createdAt,
+        turno: a.center?.turno as TurnoId | undefined,
+        prioridade: a.center?.priority
       }))
     ];
     const situacaoDaMissao = (prazo?: string) => {
@@ -773,6 +797,32 @@ export default function PainelDeCheckIns({
     });
     atrasadasSemVolta.sort((a, b) => b.dias - a.dias);
     const cumpridas = missoes.filter(m => comCheckIn.has(m.id)).length;
+
+    /* ------------------------------------------- a agenda do dia ---
+     * Missão tem hora, e o gestor precisa ver o dia inteiro de uma vez: se
+     * a manhã está carregada e a tarde vazia, isso é decisão a tomar hoje,
+     * não relatório de fim de semana. A fatia que já voltou com check-in
+     * aparece separada — turno cheio de missão cumprida é outro assunto.
+     */
+    const porTurno = TURNOS.map(id => {
+      const doTurno = missoes.filter(m => m.turno === id);
+      return {
+        id,
+        total: doTurno.length,
+        cumpridas: doTurno.filter(m => comCheckIn.has(m.id)).length
+      };
+    });
+    const semTurno = missoes.filter(m => !m.turno).length;
+    const picoDoTurno = Math.max(1, ...porTurno.map(t => t.total));
+
+    const porPrioridadeDaMissao = niveisOrdenados
+      .map(n => ({
+        ...n,
+        total: missoes.filter(m => m.prioridade === n.id).length,
+        cumpridas: missoes.filter(m => m.prioridade === n.id && comCheckIn.has(m.id)).length
+      }))
+      .filter(n => n.total > 0);
+    const semPrioridadeNaMissao = missoes.filter(m => !m.prioridade).length;
 
     /* ---------------------------------------------- o que está pegando ---*/
     const urgentes = graves
@@ -822,6 +872,11 @@ export default function PainelDeCheckIns({
       contagemDeMissoes,
       atrasadasSemVolta,
       cumpridas,
+      porTurno,
+      semTurno,
+      picoDoTurno,
+      porPrioridadeDaMissao,
+      semPrioridadeNaMissao,
       urgentes,
       porNivel,
       semNivel
@@ -849,6 +904,11 @@ export default function PainelDeCheckIns({
     contagemDeMissoes,
     atrasadasSemVolta,
     cumpridas,
+    porTurno,
+    semTurno,
+    picoDoTurno,
+    porPrioridadeDaMissao,
+    semPrioridadeNaMissao,
     urgentes,
     porNivel,
     semNivel,
@@ -1590,6 +1650,127 @@ export default function PainelDeCheckIns({
                     )}
                   </div>
 
+
+                  {/* ------------------------------------ AGENDA DO DIA --- */}
+                  {(porTurno.some(t => t.total > 0) ||
+                    porPrioridadeDaMissao.length > 0) && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+                      {porTurno.some(t => t.total > 0) && (
+                        <div>
+                          <div className="flex items-baseline justify-between gap-2 mb-2">
+                            <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">
+                              Por turno
+                            </p>
+                            {turnoDeAgora(janelasDeTurno) && (
+                              <span className="text-[9.5px] font-black uppercase tracking-wider text-emerald-600">
+                                agora: {NOME_DO_TURNO[turnoDeAgora(janelasDeTurno)!]}
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {porTurno.map(t => {
+                              const eAgora = turnoDeAgora(janelasDeTurno) === t.id;
+                              const janela = janelaDoTurno(janelasDeTurno, t.id);
+                              const cor = COR_DO_TURNO[t.id];
+                              return (
+                                <div
+                                  key={t.id}
+                                  className={`rounded-xl border px-2.5 py-2 ${
+                                    eAgora ? 'bg-white' : 'bg-slate-50/60 border-slate-200'
+                                  }`}
+                                  style={
+                                    eAgora
+                                      ? { borderColor: `${cor}66`, boxShadow: `0 0 0 1px ${cor}22` }
+                                      : undefined
+                                  }
+                                  title={`${NOME_DO_TURNO[t.id]}: ${janela.inicio} às ${janela.fim}`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <IconeDoTurno
+                                      turno={t.id}
+                                      className="w-3 h-3 shrink-0"
+                                    />
+                                    <span
+                                      className="text-[10px] font-black uppercase tracking-wider truncate"
+                                      style={{ color: cor }}
+                                    >
+                                      {NOME_DO_TURNO[t.id]}
+                                    </span>
+                                  </span>
+                                  <span className="flex items-baseline gap-1 mt-1">
+                                    <span className="text-[18px] font-black text-[#0D233A] leading-none tabular-nums">
+                                      {t.total}
+                                    </span>
+                                    <span className="text-[9.5px] font-bold text-slate-400 leading-none">
+                                      {t.cumpridas > 0 ? `${t.cumpridas} com volta` : 'sem volta'}
+                                    </span>
+                                  </span>
+                                  <span className="block h-1.5 rounded-full bg-slate-100 overflow-hidden mt-1.5">
+                                    <span
+                                      className="block h-full rounded-full"
+                                      style={{
+                                        width: `${(t.total / picoDoTurno) * 100}%`,
+                                        backgroundColor: t.total > 0 ? cor : 'transparent'
+                                      }}
+                                    />
+                                  </span>
+                                  <span className="block text-[9px] font-bold text-slate-400 tabular-nums mt-1 leading-none">
+                                    {janela.inicio}–{janela.fim}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {semTurno > 0 && (
+                            <p className="text-[9.5px] font-semibold text-slate-400 mt-2 leading-snug">
+                              <span className="font-black text-slate-500">{semTurno}</span>{' '}
+                              {semTurno === 1 ? 'missão vale' : 'missões valem'} para qualquer
+                              horário — sem turno marcado, elas nunca sobem para o topo da
+                              tela de quem está na rua.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {porPrioridadeDaMissao.length > 0 && (
+                        <div>
+                          <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400 mb-1.5">
+                            Por prioridade
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {porPrioridadeDaMissao.map(n => (
+                              <span
+                                key={n.id}
+                                className="px-2.5 py-1.5 rounded-xl text-[10.5px] font-bold flex items-center gap-1.5 border bg-white border-slate-200 text-slate-600"
+                                title={`${n.cumpridas} de ${n.total} voltaram com check-in`}
+                              >
+                                <span
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{ backgroundColor: n.color }}
+                                />
+                                {n.label}
+                                <span className="font-black tabular-nums text-[#0D233A]">
+                                  {n.total}
+                                </span>
+                                <span className="text-[9.5px] font-bold text-slate-400">
+                                  · {n.cumpridas} com volta
+                                </span>
+                              </span>
+                            ))}
+                            {semPrioridadeNaMissao > 0 && (
+                              <span className="px-2.5 py-1.5 rounded-xl text-[10.5px] font-bold bg-slate-50 border border-slate-200 text-slate-500 flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-slate-300" />
+                                Sem prioridade
+                                <span className="font-black tabular-nums">
+                                  {semPrioridadeNaMissao}
+                                </span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {atrasadasSemVolta.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-100">
                       <p className="text-[9.5px] font-black uppercase tracking-widest text-rose-600 mb-1.5 flex items-center gap-1.5">

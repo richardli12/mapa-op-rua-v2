@@ -37,6 +37,18 @@ import {
   EditorDeMaterial,
   ItemMaterial,
 } from "./components/MaterialDaMissao";
+import {
+  EtiquetaDePrioridade,
+  EtiquetaDeTurno,
+  TurnoEPrioridadeDaMissao,
+} from "./components/TurnoEPrioridade";
+import {
+  CHAVE_TURNOS,
+  JanelaDeTurno,
+  TURNOS_PADRAO,
+  TurnoId,
+  lerTurnos,
+} from "./turnos";
 import { lerDispositivo } from "./services/dispositivo";
 import DispositivosMembroModal from "./components/DispositivosMembroModal";
 import ConfiguracoesAdmin, {
@@ -1443,6 +1455,27 @@ export default function App() {
     })();
   }, []);
 
+  /**
+   * O relógio da campanha.
+   *
+   * Vem do banco porque é do sistema, não do navegador de quem abriu. Até
+   * ele chegar valem os horários de fábrica — o formulário nunca fica sem
+   * turno para oferecer.
+   */
+  const [turnosDaCampanha, setTurnosDaCampanha] =
+    useState<JanelaDeTurno[]>(TURNOS_PADRAO);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const res = await DatabaseService.lerConfiguracao(CHAVE_TURNOS);
+      if (vivo && res.value) setTurnosDaCampanha(lerTurnos(res.value));
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
   // Quem digitou só o domínio de acesso, sem link, vai para fora do sistema.
   useEffect(() => {
     if (!ROTA_INICIAL.semLink) return;
@@ -1810,6 +1843,15 @@ export default function App() {
   // Id do Tipo de Operação escolhido para o ponto.
   const [pinIconType, setPinIconType] = useState<string>("");
   const [pinDate, setPinDate] = useState("");
+  /**
+   * Turno e prioridade da missão em edição.
+   *
+   * Um par só para ponto e área: as duas são a mesma missão vista de dois
+   * jeitos, e o formulário nunca mostra as duas ao mesmo tempo. Dois pares
+   * separados só dariam chance de salvar o de um lado com o valor do outro.
+   */
+  const [missaoTurno, setMissaoTurno] = useState<TurnoId | "">("");
+  const [missaoPrioridade, setMissaoPrioridade] = useState("");
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [pinCandidateId, setPinCandidateId] = useState<string>("");
 
@@ -3391,6 +3433,8 @@ export default function App() {
           lng: targetCoords.lng,
           assignedDeltas: selectedDeltas,
           ...(materialDaArea.length > 0 ? { material: materialDaArea } : {}),
+          ...(missaoTurno ? { turno: missaoTurno } : {}),
+          ...(missaoPrioridade ? { priority: missaoPrioridade } : {}),
         },
         radius: Number(areaRadius),
         color: areaColor,
@@ -3431,6 +3475,8 @@ export default function App() {
           lng: targetCoords.lng,
           assignedDeltas: selectedDeltas,
           ...(materialDaArea.length > 0 ? { material: materialDaArea } : {}),
+          ...(missaoTurno ? { turno: missaoTurno } : {}),
+          ...(missaoPrioridade ? { priority: missaoPrioridade } : {}),
         },
         radius: Number(areaRadius),
         color: areaColor,
@@ -3460,6 +3506,8 @@ export default function App() {
 
   const resetAreaForm = () => {
     setMaterialMissao([]);
+    setMissaoTurno("");
+    setMissaoPrioridade("");
     setEdicaoOriginal(null);
     setDefinindoRaio(false);
     setNomeandoRaio(null);
@@ -3851,6 +3899,8 @@ export default function App() {
       assignedDeltas: selectedDeltas,
       ...(semLocal ? { semLocal: true } : {}),
       ...(material.length > 0 ? { material } : {}),
+      ...(missaoTurno ? { turno: missaoTurno } : {}),
+      ...(missaoPrioridade ? { priority: missaoPrioridade } : {}),
     };
 
     if (editingPinId) {
@@ -3953,6 +4003,8 @@ export default function App() {
 
   const resetPinForm = () => {
     setMaterialMissao([]);
+    setMissaoTurno("");
+    setMissaoPrioridade("");
     setEdicaoOriginal(null);
     setPinTitle("");
     setPinDescription("");
@@ -4065,6 +4117,8 @@ export default function App() {
     setPickedCoords(centro);
     setAreaCandidateId(area.candidateId || "");
     setSelectedDeltas(area.assignedDeltas || area.center?.assignedDeltas || []);
+    setMissaoTurno(area.center?.turno || "");
+    setMissaoPrioridade(area.center?.priority || "");
     setMaterialMissao(
       material.map((m) => ({
         ...m,
@@ -4100,6 +4154,8 @@ export default function App() {
     setPinColor(pin.color);
     setPinIconType(pin.iconType);
     setPinDate(pin.date || "");
+    setMissaoTurno(pin.position?.turno || "");
+    setMissaoPrioridade(pin.position?.priority || "");
     // Só a coordenada: `position` carrega material e equipe junto, e guardá-lo
     // inteiro aqui fazia o que foi removido no formulário voltar ao salvar.
     setPickedCoords(local);
@@ -4541,6 +4597,10 @@ export default function App() {
     else setMapFilter("nada");
   };
 
+  /** O nível de prioridade que a missão guarda, quando ele ainda existe. */
+  const nivelDaMissao = (id?: string) =>
+    id ? niveisDePrioridade.find((n) => n.id === id) : undefined;
+
   /** Quantos filtros do painel estão ligados, para o aviso no botão do mapa. */
   const filtrosDeCheckInLigados =
     filtroPessoas.length + filtroNiveis.length + filtroTiposAcao.length;
@@ -4671,6 +4731,8 @@ export default function App() {
         lng: a.center?.lng ?? 0,
         raio: a.radius,
         material: a.center?.material || [],
+        turno: a.center?.turno,
+        priority: a.center?.priority,
         createdAt: a.createdAt,
       }));
 
@@ -4691,6 +4753,8 @@ export default function App() {
         tipoLabel: rotuloDoTipo(p.iconType),
         semLocal: p.position?.semLocal === true,
         material: p.position?.material || [],
+        turno: p.position?.turno,
+        priority: p.position?.priority,
         createdAt: p.createdAt,
       }));
 
@@ -8208,6 +8272,7 @@ export default function App() {
             padraoRedirecionamento={REDIRECIONAMENTO_PADRAO}
             dominiosDeAcesso={DOMINIOS_DE_ACESSO}
             notify={triggerNotification}
+            onTurnosMudarem={setTurnosDaCampanha}
           />
         )}
 
@@ -13450,6 +13515,24 @@ export default function App() {
                                   </span>
                                 ) : null}
                               </p>
+                              {(area.center?.turno ||
+                                nivelDaMissao(area.center?.priority)) && (
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 select-none">
+                                  {area.center?.turno && (
+                                    <EtiquetaDeTurno
+                                      turno={area.center.turno}
+                                      janelas={turnosDaCampanha}
+                                      tamanho="mini"
+                                    />
+                                  )}
+                                  {nivelDaMissao(area.center?.priority) && (
+                                    <EtiquetaDePrioridade
+                                      nivel={nivelDaMissao(area.center?.priority)!}
+                                      tamanho="mini"
+                                    />
+                                  )}
+                                </div>
+                              )}
                             </div>
 
                             {/* Edition and deletion triggers */}
@@ -13656,6 +13739,25 @@ export default function App() {
                               <span>
                                 Data: {pin.date.split("-").reverse().join("/")}
                               </span>
+                            </div>
+                          )}
+
+                          {(pin.position?.turno ||
+                            nivelDaMissao(pin.position?.priority)) && (
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5 select-none">
+                              {pin.position?.turno && (
+                                <EtiquetaDeTurno
+                                  turno={pin.position.turno}
+                                  janelas={turnosDaCampanha}
+                                  tamanho="mini"
+                                />
+                              )}
+                              {nivelDaMissao(pin.position?.priority) && (
+                                <EtiquetaDePrioridade
+                                  nivel={nivelDaMissao(pin.position?.priority)!}
+                                  tamanho="mini"
+                                />
+                              )}
                             </div>
                           )}
 
@@ -13906,6 +14008,7 @@ export default function App() {
           }}
           operationTypes={operationTypes}
             priorityLevels={priorityLevels}
+            janelasDeTurno={turnosDaCampanha}
             rulerActive={reguaLigada}
             rulerPoints={pontosRegua}
             rulerColor={corRegua}
@@ -14956,6 +15059,25 @@ export default function App() {
                           />
                         </div>
 
+                        {/*
+                          Quando, dentro do dia, e o quanto importa.
+
+                          O prazo diz o dia; o turno diz a parte do dia. Juntos
+                          eles decidem a ordem em que a equipe vê as missões na
+                          rua — por isso ficam colados, e não num canto do
+                          formulário.
+                        */}
+                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                          <TurnoEPrioridadeDaMissao
+                            janelas={turnosDaCampanha}
+                            turno={missaoTurno}
+                            onTurno={setMissaoTurno}
+                            prioridade={missaoPrioridade}
+                            onPrioridade={setMissaoPrioridade}
+                            niveis={niveisDePrioridade}
+                          />
+                        </div>
+
                         <div>
                           <div className="flex justify-between items-center mb-1 select-none">
                             <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400">
@@ -15261,6 +15383,25 @@ export default function App() {
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
                             />
                           </div>
+                        </div>
+
+                        {/*
+                          Quando, dentro do dia, e o quanto importa.
+
+                          O prazo diz o dia; o turno diz a parte do dia. Juntos
+                          eles decidem a ordem em que a equipe vê as missões na
+                          rua — por isso ficam colados, e não num canto do
+                          formulário.
+                        */}
+                        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                          <TurnoEPrioridadeDaMissao
+                            janelas={turnosDaCampanha}
+                            turno={missaoTurno}
+                            onTurno={setMissaoTurno}
+                            prioridade={missaoPrioridade}
+                            onPrioridade={setMissaoPrioridade}
+                            niveis={niveisDePrioridade}
+                          />
                         </div>
 
                         <div>
@@ -15862,6 +16003,7 @@ export default function App() {
         )}
         priorityLevels={niveisDePrioridade}
         pessoaDoCheckIn={pessoaDoCheckIn}
+        janelasDeTurno={turnosDaCampanha}
         de={filtroDe}
         ate={filtroAte}
         rotuloDoPeriodo={rotuloDoPeriodo(filtroDe, filtroAte)}
