@@ -1107,13 +1107,13 @@ export default function MapContainer({
     // Phase 1: Try shifting based on candidate's own mapped coordinates (using their pins, areas, checkins)
     const candPoints: L.LatLng[] = [];
     areas.forEach(a => {
-      if (a.candidateId === selectedCandidateId && a.active) {
+      if (a.candidateId === selectedCandidateId) {
         candPoints.push(L.latLng(a.center.lat, a.center.lng));
       }
     });
 
     pins.forEach(p => {
-      if (p.candidateId === selectedCandidateId && p.active) {
+      if (p.candidateId === selectedCandidateId) {
         candPoints.push(L.latLng(p.position.lat, p.position.lng));
       }
     });
@@ -1204,14 +1204,14 @@ export default function MapContainer({
 
     // Search inside areas first
     const selectedArea = areas.find(a => a.id === selectedId);
-    if (selectedArea && selectedArea.active) {
+    if (selectedArea) {
       map.setView([selectedArea.center.lat, selectedArea.center.lng], 14, { animate: true });
       return;
     }
 
     // Search in pins
     const selectedPin = pins.find(p => p.id === selectedId);
-    if (selectedPin && selectedPin.active) {
+    if (selectedPin) {
       map.setView([selectedPin.position.lat, selectedPin.position.lng], 15, { animate: true });
       return;
     }
@@ -1365,7 +1365,6 @@ export default function MapContainer({
     }
 
     areas.forEach(area => {
-      if (!area.active) return;
       // Em edição: quem aparece no lugar dela é o fantasma arrastável.
       if (itemEmEdicaoId && area.id === itemEmEdicaoId) return;
 
@@ -1452,7 +1451,6 @@ export default function MapContainer({
     }
 
     pins.forEach(pin => {
-      if (!pin.active) return;
       // Em edição: quem aparece no lugar dele é o fantasma arrastável.
       if (itemEmEdicaoId && pin.id === itemEmEdicaoId) return;
 

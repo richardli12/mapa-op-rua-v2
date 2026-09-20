@@ -3394,7 +3394,7 @@ export default function App() {
         },
         radius: Number(areaRadius),
         color: areaColor,
-        active: existingArea ? existingArea.active : true,
+        active: true,
         teamSize: Number(areaTeamSize) || 0,
         contactName: areaContact,
         createdAt: existingArea
@@ -3863,7 +3863,7 @@ export default function App() {
         position: posicao,
         color: pinColor,
         iconType: pinIconType,
-        active: existingPin ? existingPin.active : true,
+        active: true,
         createdAt: existingPin
           ? existingPin.createdAt
           : new Date().toISOString(),
@@ -3981,44 +3981,14 @@ export default function App() {
     setModalRuaDropdownOpen(false);
   };
 
-  // Handler for list actions
-  const toggleAreaActive = (id: string) => {
-    setAreas((prev) =>
-      prev.map((a) => {
-        if (a.id === id) {
-          const updated = { ...a, active: !a.active };
-          if (isDatabaseConfigured) {
-            DatabaseService.upsertArea(updated).then((res) => {
-              if (!res.success)
-                triggerNotification(`Banco de dados: ${res.error}`, "error");
-            });
-          }
-          return updated;
-        }
-        return a;
-      }),
-    );
-    triggerNotification("Visibilidade da área alterada", "info");
-  };
-
-  const togglePinActive = (id: string) => {
-    setPins((prev) =>
-      prev.map((p) => {
-        if (p.id === id) {
-          const updated = { ...p, active: !p.active };
-          if (isDatabaseConfigured) {
-            DatabaseService.upsertPin(updated).then((res) => {
-              if (!res.success)
-                triggerNotification(`Banco de dados: ${res.error}`, "error");
-            });
-          }
-          return updated;
-        }
-        return p;
-      }),
-    );
-    triggerNotification("Visibilidade do pin alterada", "info");
-  };
+  /*
+   * Missão não se esconde.
+   *
+   * O olho de "ocultar" tirava a missão do mapa sem tirá-la do sistema: ela
+   * continuava valendo para quem a recebeu, mas sumia de quem manda, e o
+   * único aviso era um selo cinza dentro do próprio cartão que já não
+   * aparecia. Quem não quer mais a missão a exclui; quem quer, vê.
+   */
 
   const deleteArea = (id: string) => {
     const area = areas.find((a) => a.id === id);
@@ -4583,13 +4553,13 @@ export default function App() {
 
   // Statistics Computations
   const totalVolunteers = filteredAreas.reduce(
-    (sum, a) => sum + (a.active ? a.teamSize || 0 : 0),
+    (sum, a) => sum + (a.teamSize || 0),
     0,
   );
-  const totalStrategicPlaces = filteredPins.filter((p) => p.active).length;
+  const totalStrategicPlaces = filteredPins.length;
   // Area in square meters: pi * r^2
   const totalAreaCoveredM2 = filteredAreas.reduce(
-    (sum, a) => sum + (a.active ? Math.PI * Math.pow(a.radius, 2) : 0),
+    (sum, a) => sum + Math.PI * Math.pow(a.radius, 2),
     0,
   );
   const totalAreaCoveredKm2 = (totalAreaCoveredM2 / 1000000).toFixed(2);
@@ -4653,13 +4623,11 @@ export default function App() {
       Array.isArray(assigned) && assigned.includes(authenticatedSupporter.id);
     const mineAreas = areas.filter(
       (a) =>
-        a.active &&
         a.candidateId === checkInCandidateId &&
         isMine(a.assignedDeltas || a.center?.assignedDeltas),
     ).length;
     const minePins = pins.filter(
       (p) =>
-        p.active &&
         p.candidateId === checkInCandidateId &&
         isMine(p.assignedDeltas || p.position?.assignedDeltas),
     ).length;
@@ -4689,7 +4657,6 @@ export default function App() {
     const deAreas: MissaoDoCampo[] = areas
       .filter(
         (a) =>
-          a.active &&
           a.candidateId === checkInCandidateId &&
           minha(a.assignedDeltas || a.center?.assignedDeltas),
       )
@@ -4710,7 +4677,6 @@ export default function App() {
     const dePinos: MissaoDoCampo[] = pins
       .filter(
         (p) =>
-          p.active &&
           p.candidateId === checkInCandidateId &&
           minha(p.assignedDeltas || p.position?.assignedDeltas),
       )
@@ -6210,12 +6176,12 @@ export default function App() {
                     );
                   }
 
-                  // Get both active areas and pins
+                  // Get both areas and pins
                   const candidateAreas = areas.filter(
-                    (a) => a.active && a.candidateId === checkInCandidateId,
+                    (a) => a.candidateId === checkInCandidateId,
                   );
                   const candidatePins = pins.filter(
-                    (p) => p.active && p.candidateId === checkInCandidateId,
+                    (p) => p.candidateId === checkInCandidateId,
                   );
 
                   // Filter by user authentication - show ONLY explicitly assigned missions
@@ -13142,7 +13108,7 @@ export default function App() {
               <Users className="w-3.5 h-3.5 text-blue-500" /> Equipes
             </div>
             <p className="text-lg font-extrabold text-slate-900 mt-0.5">
-              {areas.filter((a) => a.active).length}
+              {areas.length}
             </p>
           </div>
           <div className="p-3">
@@ -13486,27 +13452,8 @@ export default function App() {
                               </p>
                             </div>
 
-                            {/* View toggle and deletion triggers */}
+                            {/* Edition and deletion triggers */}
                             <div className="flex items-center gap-1 opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleAreaActive(area.id);
-                                }}
-                                className={`p-1 hover:bg-slate-100 rounded text-slate-400 transition-colors ${!area.active ? "text-red-500" : "hover:text-slate-600"}`}
-                                title={
-                                  area.active
-                                    ? "Ocultar do mapa"
-                                    : "Exibir no mapa"
-                                }
-                              >
-                                {area.active ? (
-                                  <Eye className="w-3.5 h-3.5" />
-                                ) : (
-                                  <EyeOff className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -13587,11 +13534,6 @@ export default function App() {
                             );
                           })()}
 
-                          {!area.active && (
-                            <div className="absolute top-2 right-2 flex items-center gap-1 text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100 font-bold uppercase select-none">
-                              <EyeOff className="w-3 h-3" /> Inativo
-                            </div>
-                          )}
                         </div>
                       );
                     })
@@ -13687,21 +13629,6 @@ export default function App() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  togglePinActive(pin.id);
-                                }}
-                                className={`p-1 hover:bg-slate-100 rounded text-slate-400 transition-colors ${!pin.active ? "text-red-500" : "hover:text-slate-600"}`}
-                                title={pin.active ? "Ocultar" : "Exibir"}
-                              >
-                                {pin.active ? (
-                                  <Eye className="w-3.5 h-3.5" />
-                                ) : (
-                                  <EyeOff className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
                                   startEditPin(pin);
                                 }}
                                 className="p-1 hover:bg-slate-100 text-slate-400 hover:text-blue-600 rounded transition-colors"
@@ -13772,11 +13699,6 @@ export default function App() {
                             );
                           })()}
 
-                          {!pin.active && (
-                            <div className="absolute top-2 right-2 flex items-center gap-1 text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100 font-bold uppercase select-none">
-                              <EyeOff className="w-3.5 h-3.5" /> Ocultado
-                            </div>
-                          )}
                         </div>
                       );
                     })
