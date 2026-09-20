@@ -83,6 +83,56 @@ const relogio = (segundos?: number) => {
   return `${m}:${String(s).padStart(2, '0')}`;
 };
 
+/**
+ * O nome que aparece na tela — nunca o do arquivo.
+ *
+ * "WhatsApp Image 2026-09-20 at 12.43.09.jpeg" não diz nada a quem está na
+ * rua e ainda entrega, no meio do sistema, o aplicativo, a data e a hora de
+ * quem mandou. O que serve é o que a coisa é, na ordem em que foi anexada:
+ * Foto 2, Documento 1, Recado gravado. O nome de origem não é mostrado em
+ * lugar nenhum, nem no visor, nem no chip, nem na dica do mouse.
+ */
+export const rotuloDoMaterial = (item: MaterialDeApoio, indice?: number) => {
+  const n = indice && indice > 0 ? ` ${indice}` : '';
+  if (item.tipo === 'audio') return 'Recado gravado';
+  if (item.tipo === 'imagem') return `Foto${n}`;
+  if (item.tipo === 'video') return `Vídeo${n}`;
+  return `Documento${n}`;
+};
+
+/** O formato — PDF, XLSX — que é informação útil, ao contrário do nome. */
+export const formatoDoMaterial = (item: MaterialDeApoio) => {
+  const alvo = (item.storagePath || item.url || '').split(/[?#]/)[0];
+  const ext = alvo.includes('.') ? alvo.split('.').pop() || '' : '';
+  return /^[a-z0-9]{1,5}$/i.test(ext) ? ext.toUpperCase() : '';
+};
+
+/** O arquivo desce para o aparelho com o mesmo rótulo da tela. */
+const nomeParaBaixar = (item: MaterialDeApoio, indice?: number) => {
+  const formato = formatoDoMaterial(item).toLowerCase();
+  const rotulo = rotuloDoMaterial(item, indice);
+  return formato ? `${rotulo}.${formato}` : rotulo;
+};
+
+/**
+ * A ordem de cada arquivo dentro do seu tipo.
+ *
+ * Só numera quando há mais de um: "Foto" sozinha não precisa virar "Foto 1".
+ */
+const numerarPorTipo = (itens: MaterialDeApoio[]) => {
+  const total: Record<string, number> = {};
+  itens.forEach(i => {
+    total[i.tipo] = (total[i.tipo] || 0) + 1;
+  });
+  const visto: Record<string, number> = {};
+  const mapa: Record<string, number> = {};
+  itens.forEach(i => {
+    visto[i.tipo] = (visto[i.tipo] || 0) + 1;
+    mapa[i.id] = total[i.tipo] > 1 ? visto[i.tipo] : 0;
+  });
+  return mapa;
+};
+
 const IconeDoTipo = ({ tipo, className }: { tipo: MaterialDeApoio['tipo']; className?: string }) =>
   tipo === 'imagem' ? (
     <ImagemIcone className={className} />
@@ -158,7 +208,7 @@ export function EditorDeMaterial({ itens, onMudar, notificar, ligado }: EditorPr
   ) => {
     if (file.size > TETO_MB * 1024 * 1024) {
       notificar(
-        `"${file.name}" tem ${tamanhoCurto(file.size)}. O limite é ${TETO_MB} MB — acima disso, quem está na rua não consegue abrir.`,
+        `Este arquivo tem ${tamanhoCurto(file.size)}. O limite é ${TETO_MB} MB — acima disso, quem está na rua não consegue abrir.`,
         'error'
       );
       return;
@@ -170,9 +220,9 @@ export function EditorDeMaterial({ itens, onMudar, notificar, ligado }: EditorPr
       id,
       tipo,
       url: '',
-      // O gravador batiza o arquivo com um carimbo de tempo; quem lê na rua
-      // merece um nome, não um número.
-      nome: nomeVisivel || file.name || 'Arquivo',
+      // O nome de origem morre aqui: nem é guardado. O que a missão carrega
+      // é o rótulo que a tela mostra.
+      nome: nomeVisivel || rotuloDoMaterial({ tipo } as MaterialDeApoio),
       tamanho: file.size,
       duracao,
       previa,
@@ -254,6 +304,7 @@ export function EditorDeMaterial({ itens, onMudar, notificar, ligado }: EditorPr
   };
 
   const prontos = itens.filter(i => i.estado === 'pronto').length;
+  const numeracao = numerarPorTipo(itens);
 
   return (
     <div className="space-y-2.5">
@@ -353,52 +404,56 @@ export function EditorDeMaterial({ itens, onMudar, notificar, ligado }: EditorPr
 
       {itens.length > 0 && (
         <ul className="space-y-1.5">
-          {itens.map(item => (
-            <li
-              key={item.id}
-              className="flex items-center gap-2.5 px-2.5 py-2 bg-white border border-slate-200 rounded-xl"
-            >
-              <span className="w-8 h-8 rounded-lg bg-slate-100 shrink-0 overflow-hidden flex items-center justify-center">
-                {item.tipo === 'imagem' && (item.previa || item.url) ? (
-                  <img
-                    src={item.previa || item.url}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <IconeDoTipo tipo={item.tipo} className="w-3.5 h-3.5 text-slate-400" />
-                )}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[11.5px] font-bold text-slate-700 truncate">
-                  {item.nome}
-                </span>
-                <span className="block text-[10px] font-semibold text-slate-400">
-                  {item.estado === 'enviando'
-                    ? `Enviando… ${item.progresso}%`
-                    : item.estado === 'erro'
-                      ? item.erro || 'Falhou no envio'
-                      : [
-                          item.tipo === 'audio' ? relogio(item.duracao) : '',
-                          tamanhoCurto(item.tamanho)
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                </span>
-              </span>
-              {item.estado === 'enviando' && (
-                <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin shrink-0" />
-              )}
-              <button
-                type="button"
-                onClick={() => remover(item.id)}
-                className="shrink-0 p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
-                title="Tirar da missão"
+          {itens.map(item => {
+            const numero = numeracao[item.id];
+            return (
+              <li
+                key={item.id}
+                className="flex items-center gap-2.5 px-2.5 py-2 bg-white border border-slate-200 rounded-xl"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </li>
-          ))}
+                <span className="w-8 h-8 rounded-lg bg-slate-100 shrink-0 overflow-hidden flex items-center justify-center">
+                  {item.tipo === 'imagem' && (item.previa || item.url) ? (
+                    <img
+                      src={item.previa || item.url}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <IconeDoTipo tipo={item.tipo} className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[11.5px] font-bold text-slate-700 truncate">
+                    {rotuloDoMaterial(item, numero)}
+                  </span>
+                  <span className="block text-[10px] font-semibold text-slate-400">
+                    {item.estado === 'enviando'
+                      ? `Enviando… ${item.progresso}%`
+                      : item.estado === 'erro'
+                        ? item.erro || 'Falhou no envio'
+                        : [
+                            item.tipo === 'audio' ? relogio(item.duracao) : '',
+                            item.tipo === 'documento' ? formatoDoMaterial(item) : '',
+                            tamanhoCurto(item.tamanho)
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                  </span>
+                </span>
+                {item.estado === 'enviando' && (
+                  <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin shrink-0" />
+                )}
+                <button
+                  type="button"
+                  onClick={() => remover(item.id)}
+                  className="shrink-0 p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
+                  title="Tirar da missão"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -415,8 +470,7 @@ export function EditorDeMaterial({ itens, onMudar, notificar, ligado }: EditorPr
 // ------------------------------------------------------------------ campo
 
 /** PDF o próprio navegador abre embutido; o resto do Office, não. */
-const ePdf = (item: MaterialDeApoio) =>
-  /\.pdf($|[?#])/i.test(item.url) || /\.pdf$/i.test(item.nome || '');
+const ePdf = (item: MaterialDeApoio) => formatoDoMaterial(item) === 'PDF';
 
 /**
  * O material aberto sem sair do sistema.
@@ -431,12 +485,15 @@ const ePdf = (item: MaterialDeApoio) =>
  */
 export function VisorDoMaterial({
   item,
+  rotulo,
   aoFechar,
   aoAnterior,
   aoProximo,
   posicao
 }: {
   item: MaterialDeApoio;
+  /** O rótulo já numerado pela lista de onde o arquivo veio. */
+  rotulo?: string;
   aoFechar: () => void;
   /**
    * Andar pelo material sem fechar e reabrir.
@@ -449,6 +506,9 @@ export function VisorDoMaterial({
   aoProximo?: () => void;
   posicao?: { atual: number; total: number };
 }) {
+  const nome = rotulo || rotuloDoMaterial(item);
+  const paraBaixar = nomeParaBaixar(item);
+
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
       if (e.key === 'Escape') aoFechar();
@@ -463,7 +523,7 @@ export function VisorDoMaterial({
     item.tipo === 'imagem' ? (
       <img
         src={item.url}
-        alt={item.nome}
+        alt={nome}
         className="max-w-full max-h-full object-contain"
         onClick={e => e.stopPropagation()}
       />
@@ -482,7 +542,7 @@ export function VisorDoMaterial({
         onClick={e => e.stopPropagation()}
       >
         <p className="text-[12px] font-black text-slate-700 text-center">
-          {item.nome}
+          {nome}
           {item.duracao ? ` · ${relogio(item.duracao)}` : ''}
         </p>
         <audio src={item.url} controls autoPlay className="w-full" />
@@ -490,7 +550,7 @@ export function VisorDoMaterial({
     ) : ePdf(item) ? (
       <iframe
         src={item.url}
-        title={item.nome}
+        title={nome}
         className="w-full h-full bg-white rounded-xl"
         onClick={e => e.stopPropagation()}
       />
@@ -505,14 +565,17 @@ export function VisorDoMaterial({
         onClick={e => e.stopPropagation()}
       >
         <FileText className="w-8 h-8 text-slate-400 mx-auto" />
-        <p className="text-[12.5px] font-black text-slate-700 break-words">{item.nome}</p>
+        <p className="text-[12.5px] font-black text-slate-700 break-words">
+          {nome}
+          {formatoDoMaterial(item) ? ` · ${formatoDoMaterial(item)}` : ''}
+        </p>
         <p className="text-[11px] text-slate-400 leading-snug">
           Este formato não abre aqui dentro. Baixe para ver no aplicativo do
           seu aparelho — a tela continua aberta atrás.
         </p>
         <a
           href={item.url}
-          download={item.nome}
+          download={paraBaixar}
           className="inline-flex items-center justify-center gap-1.5 w-full px-3 py-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider"
         >
           <Download className="w-3.5 h-3.5" />
@@ -528,7 +591,7 @@ export function VisorDoMaterial({
     >
       <div className="absolute top-0 inset-x-0 h-12 flex items-center gap-2 px-3">
         <span className="min-w-0 flex-1 text-[11.5px] font-bold text-white/90 truncate">
-          {item.nome}
+          {nome}
         </span>
         {posicao && posicao.total > 1 && (
           <span className="text-[11px] font-black text-white/70 tabular-nums shrink-0">
@@ -537,7 +600,7 @@ export function VisorDoMaterial({
         )}
         <a
           href={item.url}
-          download={item.nome}
+          download={paraBaixar}
           onClick={e => e.stopPropagation()}
           aria-label="Baixar"
           title="Baixar"
@@ -603,6 +666,8 @@ export function MaterialDaMissao({ itens }: { itens: MaterialDeApoio[] }) {
   const visuais = prontos.filter(i => i.tipo === 'imagem' || i.tipo === 'video');
   const audios = prontos.filter(i => i.tipo === 'audio');
   const documentos = prontos.filter(i => i.tipo === 'documento');
+  const numeracao = numerarPorTipo(prontos);
+  const rotuloDe = (item: MaterialDeApoio) => rotuloDoMaterial(item, numeracao[item.id]);
 
   const abrir = (e: React.MouseEvent, item: MaterialDeApoio) => {
     // O cartão da missão escuta o clique: abrir o material não pode
@@ -625,11 +690,11 @@ export function MaterialDaMissao({ itens }: { itens: MaterialDeApoio[] }) {
               key={item.id}
               type="button"
               onClick={e => abrir(e, item)}
-              title={item.nome}
+              title={rotuloDe(item)}
               className="relative w-14 h-14 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 shrink-0 block cursor-pointer"
             >
               {item.tipo === 'imagem' ? (
-                <img src={item.url} alt={item.nome} className="w-full h-full object-cover" />
+                <img src={item.url} alt={rotuloDe(item)} className="w-full h-full object-cover" />
               ) : (
                 <video src={item.url} preload="metadata" className="w-full h-full object-cover" />
               )}
@@ -659,19 +724,31 @@ export function MaterialDaMissao({ itens }: { itens: MaterialDeApoio[] }) {
               key={item.id}
               type="button"
               onClick={e => abrir(e, item)}
-              title={item.nome}
+              title={rotuloDe(item)}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 max-w-full cursor-pointer"
             >
               <FileText className="w-3 h-3 text-slate-500 shrink-0" />
               <span className="text-[10.5px] font-bold text-slate-600 truncate max-w-[150px]">
-                {item.nome}
+                {rotuloDe(item)}
+                {formatoDoMaterial(item) ? (
+                  <span className="text-slate-400 font-semibold">
+                    {' · '}
+                    {formatoDoMaterial(item)}
+                  </span>
+                ) : null}
               </span>
             </button>
           ))}
         </div>
       )}
 
-      {aberto && <VisorDoMaterial item={aberto} aoFechar={() => setAberto(null)} />}
+      {aberto && (
+        <VisorDoMaterial
+          item={aberto}
+          rotulo={rotuloDe(aberto)}
+          aoFechar={() => setAberto(null)}
+        />
+      )}
     </div>
   );
 }
