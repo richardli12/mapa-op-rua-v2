@@ -28,6 +28,10 @@ import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import { Estabelecimento } from "./services/estabelecimentos";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat, { MissaoDoCampo } from "./components/CheckInChat";
+import {
+  EditorDeMaterial,
+  ItemMaterial,
+} from "./components/MaterialDaMissao";
 import { lerDispositivo } from "./services/dispositivo";
 import DispositivosMembroModal from "./components/DispositivosMembroModal";
 import ConfiguracoesAdmin, {
@@ -1642,6 +1646,14 @@ export default function App() {
   const [creationLocationMode, setCreationLocationMode] = useState<
     "ask" | "search" | "map" | "sem" | null
   >(null);
+  /**
+   * Material de apoio da missão em edição, área ou ponto.
+   *
+   * Um estado só para os dois formulários porque só um deles fica aberto por
+   * vez, e porque o arquivo já subiu para o Storage antes de a missão existir:
+   * quem desiste no meio precisa de alguém para apagar o que ficou.
+   */
+  const [materialMissao, setMaterialMissao] = useState<ItemMaterial[]>([]);
   const [isResolvingPickedAddress, setIsResolvingPickedAddress] =
     useState(false);
   const [pickedAddressLabel, setPickedAddressLabel] = useState<string | null>(
@@ -3248,6 +3260,7 @@ export default function App() {
     const targetCoords = pickedCoords || { lat: -9.6548, lng: -35.715 }; // Default Maceió Centro
 
     const titulo = areaTitle.trim() || nomePadraoDaArea();
+    const materialDaArea = materialParaSalvar();
 
     if (editingAreaId) {
       // Edit existing
@@ -3257,7 +3270,13 @@ export default function App() {
         title: titulo,
         description: areaDescription,
         bairro: areaBairro,
-        center: { ...targetCoords, assignedDeltas: selectedDeltas },
+        center: {
+          // Só lat e lng: ver o comentário em savePin.
+          lat: targetCoords.lat,
+          lng: targetCoords.lng,
+          assignedDeltas: selectedDeltas,
+          ...(materialDaArea.length > 0 ? { material: materialDaArea } : {}),
+        },
         radius: Number(areaRadius),
         color: areaColor,
         active: existingArea ? existingArea.active : true,
@@ -3290,7 +3309,13 @@ export default function App() {
         title: titulo,
         description: areaDescription.trim(),
         bairro: areaBairro,
-        center: { ...targetCoords, assignedDeltas: selectedDeltas },
+        center: {
+          // Só lat e lng: ver o comentário em savePin.
+          lat: targetCoords.lat,
+          lng: targetCoords.lng,
+          assignedDeltas: selectedDeltas,
+          ...(materialDaArea.length > 0 ? { material: materialDaArea } : {}),
+        },
         radius: Number(areaRadius),
         color: areaColor,
         active: true,
@@ -3318,6 +3343,7 @@ export default function App() {
   };
 
   const resetAreaForm = () => {
+    setMaterialMissao([]);
     setDefinindoRaio(false);
     setNomeandoRaio(null);
     setAreaTitle("");
@@ -3677,10 +3703,15 @@ export default function App() {
      * quem lê é `position.semLocal`, nunca a lat/lng deste caso.
      */
     const semLocal = creationLocationMode === "sem";
+    const material = materialParaSalvar();
+    // Só lat e lng do que veio: na edição `pickedCoords` é o `position` antigo
+    // inteiro, e espalhá-lo faria o material removido voltar sozinho.
     const posicao = {
-      ...targetCoords,
+      lat: targetCoords.lat,
+      lng: targetCoords.lng,
       assignedDeltas: selectedDeltas,
       ...(semLocal ? { semLocal: true } : {}),
+      ...(material.length > 0 ? { material } : {}),
     };
 
     if (editingPinId) {
@@ -3745,7 +3776,38 @@ export default function App() {
     resetPinForm();
   };
 
+  /**
+   * Larga o material que subiu e não virou missão.
+   *
+   * Cancelar o formulário sem isto deixa o arquivo no Storage para sempre,
+   * sem nada que o referencie. Salvar não passa por aqui: lá o material fica.
+   */
+  const descartarMaterialPendente = () => {
+    const caminhos = materialMissao
+      .filter((m) => !m.jaSalvo)
+      .map((m) => m.storagePath)
+      .filter(Boolean) as string[];
+    if (caminhos.length > 0) DatabaseService.removerArquivosStorage(caminhos);
+    materialMissao.forEach((m) => m.previa && URL.revokeObjectURL(m.previa));
+    setMaterialMissao([]);
+  };
+
+  /** O material pronto, no formato que a missão guarda. */
+  const materialParaSalvar = () =>
+    materialMissao
+      .filter((m) => m.estado === "pronto" && m.url)
+      .map(({ id, tipo, url, storagePath, nome, tamanho, duracao }) => ({
+        id,
+        tipo,
+        url,
+        storagePath,
+        nome,
+        tamanho,
+        duracao,
+      }));
+
   const resetPinForm = () => {
+    setMaterialMissao([]);
     setPinTitle("");
     setPinDescription("");
     setPinColor("#ea580c");
@@ -3870,6 +3932,14 @@ export default function App() {
     setPickedCoords(area.center);
     setAreaCandidateId(area.candidateId || "");
     setSelectedDeltas(area.assignedDeltas || area.center?.assignedDeltas || []);
+    setMaterialMissao(
+      (area.center?.material || []).map((m) => ({
+        ...m,
+        estado: "pronto" as const,
+        progresso: 100,
+        jaSalvo: true,
+      })),
+    );
     triggerNotification("Carregado dados para edição da área!", "info");
   };
 
@@ -3884,6 +3954,14 @@ export default function App() {
     setPinDate(pin.date || "");
     setPickedCoords(pin.position);
     setCreationLocationMode(pin.position?.semLocal ? "sem" : "map");
+    setMaterialMissao(
+      (pin.position?.material || []).map((m) => ({
+        ...m,
+        estado: "pronto" as const,
+        progresso: 100,
+        jaSalvo: true,
+      })),
+    );
     setPinCandidateId(pin.candidateId || "");
     setSelectedDeltas(pin.assignedDeltas || pin.position?.assignedDeltas || []);
     triggerNotification(
@@ -3927,6 +4005,7 @@ export default function App() {
   /** Larga a criação do raio inteira: nada fica desenhado nem pela metade. */
   const cancelarRaio = () => {
     setClickToPickCoords(false);
+    descartarMaterialPendente();
     resetAreaForm();
     triggerNotification("Criação da área cancelada.", "info");
   };
@@ -4364,6 +4443,7 @@ export default function App() {
         lat: a.center?.lat ?? 0,
         lng: a.center?.lng ?? 0,
         raio: a.radius,
+        material: a.center?.material || [],
         createdAt: a.createdAt,
       }));
 
@@ -4384,6 +4464,7 @@ export default function App() {
         lng: p.position?.lng ?? 0,
         tipoLabel: rotuloDoTipo(p.iconType),
         semLocal: p.position?.semLocal === true,
+        material: p.position?.material || [],
         createdAt: p.createdAt,
       }));
 
@@ -12356,6 +12437,15 @@ export default function App() {
                       className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs resize-none"
                     />
                   </div>
+
+                  <div className="border-t border-slate-100 pt-3.5">
+                    <EditorDeMaterial
+                      itens={materialMissao}
+                      onMudar={setMaterialMissao}
+                      notificar={triggerNotification}
+                      ligado={isDatabaseConfigured}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2 pt-5">
@@ -14335,6 +14425,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    descartarMaterialPendente();
                     if (creationModalType === "area") resetAreaForm();
                     else resetPinForm();
                   }}
@@ -15097,6 +15188,15 @@ export default function App() {
                             </div>
                           )}
 
+                          <div className="border-t border-slate-100 pt-3">
+                            <EditorDeMaterial
+                              itens={materialMissao}
+                              onMudar={setMaterialMissao}
+                              notificar={triggerNotification}
+                              ligado={isDatabaseConfigured}
+                            />
+                          </div>
+
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">
                               Direcionar Missão à Equipe
@@ -15349,6 +15449,15 @@ export default function App() {
                               </select>
                             </div>
                           )}
+
+                          <div className="border-t border-slate-100 pt-3">
+                            <EditorDeMaterial
+                              itens={materialMissao}
+                              onMudar={setMaterialMissao}
+                              notificar={triggerNotification}
+                              ligado={isDatabaseConfigured}
+                            />
+                          </div>
 
                           <div className="space-y-1">
                             <label className="block text-[10.5px] uppercase tracking-wider font-bold text-indigo-950 mb-1">

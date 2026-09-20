@@ -1,9 +1,34 @@
+/**
+ * Arquivo que o comitê manda junto com a missão.
+ *
+ * A arte do panfleto, a planilha das ruas, um recado gravado. Vive dentro do
+ * jsonb de posição da missão (`center` na área, `position` no ponto), que já
+ * carrega dado que não é coordenada — assim a função funciona no banco que já
+ * está no ar, sem depender de migração para o material aparecer no campo.
+ */
+export interface MaterialDeApoio {
+  id: string;
+  tipo: 'imagem' | 'video' | 'audio' | 'documento';
+  url: string;
+  /** Caminho no Storage, para o arquivo sair junto quando a missão sai. */
+  storagePath?: string;
+  nome: string;
+  tamanho?: number;
+  /** Só no áudio: a pessoa precisa saber se são 20 segundos ou 4 minutos. */
+  duracao?: number;
+}
+
 export interface PanfletagemArea {
   id: string;
   title: string;
   description: string;
   bairro: string;
-  center: { lat: number; lng: number; assignedDeltas?: string[] };
+  center: {
+    lat: number;
+    lng: number;
+    assignedDeltas?: string[];
+    material?: MaterialDeApoio[];
+  };
   radius: number; // in meters (default 500)
   color: string; // Hex color for circle
   active: boolean;
@@ -31,6 +56,7 @@ export interface CampaignPin {
     lng: number;
     assignedDeltas?: string[];
     semLocal?: boolean;
+    material?: MaterialDeApoio[];
   };
   color: string;
   /** Id do Tipo de Operação (ver OperationType). Fica solto de propósito: os tipos são cadastrados pelo próprio usuário. */
