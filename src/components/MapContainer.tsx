@@ -306,6 +306,15 @@ interface MapContainerProps {
   /** Entrega ao painel o centro e o zoom de agora, para a busca por área. */
   aoRegistrarVista?: (ler: () => { lat: number; lng: number; zoom: number } | null) => void;
   onCoordsPicked: (coords: { lat: number; lng: number }) => void;
+  /**
+   * Ponto ou área que está aberta no editor.
+   *
+   * Ela sai do mapa enquanto está sendo editada: quem representa o lugar
+   * escolhido é o fantasma tracejado, que se arrasta. Sem isso o marcador
+   * antigo e o novo ficariam empilhados, e mover o ponto não teria efeito
+   * visível nenhum até salvar.
+   */
+  itemEmEdicaoId?: string | null;
   tempPlacementCoords: { lat: number; lng: number } | null;
   tempPlacementColor: string;
   tempPlacementRadius?: number;
@@ -424,6 +433,7 @@ export default function MapContainer({
   onEstabelecimentoSelecionado,
   aoRegistrarVista,
   onCoordsPicked,
+  itemEmEdicaoId = null,
   tempPlacementCoords,
   tempPlacementColor,
   tempPlacementRadius = 0,
@@ -460,6 +470,8 @@ export default function MapContainer({
   const tempCircleRef = useRef<any>(null);
   const tempHandleRef = useRef<any>(null);
   const arrastandoRaioRef = useRef(false);
+  /** Arrasto do ponto provisório em curso: o clique do fim do gesto não conta. */
+  const arrastandoPontoRef = useRef(false);
   /** Escreve a medida no miolo do círculo temporário, quando ele existe. */
   const tempMedidaRef = useRef<((metros: number) => void) | null>(null);
   /** Desfaz o aviso de zoom do círculo fantasma quando a camada é refeita. */
@@ -798,6 +810,8 @@ export default function MapContainer({
       // Um arrasto de raio acabou de acontecer: o clique que o navegador
       // dispara em seguida é resto do gesto, não uma escolha nova.
       if (arrastandoRaioRef.current) return;
+      // Idem para o arrasto do ponto provisório.
+      if (arrastandoPontoRef.current) return;
       aoEscolherCoordenadaRef.current({ lat: e.latlng.lat, lng: e.latlng.lng });
     });
 
@@ -1085,6 +1099,8 @@ export default function MapContainer({
 
     areas.forEach(area => {
       if (!area.active) return;
+      // Em edição: quem aparece no lugar dela é o fantasma arrastável.
+      if (itemEmEdicaoId && area.id === itemEmEdicaoId) return;
 
       const isSelected = area.id === selectedId;
 
@@ -1138,7 +1154,7 @@ export default function MapContainer({
       circlesGroup.addLayer(circle);
       circlesGroup.addLayer(centerMarker);
     });
-  }, [areas, selectedId, mapFilter]);
+  }, [areas, selectedId, mapFilter, itemEmEdicaoId]);
 
   // Render Pins
   useEffect(() => {
@@ -1154,6 +1170,8 @@ export default function MapContainer({
 
     pins.forEach(pin => {
       if (!pin.active) return;
+      // Em edição: quem aparece no lugar dele é o fantasma arrastável.
+      if (itemEmEdicaoId && pin.id === itemEmEdicaoId) return;
 
       const isSelected = pin.id === selectedId;
       // pin.iconType guarda o id do Tipo de Operação; o desenho vem do tipo.
@@ -1187,7 +1205,7 @@ export default function MapContainer({
 
       pinsGroup.addLayer(marker);
     });
-  }, [pins, selectedId, mapFilter, operationTypes]);
+  }, [pins, selectedId, mapFilter, operationTypes, itemEmEdicaoId]);
 
   // Render Check-ins
   useEffect(() => {
@@ -2063,9 +2081,38 @@ export default function MapContainer({
       } else {
         // Draw temp pin marker
         const tempIcon = getCustomPinIcon(tempPlacementColor, 'flag', true);
+        /**
+         * O ponto provisório se arrasta.
+         *
+         * Clicar no mapa coloca o ponto perto; acertar a esquina certa é
+         * questão de centímetros na tela. Arrastar resolve isso sem obrigar
+         * a pessoa a clicar de novo, e é o mesmo gesto que ela já usa para
+         * mover um ponto que existe.
+         */
         const tempMarker = L.marker([tempPlacementCoords.lat, tempPlacementCoords.lng], {
           icon: tempIcon,
-          opacity: 0.8
+          opacity: 0.9,
+          draggable: true,
+          autoPan: true,
+          keyboard: false
+        });
+        tempMarker.bindTooltip('Arraste para mover', {
+          direction: 'top',
+          offset: [0, -46],
+          opacity: 0.95
+        });
+        tempMarker.on('dragstart', () => {
+          arrastandoPontoRef.current = true;
+          tempMarker.closeTooltip();
+        });
+        tempMarker.on('dragend', () => {
+          const destino = tempMarker.getLatLng();
+          // O clique sintético que o navegador dispara no fim do arrasto
+          // ainda está a caminho: a trava só cai no quadro seguinte.
+          setTimeout(() => {
+            arrastandoPontoRef.current = false;
+          }, 0);
+          aoEscolherCoordenadaRef.current({ lat: destino.lat, lng: destino.lng });
         });
         tempGroup.addLayer(tempMarker);
       }

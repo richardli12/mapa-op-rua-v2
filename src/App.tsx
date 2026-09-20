@@ -161,6 +161,7 @@ import {
   CHECKIN_MAX_MEDIA,
   CHECKIN_MAX_IMAGE_BYTES,
   CHECKIN_MAX_VIDEO_BYTES,
+  MaterialDeApoio,
 } from "./types";
 import {
   DatabaseService,
@@ -1778,6 +1779,21 @@ export default function App() {
   const [pinCandidateId, setPinCandidateId] = useState<string>("");
 
   /**
+   * Como a missão estava quando o editor abriu.
+   *
+   * Serve a três coisas que a edição precisa e a criação não: voltar atrás
+   * quando quem foi mover o ponto no mapa desiste, saber se o lugar mudou de
+   * verdade (senão o endereço do banco seria reescrito à toa a cada abertura)
+   * e descobrir qual material de apoio foi tirado, para o arquivo sair também
+   * do Storage em vez de ficar lá sem dono.
+   */
+  const [edicaoOriginal, setEdicaoOriginal] = useState<{
+    coords: { lat: number; lng: number } | null;
+    radius: number | "";
+    material: MaterialDeApoio[];
+  } | null>(null);
+
+  /**
    * Cliente que dita o padrão de estado e município.
    *
    * Dentro do formulário vale o cliente escolhido nele; fora, vale o
@@ -1854,6 +1870,34 @@ export default function App() {
     );
     return match?.ibgeId ?? null;
   }, [candidateLocation, brasilCities]);
+
+  /**
+   * O editor aberto está mexendo numa missão que já existe?
+   *
+   * O mesmo formulário cria e edita — mudam os textos, o botão de salvar, o
+   * de excluir e o direito de desistir do que já estava gravado.
+   */
+  const editandoNoModal =
+    creationModalType === "pin"
+      ? !!editingPinId
+      : creationModalType === "area"
+        ? !!editingAreaId
+        : false;
+
+  /** Id da missão aberta no editor, para o mapa tirá-la do desenho. */
+  const itemEmEdicaoId = editandoNoModal
+    ? creationModalType === "pin"
+      ? editingPinId
+      : editingAreaId
+    : null;
+
+  /** O lugar escolhido agora é o mesmo de quando o editor abriu? */
+  const localIntocadoNaEdicao =
+    !!edicaoOriginal &&
+    !!edicaoOriginal.coords &&
+    !!pickedCoords &&
+    Math.abs(edicaoOriginal.coords.lat - pickedCoords.lat) < 1e-9 &&
+    Math.abs(edicaoOriginal.coords.lng - pickedCoords.lng) < 1e-9;
 
   /**
    * O local do pin ou do raio já está definido? Depende do caminho escolhido:
@@ -2972,23 +3016,27 @@ export default function App() {
 
   // Preset configuration when Picked Coordinates change
   useEffect(() => {
-    if (pickedCoords) {
-      if (coordsPickingMode === "area") {
-        triggerNotification(
-          "Ponto central da área de panfletagem selecionado no mapa!",
-          "success",
-        );
-      } else {
-        triggerNotification(
-          "Localização do PIN selecionada com sucesso no mapa!",
-          "success",
-        );
-      }
-      setClickToPickCoords(false);
-      // Área: o centro está marcado, e o raio é desenhado arrastando a alça.
-      // O formulário só volta quando a pessoa disser que terminou.
-      if (coordsPickingMode === "area") setDefinindoRaio(true);
+    // Só interessa a coordenada que veio de um gesto no mapa. Abrir uma
+    // missão para editar também preenche `pickedCoords`, e sem esta guarda
+    // isso disparava o aviso de "local selecionado" e jogava a edição de uma
+    // área direto no passo de desenhar o raio, sem ninguém ter pedido.
+    if (!pickedCoords || !clickToPickCoords) return;
+
+    if (coordsPickingMode === "area") {
+      triggerNotification(
+        "Ponto central da área de panfletagem selecionado no mapa!",
+        "success",
+      );
+    } else {
+      triggerNotification(
+        "Localização do PIN selecionada com sucesso no mapa!",
+        "success",
+      );
     }
+    setClickToPickCoords(false);
+    // Área: o centro está marcado, e o raio é desenhado arrastando a alça.
+    // O formulário só volta quando a pessoa disser que terminou.
+    if (coordsPickingMode === "area") setDefinindoRaio(true);
   }, [pickedCoords]);
 
   // Quem escolhe pelo mapa não passa pelos seletores de bairro e rua, então o
@@ -3020,11 +3068,16 @@ export default function App() {
       const cidade = address.city || creationCityName || "";
       const uf = address.uf || creationStateShortName || "";
 
-      if (bairro) {
-        setCreationBairroName(bairro);
-        if (coordsPickingMode === "area") setAreaBairro(bairro);
+      // Missão aberta para edição e ainda no mesmo lugar: o endereço serve só
+      // para ser mostrado. Reescrever o bairro gravado a cada abertura trocaria
+      // o que alguém digitou pelo palpite do geocodificador, sem ninguém pedir.
+      if (!localIntocadoNaEdicao) {
+        if (bairro) {
+          setCreationBairroName(bairro);
+          if (coordsPickingMode === "area") setAreaBairro(bairro);
+        }
+        if (rua) setCreationRuaName(rua);
       }
-      if (rua) setCreationRuaName(rua);
 
       setPickedAddressLabel(
         [rua, bairro, cidade && uf ? `${cidade} - ${uf}` : cidade]
@@ -3246,7 +3299,9 @@ export default function App() {
     setCoordsPickingMode(type);
     setClickToPickCoords(true);
     triggerNotification(
-      "Selecione uma localização clicando diretamente em qualquer lugar no mapa.",
+      editandoNoModal
+        ? "Arraste o pino ou clique no lugar novo. Só vale depois de salvar."
+        : "Selecione uma localização clicando diretamente em qualquer lugar no mapa.",
       "info",
     );
   };
@@ -3276,7 +3331,8 @@ export default function App() {
       return;
     }
 
-    const targetCoords = pickedCoords || { lat: -9.6548, lng: -35.715 }; // Default Maceió Centro
+    const targetCoords = pickedCoords ||
+      edicaoOriginal?.coords || { lat: -9.6548, lng: -35.715 }; // Default Maceió Centro
 
     const titulo = areaTitle.trim() || nomePadraoDaArea();
     const materialDaArea = materialParaSalvar();
@@ -3316,8 +3372,9 @@ export default function App() {
             triggerNotification(`Banco de dados: ${res.error}`, "error");
         });
       }
+      limparMaterialRemovido(materialDaArea);
       triggerNotification(
-        "Área de panfletagem editada com sucesso!",
+        "Área de panfletagem atualizada com sucesso!",
         "success",
       );
       setEditingAreaId(null);
@@ -3363,6 +3420,7 @@ export default function App() {
 
   const resetAreaForm = () => {
     setMaterialMissao([]);
+    setEdicaoOriginal(null);
     setDefinindoRaio(false);
     setNomeandoRaio(null);
     setAreaTitle("");
@@ -3712,7 +3770,10 @@ export default function App() {
       return;
     }
 
-    const targetCoords = pickedCoords || { lat: -9.66, lng: -35.72 };
+    // Sem local: a coluna do banco continua exigindo uma coordenada. Vale a
+    // que a missão já tinha, e só na falta dela o centro de Maceió.
+    const targetCoords = pickedCoords ||
+      edicaoOriginal?.coords || { lat: -9.66, lng: -35.72 };
     /**
      * Missão sem lugar no mapa.
      *
@@ -3760,7 +3821,13 @@ export default function App() {
             triggerNotification(`Banco de dados: ${res.error}`, "error");
         });
       }
-      triggerNotification("Ponto estratégico editado!", "success");
+      limparMaterialRemovido(material);
+      triggerNotification(
+        semLocal
+          ? "Missão atualizada. Quem você marcou vê a versão nova no check-in."
+          : "Ponto estratégico atualizado!",
+        "success",
+      );
       setEditingPinId(null);
     } else {
       // Create new
@@ -3827,6 +3894,7 @@ export default function App() {
 
   const resetPinForm = () => {
     setMaterialMissao([]);
+    setEdicaoOriginal(null);
     setPinTitle("");
     setPinDescription("");
     setPinColor("#ea580c");
@@ -3904,6 +3972,8 @@ export default function App() {
       onConfirm: () => {
         setAreas((prev) => prev.filter((a) => a.id !== id));
         if (selectedId === id) setSelectedId(null);
+        // O editor não pode ficar aberto em cima de algo que não existe mais.
+        if (editingAreaId === id) resetAreaForm();
         if (isDatabaseConfigured) {
           DatabaseService.deleteArea(id).then((res) => {
             if (!res.success)
@@ -3926,6 +3996,8 @@ export default function App() {
       onConfirm: () => {
         setPins((prev) => prev.filter((p) => p.id !== id));
         if (selectedId === id) setSelectedId(null);
+        // O editor não pode ficar aberto em cima de algo que não existe mais.
+        if (editingPinId === id) resetPinForm();
         if (isDatabaseConfigured) {
           DatabaseService.deletePin(id).then((res) => {
             if (!res.success)
@@ -3937,9 +4009,22 @@ export default function App() {
     });
   };
 
+  /**
+   * Abre a missão no mesmo editor que a criou.
+   *
+   * Editar num formulário reduzido, como era antes, deixava metade da missão
+   * fora do alcance: o material de apoio, quem recebe a missão e o próprio
+   * lugar no mapa só existiam na criação. Reaproveitar o editor inteiro é o
+   * que garante que dá para mudar tudo — e que um campo novo amanhã já nasce
+   * editável, sem ninguém precisar lembrar de copiá-lo para o segundo lugar.
+   */
   const startEditArea = (area: PanfletagemArea) => {
+    const centro = { lat: area.center.lat, lng: area.center.lng };
+    const material = area.center?.material || [];
+
     setActiveTab("areas");
     setSelectedId(area.id);
+    setEditingPinId(null);
     setEditingAreaId(area.id);
     setAreaTitle(area.title);
     setAreaDescription(area.description || "");
@@ -3948,33 +4033,49 @@ export default function App() {
     setAreaColor(area.color);
     setAreaTeamSize(area.teamSize || "");
     setAreaContact(area.contactName || "");
-    setPickedCoords(area.center);
+    setPickedCoords(centro);
     setAreaCandidateId(area.candidateId || "");
     setSelectedDeltas(area.assignedDeltas || area.center?.assignedDeltas || []);
     setMaterialMissao(
-      (area.center?.material || []).map((m) => ({
+      material.map((m) => ({
         ...m,
         estado: "pronto" as const,
         progresso: 100,
         jaSalvo: true,
       })),
     );
-    triggerNotification("Carregado dados para edição da área!", "info");
+    setEdicaoOriginal({ coords: centro, radius: area.radius, material });
+
+    // O editor completo, no centro da tela, com o passo do local já resolvido.
+    setCoordsPickingMode("area");
+    setCreationLocationMode("map");
+    setCreationModalType("area");
+    setClickToPickCoords(false);
+    setDefinindoRaio(false);
+    setNomeandoRaio(null);
   };
 
   const startEditPin = (pin: CampaignPin) => {
+    const semLocal = !!pin.position?.semLocal;
+    const local = semLocal
+      ? null
+      : { lat: pin.position.lat, lng: pin.position.lng };
+    const material = pin.position?.material || [];
+
     setActiveTab("pins");
     setSelectedId(pin.id);
+    setEditingAreaId(null);
     setEditingPinId(pin.id);
     setPinTitle(pin.title);
     setPinDescription(pin.description || "");
     setPinColor(pin.color);
     setPinIconType(pin.iconType);
     setPinDate(pin.date || "");
-    setPickedCoords(pin.position);
-    setCreationLocationMode(pin.position?.semLocal ? "sem" : "map");
+    // Só a coordenada: `position` carrega material e equipe junto, e guardá-lo
+    // inteiro aqui fazia o que foi removido no formulário voltar ao salvar.
+    setPickedCoords(local);
     setMaterialMissao(
-      (pin.position?.material || []).map((m) => ({
+      material.map((m) => ({
         ...m,
         estado: "pronto" as const,
         progresso: 100,
@@ -3983,10 +4084,52 @@ export default function App() {
     );
     setPinCandidateId(pin.candidateId || "");
     setSelectedDeltas(pin.assignedDeltas || pin.position?.assignedDeltas || []);
-    triggerNotification(
-      "Carregado dados para edição do ponto estratégico!",
-      "info",
-    );
+    setEdicaoOriginal({
+      coords: { lat: pin.position.lat, lng: pin.position.lng },
+      radius: "",
+      material,
+    });
+
+    setCoordsPickingMode("pin");
+    setCreationLocationMode(semLocal ? "sem" : "map");
+    setCreationModalType("pin");
+    setClickToPickCoords(false);
+    setDefinindoRaio(false);
+    setNomeandoRaio(null);
+  };
+
+  /**
+   * Desiste de mover a missão e devolve o editor com o lugar de antes.
+   *
+   * Sem isto, cancelar no meio do "escolher outro ponto" largava a edição
+   * inteira — ou pior, deixava a missão com o lugar pela metade.
+   */
+  const cancelarMovimentacaoDaMissao = () => {
+    setClickToPickCoords(false);
+    setDefinindoRaio(false);
+    setNomeandoRaio(null);
+    if (edicaoOriginal?.coords) setPickedCoords(edicaoOriginal.coords);
+    if (edicaoOriginal && edicaoOriginal.radius !== "") {
+      setAreaRadius(edicaoOriginal.radius);
+    }
+    setCreationLocationMode("map");
+    triggerNotification("O lugar da missão continua onde estava.", "info");
+  };
+
+  /**
+   * Material que saiu da missão na edição, apagado também do Storage.
+   *
+   * Tirar o arquivo da tela e salvar não bastava: o arquivo continuava no
+   * balde para sempre, sem nada que o referenciasse.
+   */
+  const limparMaterialRemovido = (mantidos: MaterialDeApoio[]) => {
+    const antes = edicaoOriginal?.material || [];
+    if (antes.length === 0) return;
+    const vivos = new Set(mantidos.map((m) => m.id));
+    const caminhos = antes
+      .filter((m) => !vivos.has(m.id) && m.storagePath)
+      .map((m) => m.storagePath as string);
+    if (caminhos.length > 0) DatabaseService.removerArquivosStorage(caminhos);
   };
 
   /**
@@ -3999,6 +4142,8 @@ export default function App() {
    */
   const triggerCreateArea = () => {
     resetAreaForm();
+    // Um ponto aberto no editor não pode ficar pendurado atrás da área nova.
+    if (editingPinId) resetPinForm();
     if (selectedCandidateFilter !== "all") {
       setAreaCandidateId(selectedCandidateFilter);
     }
@@ -4038,6 +4183,7 @@ export default function App() {
    */
   const virarPontoEstrategico = (lugar: Estabelecimento) => {
     resetPinForm();
+    if (editingAreaId) resetAreaForm();
     if (selectedCandidateFilter !== "all") setPinCandidateId(selectedCandidateFilter);
     setPinTitle(lugar.nome);
     setPinDescription(
@@ -4062,6 +4208,8 @@ export default function App() {
 
   const triggerCreatePin = () => {
     resetPinForm();
+    // Uma área aberta no editor não pode ficar pendurada atrás do ponto novo.
+    if (editingAreaId) resetAreaForm();
     if (selectedCandidateFilter !== "all") {
       setPinCandidateId(selectedCandidateFilter);
     }
@@ -12009,6 +12157,27 @@ export default function App() {
             aoClicar: triggerCreateArea,
           },
           {
+            /**
+             * A porta da lista.
+             *
+             * Missão sem lugar no mapa não tem marcador para clicar, e sem
+             * este botão ela ficava sem nenhum caminho até o editor. Aqui
+             * dentro está tudo que já foi marcado: pontos, áreas e check-ins.
+             */
+            id: "missoes",
+            grupo: "marcar",
+            rotulo: "Missões marcadas",
+            ajuda: "Ver, editar e excluir o que já está marcado",
+            cor: "#0D9488",
+            ativa: isSidebarOpen,
+            contador: filteredPins.length + filteredAreas.length,
+            icone: <ClipboardList className="w-4 h-4" />,
+            aoClicar: (e) => {
+              e.stopPropagation();
+              setIsSidebarOpen((aberto) => !aberto);
+            },
+          },
+          {
             id: "regua",
             grupo: "marcar",
             rotulo: "Régua",
@@ -12559,12 +12728,23 @@ export default function App() {
             ) : (
               <>
                 <MapPin className="w-4 h-4 text-blue-400" />
-                <span>Selecione a localização do seu Pin no mapa</span>
+                <span>
+                  {editandoNoModal
+                    ? "Clique no lugar novo ou arraste o pino para movê-lo"
+                    : "Selecione a localização do seu Pin no mapa"}
+                </span>
               </>
             )}
           </span>
           <button
             onClick={() => {
+              // Editando: desistir de mover não pode jogar fora a missão nem o
+              // que já foi mexido no formulário. Volta para o editor, no lugar
+              // em que a missão estava.
+              if (editandoNoModal) {
+                cancelarMovimentacaoDaMissao();
+                return;
+              }
               // No raio não há pergunta anterior para voltar: cancelar aqui é
               // largar a criação inteira, sem deixar meia área pendurada.
               if (coordsPickingMode === "area" && creationModalType === "area") {
@@ -12820,7 +13000,13 @@ export default function App() {
             Refazer
           </button>
           <button
-            onClick={cancelarRaio}
+            onClick={() => {
+              if (editandoNoModal) {
+                cancelarMovimentacaoDaMissao();
+                return;
+              }
+              cancelarRaio();
+            }}
             className="px-3 py-1 bg-transparent hover:bg-rose-500/20 text-[10px] text-rose-300 hover:text-rose-200 rounded-full font-bold border border-rose-400/40 cursor-pointer transition-all"
           >
             Cancelar
@@ -12835,6 +13021,12 @@ export default function App() {
                 return;
               }
               setDefinindoRaio(false);
+              // Editando: o nome já existe e o resto da missão está aberto
+              // atrás. Concluir aqui devolve o editor, não recomeça o cadastro.
+              if (editandoNoModal) {
+                setCreationLocationMode("map");
+                return;
+              }
               // Desenho pronto: agora a única pergunta é se essa área tem nome.
               setNomeandoRaio("pergunta");
             }}
@@ -12916,11 +13108,26 @@ export default function App() {
             }`}
             onClick={() => {
               setActiveTab("pins");
-              if (editingAreaId) resetAreaForm();
             }}
           >
             <MapPin className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Pontos</span>
+          </button>
+
+          {/* As áreas tinham lista, mas nenhuma aba que levasse até ela: só se
+              chegava lá clicando num círculo do mapa. */}
+          <button
+            className={`flex-1 py-3 flex flex-col md:flex-row justify-center items-center gap-1 border-b-2 hover:bg-white hover:text-indigo-600 transition-all ${
+              activeTab === "areas"
+                ? "border-indigo-600 text-indigo-600 font-extrabold bg-white shadow-3xs"
+                : "border-transparent text-slate-500"
+            }`}
+            onClick={() => {
+              setActiveTab("areas");
+            }}
+          >
+            <Circle className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Áreas</span>
           </button>
 
           <button
@@ -13146,189 +13353,6 @@ export default function App() {
           {/* TAB 1: AREAS MANAGEMENT */}
           {activeTab === "areas" && (
             <div className="space-y-5">
-              {editingAreaId ? (
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 shadow-xs space-y-4">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                      <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg">
-                        <Edit2 className="w-4 h-4" />
-                      </div>
-                      Editar Área de Raio
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={resetAreaForm}
-                      className="text-xs text-red-500 hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-
-                  <form onSubmit={saveArea} className="space-y-3.5">
-                    {/* Title */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Título da Equipe / Ação
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Opcional"
-
-                        value={areaTitle}
-                        onChange={(e) => setAreaTitle(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
-                      />
-                    </div>
-
-                    {/* Associar Cliente */}
-                    {selectedCandidateFilter === "all" && (
-                      <div>
-                        <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                          Associar Cliente (Para mapas isolados)
-                        </label>
-                        <select
-                          value={areaCandidateId}
-                          onChange={(e) => setAreaCandidateId(e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs font-semibold"
-                        >
-                          <option value="">Geral / Sem Cliente</option>
-                          {candidates.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} ({c.office || "Cliente"})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {/* Bairro Correspondente */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Bairro Correspondente *
-                      </label>
-                      <select
-                        value={areaBairro}
-                        onChange={(e) => setAreaBairro(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs font-semibold"
-                      >
-                        {/* Garante que o bairro já selecionado/salvo apareça como a opção selecionada primária se não estiver nas listas padrão */}
-                        {areaBairro && !MACEIO_BAIRROS.some((b) => b.name === areaBairro) && (
-                          <option value={areaBairro}>{areaBairro}</option>
-                        )}
-                        {brasilDistricts && brasilDistricts.length > 0 ? (
-                          brasilDistricts
-                            .filter((b) => b.name !== areaBairro)
-                            .map((b) => (
-                              <option key={b.id || b.name} value={b.name}>
-                                {b.name}
-                              </option>
-                            ))
-                        ) : (
-                          MACEIO_BAIRROS.filter((b) => b.name !== areaBairro).map((b) => (
-                            <option key={b.name} value={b.name}>
-                              {b.name}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </div>
-
-                    {/* Team Size & Radius */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                          Equipe (Voluntários)
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="500"
-                          placeholder="—"
-                          value={areaTeamSize}
-                          onChange={(e) =>
-                            setAreaTeamSize(
-                              e.target.value === "" ? "" : Number(e.target.value),
-                            )
-                          }
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                          Raio (metros)
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="100000"
-                          step="1"
-                          placeholder="Arraste no mapa"
-                          value={areaRadius}
-                          onChange={(e) =>
-                            setAreaRadius(
-                              e.target.value === "" ? "" : Number(e.target.value),
-                            )
-                          }
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Color selection */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Cor correlativa
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="color"
-                          value={areaColor}
-                          onChange={(e) => setAreaColor(e.target.value)}
-                          className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-none shrink-0"
-                        />
-                        <span className="text-xs text-slate-500 py-1 font-mono uppercase">
-                          {areaColor}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Contact leader */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Coordenador Local
-                      </label>
-                      <input
-                        type="text"
-                        value={areaContact}
-                        onChange={(e) => setAreaContact(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
-                      />
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Missão / Descrição
-                      </label>
-                      <textarea
-                        value={areaDescription}
-                        onChange={(e) => setAreaDescription(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs cursor-pointer transition-all flex items-center justify-center gap-1 shadow-3xs"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      Salvar Alterações
-                    </button>
-                  </form>
-                </div>
-              ) : (
                 <button
                   type="button"
                   onClick={triggerCreateArea}
@@ -13349,7 +13373,6 @@ export default function App() {
                   </div>
                   <ChevronRight className="w-4 h-4 text-indigo-400" />
                 </button>
-              )}
 
               {/* LIST OF REGISTERED PANFLETAGEM GROUPS */}
               <div className="space-y-3">
@@ -13524,137 +13547,6 @@ export default function App() {
           {activeTab === "pins" && (
             <div className="space-y-4">
               {/* Form to Edit Custom Pins or Big CTA to create */}
-              {editingPinId ? (
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 shadow-xs space-y-4">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                      <div className="p-1.5 bg-orange-100 text-orange-600 rounded-lg">
-                        <Edit2 className="w-4 h-4" />
-                      </div>
-                      Editar Ponto Estratégico
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={resetPinForm}
-                      className="text-xs text-red-500 hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-
-                  <form onSubmit={savePin} className="space-y-3.5">
-                    {/* Title */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Título do Pin *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={pinTitle}
-                        onChange={(e) => setPinTitle(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-slate-800 shadow-2xs"
-                      />
-                    </div>
-
-                    {/* Associar Cliente */}
-                    {selectedCandidateFilter === "all" && (
-                      <div>
-                        <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                          Associar Cliente (Para mapas isolados)
-                        </label>
-                        <select
-                          value={pinCandidateId}
-                          onChange={(e) => setPinCandidateId(e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-slate-800 shadow-2xs font-semibold"
-                        >
-                          <option value="">Geral / Sem Cliente</option>
-                          {candidates.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} ({c.office || "Cliente"})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {/* Tipo de operação */}
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400">
-                          Tipo de Operação
-                        </label>
-                        <button
-                          type="button"
-                          onClick={openOperationTypesManager}
-                          className="text-[10px] uppercase font-bold tracking-wider text-orange-600 hover:text-orange-700 transition-colors cursor-pointer flex items-center gap-1"
-                        >
-                          <PenTool className="w-3 h-3" />
-                          Gerenciar
-                        </button>
-                      </div>
-                      <OperationTypeSelect
-                        types={clientOperationTypes}
-                        value={pinIconType}
-                        onChange={handlePinTypeChange}
-                        accent="orange"
-                      />
-                    </div>
-
-                    {/* Color selection */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Cor do Pin
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="color"
-                          value={pinColor}
-                          onChange={(e) => setPinColor(e.target.value)}
-                          className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-none shrink-0"
-                        />
-                        <span className="text-xs text-slate-500 py-1 font-mono uppercase">
-                          {pinColor}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Date */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Prazo / Data do Evento
-                      </label>
-                      <input
-                        type="date"
-                        value={pinDate}
-                        onChange={(e) => setPinDate(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-100 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-slate-800 shadow-2xs"
-                      />
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                        Anotações / Descrição
-                      </label>
-                      <textarea
-                        value={pinDescription}
-                        onChange={(e) => setPinDescription(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-orange-500 text-slate-800 shadow-2xs"
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="w-full py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-bold text-xs cursor-pointer transition-all flex items-center justify-center gap-1 shadow-3xs"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      Salvar Alterações
-                    </button>
-                  </form>
-                </div>
-              ) : (
                 <button
                   type="button"
                   onClick={triggerCreatePin}
@@ -13675,7 +13567,6 @@ export default function App() {
                   </div>
                   <ChevronRight className="w-4 h-4 text-orange-400" />
                 </button>
-              )}
 
               {/* LIST OF PINS */}
               <div className="space-y-3">
@@ -14017,18 +13908,14 @@ export default function App() {
           onDeleteCheckIn={excluirCheckIn}
           onSelectItem={(id, type) => {
             setSelectedId(id);
+            // Clicar na missão abre o editor completo no centro da tela. A
+            // lateral fica como estava: ela é a lista, não o formulário.
             if (type === "area") {
               const found = areas.find((a) => a.id === id);
-              if (found) {
-                startEditArea(found);
-                setIsSidebarOpen(true);
-              }
+              if (found) startEditArea(found);
             } else {
               const found = pins.find((p) => p.id === id);
-              if (found) {
-                startEditPin(found);
-                setIsSidebarOpen(true);
-              }
+              if (found) startEditPin(found);
             }
           }}
           clickToPickCoords={clickToPickCoords}
@@ -14044,6 +13931,7 @@ export default function App() {
             rulerColor={corRegua}
             onRulerPoint={(coords) => setPontosRegua((p) => [...p, coords])}
           tempPlacementCoords={pickedCoords}
+          itemEmEdicaoId={itemEmEdicaoId}
           tempPlacementColor={
             coordsPickingMode === "area" ? areaColor : pinColor
           }
@@ -14319,19 +14207,27 @@ export default function App() {
                 <div>
                   <h3 className="font-extrabold text-indigo-950 text-base leading-tight">
                     {creationModalType === "area"
-                      ? "Criar Área de Trabalho (Raio)"
+                      ? editandoNoModal
+                        ? "Editar Área de Trabalho (Raio)"
+                        : "Criar Área de Trabalho (Raio)"
                       : creationLocationMode === "sem"
-                        ? "Criar Missão (sem local)"
-                        : "Criar Ponto Estratégico (PIN)"}
+                        ? editandoNoModal
+                          ? "Editar Missão (sem local)"
+                          : "Criar Missão (sem local)"
+                        : editandoNoModal
+                          ? "Editar Ponto Estratégico (PIN)"
+                          : "Criar Ponto Estratégico (PIN)"}
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    {creationLocationMode === "map"
-                      ? "Local definido pelo ponto clicado no mapa."
-                      : creationLocationMode === "search"
-                        ? "Planeje a localização ideal selecionando o bairro e rua."
-                        : creationLocationMode === "sem"
-                          ? "Sem lugar no mapa: a missão vai direto para quem você marcar."
-                          : "Primeiro, escolha como quer definir o local."}
+                    {editandoNoModal
+                      ? "Tudo pode mudar: título, tipo, equipe, material e o lugar no mapa."
+                      : creationLocationMode === "map"
+                        ? "Local definido pelo ponto clicado no mapa."
+                        : creationLocationMode === "search"
+                          ? "Planeje a localização ideal selecionando o bairro e rua."
+                          : creationLocationMode === "sem"
+                            ? "Sem lugar no mapa: a missão vai direto para quem você marcar."
+                            : "Primeiro, escolha como quer definir o local."}
                   </p>
                 </div>
                 <button
@@ -14508,10 +14404,22 @@ export default function App() {
                               creationModalType === "area" ? "area" : "pin",
                             )
                           }
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-all cursor-pointer"
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-all cursor-pointer flex items-center justify-center gap-1.5"
                         >
-                          Escolher outro ponto
+                          <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                          {editandoNoModal
+                            ? creationModalType === "area"
+                              ? "Mover o centro e refazer o raio"
+                              : "Mover para outro ponto do mapa"
+                            : "Escolher outro ponto"}
                         </button>
+                        {editandoNoModal && (
+                          <p className="text-[10px] text-slate-500 leading-snug text-center">
+                            {creationModalType === "area"
+                              ? "No mapa, arraste o miolo para mover e a borda para mudar o raio. Nada muda até você salvar."
+                              : "No mapa dá para clicar no lugar novo ou arrastar o pino. Nada muda até você salvar."}
+                          </p>
+                        )}
                       </>
                     ) : (
                       <p className="text-xs text-slate-500 leading-snug">
@@ -15008,6 +14916,36 @@ export default function App() {
                           </div>
                         </div>
 
+                        {/* O bairro é o que aparece na lista e nos relatórios.
+                            O mapa descobre sozinho quando o centro é marcado,
+                            mas quem conhece a região manda mais que o
+                            geocodificador — então dá para escrever por cima. */}
+                        <div>
+                          <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
+                            Bairro Correspondente
+                          </label>
+                          <input
+                            type="text"
+                            list="bairros-conhecidos"
+                            placeholder={
+                              isResolvingPickedAddress
+                                ? "Identificando pelo mapa..."
+                                : "Ex: Jatiúca"
+                            }
+                            value={areaBairro}
+                            onChange={(e) => setAreaBairro(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
+                          />
+                          <datalist id="bairros-conhecidos">
+                            {(brasilDistricts && brasilDistricts.length > 0
+                              ? brasilDistricts.map((b) => b.name)
+                              : MACEIO_BAIRROS.map((b) => b.name)
+                            ).map((nome) => (
+                              <option key={nome} value={nome} />
+                            ))}
+                          </datalist>
+                        </div>
+
                         <div>
                           <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
                             Responsável / Coordenador da Ação
@@ -15119,7 +15057,15 @@ export default function App() {
                               para todo o time.
                             </p>
                             {(() => {
-                              const activeCandId = areaCandidateId;
+                              // Com o mapa filtrado por um cliente o seletor
+                              // acima nem aparece: sem esta volta, a edição de
+                              // uma missão desse cliente ficava sem equipe
+                              // nenhuma para marcar.
+                              const activeCandId =
+                                areaCandidateId ||
+                                (selectedCandidateFilter !== "all"
+                                  ? selectedCandidateFilter
+                                  : "");
                               const candidatesDeltas = supporters.filter(
                                 (s) =>
                                   s.candidate_id === activeCandId ||
@@ -15381,7 +15327,15 @@ export default function App() {
                               para todo o time.
                             </p>
                             {(() => {
-                              const activeCandId = pinCandidateId;
+                              // Com o mapa filtrado por um cliente o seletor
+                              // acima nem aparece: sem esta volta, a edição de
+                              // uma missão desse cliente ficava sem equipe
+                              // nenhuma para marcar.
+                              const activeCandId =
+                                pinCandidateId ||
+                                (selectedCandidateFilter !== "all"
+                                  ? selectedCandidateFilter
+                                  : "");
                               const candidatesDeltas = supporters.filter(
                                 (s) =>
                                   s.candidate_id === activeCandId ||
@@ -15508,10 +15462,29 @@ export default function App() {
                     )}
 
                     {/* Action Buttons inside Modal */}
-                    <div className="flex gap-3 pt-2 justify-end">
+                    <div className="flex flex-wrap gap-3 pt-2 justify-end items-center">
+                      {/* Excluir mora junto do resto: quem abriu a missão para
+                          mexer nela também é quem decide tirá-la do mapa. */}
+                      {editandoNoModal && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (creationModalType === "area") {
+                              if (editingAreaId) deleteArea(editingAreaId);
+                            } else if (editingPinId) {
+                              deletePin(editingPinId);
+                            }
+                          }}
+                          className="mr-auto px-3 py-2 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 font-bold text-xs rounded-xl cursor-pointer transition-colors flex items-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Excluir
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
+                          descartarMaterialPendente();
                           if (creationModalType === "area") resetAreaForm();
                           else resetPinForm();
                         }}
@@ -15536,7 +15509,11 @@ export default function App() {
                         ) : (
                           <>
                             <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
-                            <span>Confirmar e Criar no Mapa</span>
+                            <span>
+                              {editandoNoModal
+                                ? "Salvar alterações"
+                                : "Confirmar e Criar no Mapa"}
+                            </span>
                           </>
                         )}
                       </button>
