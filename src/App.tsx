@@ -119,7 +119,26 @@ import ConfirmDialog, { ConfirmRequest } from "./components/ConfirmDialog";
 import MindMapPanel from "./components/MindMapPanel";
 import MiniMapa from "./components/MiniMapa";
 import BarrasDaEscola from "./components/BarrasDaEscola";
+import {
+  FerramentasDoMapa,
+  GrupoDeFerramentas,
+} from "./components/FerramentasDoMapa";
 import { OPERATION_ICONS } from "./operationIcons";
+
+/**
+ * Os blocos do trilho de ferramentas do mapa.
+ *
+ * A ordem é a da rotina de quem usa: primeiro se marca o território, depois
+ * se liga o que ajuda a ler o território, então se filtra o que já existe e
+ * por último se mostra para os outros. Menu longo sem divisão vira lista de
+ * compras -- com divisão, quem procura sabe em qual terço olhar.
+ */
+const GRUPOS_DE_FERRAMENTAS: GrupoDeFerramentas[] = [
+  { id: "marcar", titulo: "Marcar" },
+  { id: "camadas", titulo: "Camadas" },
+  { id: "filtrar", titulo: "Filtrar" },
+  { id: "apresentar", titulo: "Apresentar" },
+];
 import {
   PanfletagemArea,
   CampaignPin,
@@ -11962,262 +11981,183 @@ export default function App() {
         </div>
       )}
 
-      {/* Sleek Floating Dock (Inspirado no print do usuário) */}
-      <div className="absolute top-1/2 left-4 -translate-y-1/2 z-[1000] bg-[#0c1322]/95 border border-slate-800/80 rounded-[28px] p-2.5 shadow-2xl flex flex-col items-center gap-3 w-[56px] pointer-events-auto transition-all">
-        {/* Button 1: MapPin (Pin) - Blue */}
-        <button
-          onClick={triggerCreatePin}
-          className="group w-10 h-10 bg-blue-600 hover:bg-blue-500 border border-blue-700 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative"
-          title="Adicionar Pin"
-        >
-          <MapPin className="w-5 h-5 fill-white" />
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Inserir Pin
-          </span>
-        </button>
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Button 2: Circle (Raio) - Red-ish/Orange background or Transparent to resemble screenshot */}
-        <button
-          onClick={triggerCreateArea}
-          className="group w-10 h-10 bg-indigo-600 hover:bg-indigo-500 border border-indigo-700 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative"
-          title="Marcar Raio/Área (Mapeamento)"
-        >
-          <Circle className="w-5 h-5 stroke-[2.5]" />
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Marcar Raio
-          </span>
-        </button>
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Button 3: Régua - mede distância no mapa */}
-        <button
-          onClick={() => {
-            const ligando = !reguaLigada;
-            setReguaLigada(ligando);
-            // Nada de painel lateral: a régua é para marcar no mapa, e o
-            // pouco que ela precisa (cor, distância, desfazer) fica num
-            // controle pequeno no canto, sem tapar o mapa.
-            if (!ligando) limparReguaEmAndamento();
-          }}
-          className={`group w-10 h-10 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
-            reguaLigada
-              ? "bg-[#F58220] border-orange-600 ring-2 ring-orange-400/40"
-              : "bg-slate-700 hover:bg-slate-600 border-slate-600"
-          }`}
-          title={reguaLigada ? "Desligar a régua" : "Medir distância (régua)"}
-        >
-          <Ruler className="w-5 h-5" />
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            {reguaLigada ? "Régua ligada" : "Régua"}
-          </span>
-        </button>
-
-        {/* ESCOLAS DO MUNICÍPIO — só aparece onde há escolas cadastradas */}
-        {escolas.length > 0 && (
-          <>
-            <div className="w-8 h-[1px] bg-slate-800/50" />
-            <button
-              onClick={() => {
-                setEscolasLigadas((ligado) => {
-                  if (ligado) setEscolaAberta(null);
-                  return !ligado;
-                });
-              }}
-              className={`group w-10 h-10 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
-                escolasLigadas
-                  ? "bg-sky-600 border-sky-700 ring-2 ring-sky-400/40"
-                  : "bg-slate-700 hover:bg-slate-600 border-slate-600"
-              }`}
-              title={
-                escolasLigadas
-                  ? "Esconder as escolas do mapa"
-                  : `Mostrar as ${escolas.length} escolas de ${municipioDoMapa}`
+      {/*
+        TRILHO DE FERRAMENTAS
+        A lista é declarada aqui e o desenho fica no componente: ordem,
+        grupo, cor e estado de cada ferramenta moram junto com o estado do
+        mapa, que é quem sabe o que está ligado.
+      */}
+      <FerramentasDoMapa
+        grupos={GRUPOS_DE_FERRAMENTAS}
+        ferramentas={[
+          {
+            id: "pin",
+            grupo: "marcar",
+            rotulo: "Inserir pin",
+            ajuda: "Marcar um ponto no mapa",
+            cor: "#2563EB",
+            icone: <MapPin className="w-4 h-4 fill-current" />,
+            aoClicar: triggerCreatePin,
+          },
+          {
+            id: "raio",
+            grupo: "marcar",
+            rotulo: "Marcar raio",
+            ajuda: "Desenhar uma área de trabalho com raio",
+            cor: "#4F46E5",
+            icone: <Circle className="w-4 h-4 stroke-[2.5]" />,
+            aoClicar: triggerCreateArea,
+          },
+          {
+            id: "regua",
+            grupo: "marcar",
+            rotulo: "Régua",
+            ajuda: reguaLigada
+              ? "Desligar a régua"
+              : "Medir distância entre pontos",
+            cor: "#F58220",
+            ativa: reguaLigada,
+            icone: <Ruler className="w-4 h-4" />,
+            aoClicar: () => {
+              const ligando = !reguaLigada;
+              setReguaLigada(ligando);
+              // Nada de painel lateral: a régua é para marcar no mapa, e o
+              // pouco que ela precisa (cor, distância, desfazer) fica num
+              // controle pequeno no canto, sem tapar o mapa.
+              if (!ligando) limparReguaEmAndamento();
+            },
+          },
+          // Escolas só entram no trilho onde há escolas cadastradas: item
+          // que não faz nada é item que ensina a desconfiar do menu.
+          ...(escolas.length > 0
+            ? [
+                {
+                  id: "escolas",
+                  grupo: "camadas",
+                  rotulo: "Escolas",
+                  ajuda: escolasLigadas
+                    ? "Esconder as escolas do mapa"
+                    : `Mostrar as ${escolas.length} escolas de ${municipioDoMapa}`,
+                  cor: "#0284C7",
+                  ativa: escolasLigadas,
+                  icone: <GraduationCap className="w-4 h-4" />,
+                  aoClicar: () => {
+                    setEscolasLigadas((ligado) => {
+                      if (ligado) setEscolaAberta(null);
+                      return !ligado;
+                    });
+                  },
+                },
+              ]
+            : []),
+          {
+            id: "territorio",
+            grupo: "camadas",
+            rotulo: "Inteligência territorial",
+            ajuda: "População, bairros e dados do Censo",
+            cor: "#0D9488",
+            ativa: territorioAberto || !!circuloAnalisado,
+            icone: <Layers3 className="w-4 h-4" />,
+            aoClicar: (e) => {
+              e.stopPropagation();
+              setTerritorioAberto((v) => !v);
+              setPesquisaLojasAberta(false);
+              setFiltroCheckInsAberto(false);
+              setIsFilterDropdownOpen(false);
+            },
+          },
+          {
+            id: "estabelecimentos",
+            grupo: "camadas",
+            rotulo: "Estabelecimentos",
+            ajuda: "Pesquisar o que existe no terreno em volta",
+            cor: "#7C3AED",
+            ativa: pesquisaLojasAberta || estabelecimentos.length > 0,
+            contador: estabelecimentos.length,
+            icone: <Store className="w-4 h-4" />,
+            aoClicar: (e) => {
+              e.stopPropagation();
+              setPesquisaLojasAberta((v) => !v);
+              setTerritorioAberto(false);
+              setFiltroCheckInsAberto(false);
+              setIsFilterDropdownOpen(false);
+            },
+          },
+          {
+            id: "filtro-checkins",
+            grupo: "filtrar",
+            rotulo: "Filtrar check-ins",
+            ajuda: "Filtrar por pessoa, data, prioridade e tipo",
+            cor: "#015FC9",
+            ativa: filtroCheckInsAberto || filtrosDeCheckInLigados > 0,
+            contador: filtrosDeCheckInLigados,
+            icone: <Users className="w-4 h-4" />,
+            aoClicar: (e) => {
+              e.stopPropagation();
+              setFiltroCheckInsAberto((v) => !v);
+              setTerritorioAberto(false);
+              setPesquisaLojasAberta(false);
+              setIsFilterDropdownOpen(false);
+            },
+          },
+          {
+            id: "camadas",
+            grupo: "filtrar",
+            rotulo: "Visualização",
+            ajuda: "Escolher o que aparece no mapa",
+            cor: "#F58220",
+            ativa: isFilterDropdownOpen || mapFilter !== "all",
+            icone: <Layers className="w-4 h-4" />,
+            aoClicar: (e) => {
+              e.stopPropagation();
+              setIsFilterDropdownOpen(!isFilterDropdownOpen);
+            },
+          },
+          {
+            id: "laser",
+            grupo: "apresentar",
+            rotulo: "Laser",
+            ajuda: laserLigado
+              ? "Laser ligado (L ou Esc para desligar)"
+              : "Apontar durante a apresentação",
+            atalho: "L",
+            cor: "#E11D48",
+            ativa: laserLigado,
+            icone: <Crosshair className="w-4 h-4" />,
+            aoClicar: (e) => {
+              e.stopPropagation();
+              setLaserLigado((ligado) => !ligado);
+            },
+          },
+          {
+            id: "mapa-mental",
+            grupo: "apresentar",
+            rotulo: "Mapa mental",
+            ajuda: "Abrir o mapa mental da operação",
+            cor: "#C026D3",
+            ativa: isMindMapOpen,
+            icone: <Brain className="w-4 h-4" />,
+            aoClicar: () => {
+              if (isMindMapOpen) {
+                closeMindMap();
+                return;
               }
-            >
-              <GraduationCap className="w-5 h-5" />
-              <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-                {escolasLigadas ? "Escolas à vista" : "Escolas"}
-              </span>
-            </button>
-          </>
-        )}
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Button 4: Compartilhar Check-in - Green */}
-        <button
-          onClick={() => setIsShareModalOpen(true)}
-          className="group w-10 h-10 bg-emerald-600 hover:bg-emerald-500 border border-emerald-700 rounded-2xl flex items-center justify-center text-white cursor-pointer hover:scale-105 active:scale-95 transition-all relative"
-          title="Compartilhar Link de Check-in"
-        >
-          <Share2 className="w-5 h-5" />
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Compartilhar Link
-          </span>
-        </button>
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Laser: o mapa não tem o cabeçalho do painel, e desligar o laser
-            não pode depender de lembrar o atalho */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setLaserLigado((ligado) => !ligado);
-          }}
-          aria-pressed={laserLigado}
-          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
-            laserLigado
-              ? "bg-rose-600 border-rose-700 text-white ring-2 ring-rose-400/40"
-              : "bg-indigo-900/80 hover:bg-indigo-800 border-indigo-700 text-indigo-200"
-          }`}
-          title={
-            laserLigado
-              ? "Laser Pointer ligado (L ou Esc para desligar)"
-              : "Laser Pointer (atalho: L)"
-          }
-        >
-          <Crosshair className="w-5 h-5" />
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Laser Pointer
-          </span>
-        </button>
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Inteligência territorial: quem mora no território */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setTerritorioAberto((v) => !v);
-            setPesquisaLojasAberta(false);
-            setFiltroCheckInsAberto(false);
-            setIsFilterDropdownOpen(false);
-          }}
-          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
-            circuloAnalisado
-              ? "bg-emerald-600 border-emerald-700 text-white shadow-lg shadow-emerald-500/20"
-              : territorioAberto
-                ? "bg-indigo-700 border-indigo-600 text-white"
-                : "bg-indigo-900/80 hover:bg-indigo-800 border-indigo-700 text-indigo-200"
-          }`}
-          title="Inteligência territorial: população, bairros e Censo"
-        >
-          <Layers3 className="w-5 h-5" />
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Inteligência territorial
-          </span>
-        </button>
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Pesquisa de estabelecimentos: o que existe no terreno em volta */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setPesquisaLojasAberta((v) => !v);
-            setFiltroCheckInsAberto(false);
-            setIsFilterDropdownOpen(false);
-          }}
-          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
-            estabelecimentos.length > 0
-              ? "bg-violet-600 border-violet-700 text-white shadow-lg shadow-violet-500/20"
-              : pesquisaLojasAberta
-                ? "bg-indigo-700 border-indigo-600 text-white"
-                : "bg-indigo-900/80 hover:bg-indigo-800 border-indigo-700 text-indigo-200"
-          }`}
-          title="Pesquisar estabelecimentos na região"
-        >
-          <Store className="w-5 h-5" />
-          {estabelecimentos.length > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-[#F58220] border-2 border-[#0c1322] text-white text-[9px] font-black flex items-center justify-center">
-              {estabelecimentos.length}
-            </span>
-          )}
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Estabelecimentos
-          </span>
-        </button>
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Filtro dos check-ins: por pessoa, período, prioridade e tipo */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setFiltroCheckInsAberto((v) => !v);
-            setIsFilterDropdownOpen(false);
-          }}
-          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative border ${
-            filtrosDeCheckInLigados > 0
-              ? "bg-[#015FC9] border-blue-700 text-white shadow-lg shadow-blue-500/20"
-              : filtroCheckInsAberto
-                ? "bg-indigo-700 border-indigo-600 text-white"
-                : "bg-indigo-900/80 hover:bg-indigo-800 border-indigo-700 text-indigo-200"
-          }`}
-          title="Filtrar check-ins por pessoa, data, prioridade e tipo"
-        >
-          <Users className="w-5 h-5" />
-          {filtrosDeCheckInLigados > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-[#F58220] border-2 border-[#0c1322] text-white text-[9px] font-black flex items-center justify-center">
-              {filtrosDeCheckInLigados}
-            </span>
-          )}
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Filtrar check-ins
-          </span>
-        </button>
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Button 4: Exibir Camadas / Filtros - Layers Icon */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsFilterDropdownOpen(!isFilterDropdownOpen);
-          }}
-          className={`group w-10 h-10 ${
-            mapFilter !== "all"
-              ? "bg-[#F58220] border border-orange-600 text-white shadow-lg shadow-orange-500/20"
-              : "bg-indigo-900/80 hover:bg-indigo-800 border border-indigo-700 text-indigo-200"
-          } rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative`}
-          title="Filtrar Elementos do Mapa"
-        >
-          <Layers className="w-5 h-5" />
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Visualização
-          </span>
-        </button>
-
-        <div className="w-8 h-[1px] bg-slate-800/50" />
-
-        {/* Button 5: Mapa Mental (iframe embutido) */}
-        <button
-          onClick={() => {
-            if (isMindMapOpen) {
-              closeMindMap();
-              return;
-            }
-            setIsMindMapOpen(true);
-            setIsFilterDropdownOpen(false);
-          }}
-          className={`group w-10 h-10 rounded-2xl flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all relative ${
-            isMindMapOpen
-              ? "bg-fuchsia-600 hover:bg-fuchsia-500 border border-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20"
-              : "bg-fuchsia-900/80 hover:bg-fuchsia-800 border border-fuchsia-700 text-fuchsia-200"
-          }`}
-          title="Mapa Mental"
-        >
-          <Brain className="w-5 h-5" />
-          <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 border border-slate-800 text-white text-[10px] uppercase font-black tracking-widest rounded-lg whitespace-nowrap shadow-xl transition-all pointer-events-none z-[1100]">
-            Mapa Mental
-          </span>
-        </button>
-
-        {/* Map Layers Filter Dropdown Flyout */}
+              setIsMindMapOpen(true);
+              setIsFilterDropdownOpen(false);
+            },
+          },
+          {
+            id: "compartilhar",
+            grupo: "apresentar",
+            rotulo: "Compartilhar link",
+            ajuda: "Gerar o link de check-in da equipe",
+            cor: "#059669",
+            icone: <Share2 className="w-4 h-4" />,
+            aoClicar: () => setIsShareModalOpen(true),
+          },
+        ]}
+      >
+        {/* Filtro de camadas: encosta na borda do trilho, aberto ou fechado */}
         <AnimatePresence>
           {isFilterDropdownOpen && (
             <motion.div
@@ -12225,7 +12165,7 @@ export default function App() {
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: -15, scale: 0.95 }}
               transition={{ duration: 0.15, ease: "easeOut" }}
-              className="absolute left-[68px] top-0 bg-[#0c1322]/98 backdrop-blur-md border border-slate-800/90 rounded-3xl p-3 shadow-2xl flex flex-col gap-1 w-60 min-w-[220px] pointer-events-auto text-left z-[2000]"
+              className="ml-3 bg-[#0c1322]/98 backdrop-blur-md border border-slate-800/90 rounded-3xl p-3 shadow-2xl flex flex-col gap-1 w-60 min-w-[220px] pointer-events-auto text-left z-[2000]"
             >
               <div className="px-2.5 py-1.5 border-b border-slate-800/80 mb-1 flex items-center justify-between">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-sans">
@@ -12343,7 +12283,7 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </FerramentasDoMapa>
 
       {/* PASSO DO NOME: primeiro a escolha, os campos só para quem quis */}
       {nomeandoRaio && (
