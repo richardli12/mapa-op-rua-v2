@@ -335,6 +335,8 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
       riscando = true;
       arrastou = false;
       inicio = { x: e.clientX, y: e.clientY };
+      // A partir daqui o gesto é do laser: o mapa não pode vê-lo passar.
+      e.stopPropagation();
       cabecaRef.current = { x: e.clientX, y: e.clientY, visivel: true };
       // O traço novo começa do zero, e não emendado no que sobrou do último.
       pontosRef.current = [];
@@ -352,6 +354,7 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
       }
 
       if (riscando) {
+        e.stopPropagation();
         if (
           !arrastou &&
           Math.hypot(e.clientX - inicio.x, e.clientY - inicio.y) > 6
@@ -365,6 +368,7 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
     };
 
     const aoSubir = (e: PointerEvent) => {
+      if (riscando) e.stopPropagation();
       if (riscando && arrastou) {
         // Só o arrasto bloqueia o clique. Um toque seco continua clicando,
         // senão o laser transformaria o painel numa vitrine.
@@ -407,21 +411,57 @@ export default function LaserPointer({ ativo }: LaserPointerProps) {
       agendar();
     };
 
-    window.addEventListener('pointerdown', aoDescer, { passive: true });
-    window.addEventListener('pointermove', aoMover, { passive: true });
-    window.addEventListener('pointerup', aoSubir, { passive: true });
-    window.addEventListener('pointercancel', aoCancelar, { passive: true });
-    // Captura: o clique precisa ser barrado antes de chegar em quem escuta.
+    /**
+     * Enquanto o laser risca, o gesto é dele e de mais ninguém.
+     *
+     * O mapa arrasta com `mousedown` + `mousemove` (é assim que o Leaflet faz
+     * — ver Draggable.js), e esses avisos continuavam chegando nele: riscar
+     * em cima do mapa puxava o mapa junto. Barrar só o clique do fim não
+     * resolvia nada, porque o arrasto já tinha acontecido.
+     *
+     * Então, com o botão apertado, os avisos de mouse e de toque param na
+     * captura, antes de chegar em qualquer ouvinte da página. O clique
+     * continua nascendo normalmente — ele é gerado pelo navegador e não
+     * depende da propagação desses avisos —, então um toque seco em botão,
+     * link ou campo segue funcionando.
+     */
+    const barrarSeRiscando = (e: Event) => {
+      if (riscando) e.stopPropagation();
+    };
+
+    // Os próprios avisos do laser ficam na captura: se eles ficassem na
+    // subida, o `stopPropagation` daqui os calaria junto com os outros.
+    window.addEventListener('pointerdown', aoDescer, true);
+    window.addEventListener('pointermove', aoMover, true);
+    window.addEventListener('pointerup', aoSubir, true);
+    window.addEventListener('pointercancel', aoCancelar, true);
+
+    window.addEventListener('mousedown', barrarSeRiscando, true);
+    window.addEventListener('mousemove', barrarSeRiscando, true);
+    window.addEventListener('mouseup', barrarSeRiscando, true);
+    window.addEventListener('touchstart', barrarSeRiscando, true);
+    window.addEventListener('touchmove', barrarSeRiscando, true);
+    window.addEventListener('touchend', barrarSeRiscando, true);
+    window.addEventListener('dragstart', barrarSeRiscando, true);
+
+    // O clique do fim de um arrasto é barrado antes de chegar em quem escuta.
     window.addEventListener('click', aoClicar, true);
     window.addEventListener('resize', aoRedimensionar);
     document.addEventListener('mouseout', saiuDaJanela);
 
     return () => {
       raiz.classList.remove('laser-ligado');
-      window.removeEventListener('pointerdown', aoDescer);
-      window.removeEventListener('pointermove', aoMover);
-      window.removeEventListener('pointerup', aoSubir);
-      window.removeEventListener('pointercancel', aoCancelar);
+      window.removeEventListener('pointerdown', aoDescer, true);
+      window.removeEventListener('pointermove', aoMover, true);
+      window.removeEventListener('pointerup', aoSubir, true);
+      window.removeEventListener('pointercancel', aoCancelar, true);
+      window.removeEventListener('mousedown', barrarSeRiscando, true);
+      window.removeEventListener('mousemove', barrarSeRiscando, true);
+      window.removeEventListener('mouseup', barrarSeRiscando, true);
+      window.removeEventListener('touchstart', barrarSeRiscando, true);
+      window.removeEventListener('touchmove', barrarSeRiscando, true);
+      window.removeEventListener('touchend', barrarSeRiscando, true);
+      window.removeEventListener('dragstart', barrarSeRiscando, true);
       window.removeEventListener('click', aoClicar, true);
       window.removeEventListener('resize', aoRedimensionar);
       document.removeEventListener('mouseout', saiuDaJanela);
