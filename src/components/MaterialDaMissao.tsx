@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  ChevronLeft,
+  ChevronRight,
   Download,
   FileText,
   Image as ImagemIcone,
@@ -423,19 +425,39 @@ const ePdf = (item: MaterialDeApoio) =>
  * do preenchimento -- em celular, voltar nem sempre devolve o formulário do
  * jeito que estava. Aqui a imagem, o vídeo, o áudio e o PDF abrem por cima
  * da própria conversa, e fechar devolve exatamente a tela de antes.
+ *
+ * Serve ao check-in e à ficha da missão no mapa: é um visor só, para o
+ * arquivo abrir do mesmo jeito em qualquer lugar do sistema.
  */
-function VisorDoMaterial({
+export function VisorDoMaterial({
   item,
-  aoFechar
+  aoFechar,
+  aoAnterior,
+  aoProximo,
+  posicao
 }: {
   item: MaterialDeApoio;
   aoFechar: () => void;
+  /**
+   * Andar pelo material sem fechar e reabrir.
+   *
+   * Opcional: onde o material é um arquivo só, como no chip do check-in, as
+   * setas não aparecem. Onde é uma pasta — a missão com a arte, a planilha e
+   * o recado gravado — fechar a cada arquivo seria trabalho à toa.
+   */
+  aoAnterior?: () => void;
+  aoProximo?: () => void;
+  posicao?: { atual: number; total: number };
 }) {
   useEffect(() => {
-    const tecla = (e: KeyboardEvent) => e.key === 'Escape' && aoFechar();
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') aoFechar();
+      if (e.key === 'ArrowLeft') aoAnterior?.();
+      if (e.key === 'ArrowRight') aoProximo?.();
+    };
     window.addEventListener('keydown', tecla);
     return () => window.removeEventListener('keydown', tecla);
-  }, [aoFechar]);
+  }, [aoFechar, aoAnterior, aoProximo]);
 
   const corpo =
     item.tipo === 'imagem' ? (
@@ -486,7 +508,7 @@ function VisorDoMaterial({
         <p className="text-[12.5px] font-black text-slate-700 break-words">{item.nome}</p>
         <p className="text-[11px] text-slate-400 leading-snug">
           Este formato não abre aqui dentro. Baixe para ver no aplicativo do
-          seu aparelho — o check-in continua aberto.
+          seu aparelho — a tela continua aberta atrás.
         </p>
         <a
           href={item.url}
@@ -508,6 +530,11 @@ function VisorDoMaterial({
         <span className="min-w-0 flex-1 text-[11.5px] font-bold text-white/90 truncate">
           {item.nome}
         </span>
+        {posicao && posicao.total > 1 && (
+          <span className="text-[11px] font-black text-white/70 tabular-nums shrink-0">
+            {posicao.atual}/{posicao.total}
+          </span>
+        )}
         <a
           href={item.url}
           download={item.nome}
@@ -528,6 +555,33 @@ function VisorDoMaterial({
         </button>
       </div>
       <div className="flex-1 min-h-0 flex items-center justify-center">{corpo}</div>
+
+      {aoAnterior && posicao && posicao.total > 1 && (
+        <button
+          type="button"
+          onClick={e => {
+            e.stopPropagation();
+            aoAnterior();
+          }}
+          aria-label="Arquivo anterior"
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center cursor-pointer transition-colors"
+        >
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+      )}
+      {aoProximo && posicao && posicao.total > 1 && (
+        <button
+          type="button"
+          onClick={e => {
+            e.stopPropagation();
+            aoProximo();
+          }}
+          aria-label="Próximo arquivo"
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center cursor-pointer transition-colors"
+        >
+          <ChevronRight className="w-5 h-5" />
+        </button>
+      )}
     </div>,
     document.body
   );
