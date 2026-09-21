@@ -335,6 +335,8 @@ interface MapContainerProps {
   /** Faixas da escala de cor, do mais claro ao mais escuro. */
   escalaTerritorial?: { corte: number; cor: string }[];
   recorteEmFoco?: string | null;
+  /** 0 a 1: quanto da mancha aparece. Quem decide é a gaveta de camadas. */
+  opacidadeDosRecortes?: number;
   onRecorteClicado?: (id: string) => void;
   onRecorteSobOCursor?: (id: string | null) => void;
   /** Enquadra o mapa nos recortes assim que eles chegam. */
@@ -584,6 +586,7 @@ export default function MapContainer({
   recortesTerritoriais,
   escalaTerritorial,
   recorteEmFoco,
+  opacidadeDosRecortes = 1,
   onRecorteClicado,
   onRecorteSobOCursor,
   enquadrarRecortes,
@@ -1920,6 +1923,15 @@ export default function MapContainer({
     }
 
     const escala = escalaTerritorial || [];
+    /*
+     * A régua da transparência.
+     *
+     * O mapa embaixo é o trabalho: ruas, pontos, missões. A mancha do Censo é
+     * contexto, e contexto que tapa o trabalho vira estorvo — daí ela nascer
+     * translúcida e o controle da força ficar na mão de quem olha.
+     */
+    const forca = Math.max(0, Math.min(1, opacidadeDosRecortes));
+    const opacidadeDe = (base: number) => base * forca;
     /** Cor da faixa em que o valor cai. Sem dado tem cor própria. */
     const corDe = (valor: number | null) => {
       if (valor === null || valor === undefined) return '#CBD5E1';
@@ -1944,7 +1956,7 @@ export default function MapContainer({
             fillColor: corDe(recorte.valor),
             // Transparente de propósito: a mancha é contexto, e o que está
             // embaixo dela continua sendo o trabalho.
-            fillOpacity: semDado ? 0.25 : emFoco ? 0.72 : 0.55,
+            fillOpacity: opacidadeDe(semDado ? 0.25 : emFoco ? 0.72 : 0.55),
             dashArray: semDado ? '4, 4' : undefined
           }
         }
@@ -1961,7 +1973,11 @@ export default function MapContainer({
       camada.on('mouseover', () => {
         // O realce sai na hora, no próprio Leaflet: esperar o React repintar a
         // malha inteira atrasaria a resposta do gesto mais barato que existe.
-        camada.setStyle({ weight: 2.5, opacity: 0.95, fillOpacity: semDado ? 0.4 : 0.72 });
+        camada.setStyle({
+          weight: 2.5,
+          opacity: 0.95,
+          fillOpacity: opacidadeDe(semDado ? 0.4 : 0.72)
+        });
         camada.bringToFront();
         onRecorteSobOCursor?.(recorte.id);
       });
@@ -1969,7 +1985,7 @@ export default function MapContainer({
         camada.setStyle({
           weight: emFoco ? 2.5 : recorte.tipo === 'setor' ? 0.6 : 1,
           opacity: emFoco ? 0.9 : 0.45,
-          fillOpacity: semDado ? 0.25 : emFoco ? 0.72 : 0.55
+          fillOpacity: opacidadeDe(semDado ? 0.25 : emFoco ? 0.72 : 0.55)
         });
         onRecorteSobOCursor?.(null);
       });
@@ -2020,7 +2036,7 @@ export default function MapContainer({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recortesTerritoriais, escalaTerritorial, recorteEmFoco]);
+  }, [recortesTerritoriais, escalaTerritorial, recorteEmFoco, opacidadeDosRecortes]);
 
   /**
    * Círculo da análise territorial.

@@ -73,6 +73,22 @@ interface InteligenciaTerritorialProps {
   /** Recorte que o mapa está destacando, para a lista acompanhar. */
   recorteEmFoco?: string | null;
   onRecorteEmFoco?: (id: string | null) => void;
+  /**
+   * A camada ligada lá em cima, na gaveta da barra do mapa.
+   *
+   * Quem manda no que o mapa pinta é ela, não este painel: a mancha existe
+   * com o painel fechado, e é para isso que a gaveta serve. `null` é camada
+   * desligada — mapa sem mancha.
+   *
+   * O painel continua desenhando o que ele mesmo mostra quando está aberto,
+   * porque uma lista de bairros ao lado de um mapa branco não ajuda ninguém.
+   */
+  metricaDaCamada?: 'populacao' | 'densidade' | 'domicilios' | null;
+  nivelDaCamada?: 'bairros' | 'setores';
+  onMetricaDaCamada?: (
+    metrica: 'populacao' | 'densidade' | 'domicilios'
+  ) => void;
+  onNivelDaCamada?: (nivel: 'bairros' | 'setores') => void;
 }
 
 type Aba = 'raio' | 'bairros' | 'setores' | 'censo';
@@ -121,8 +137,21 @@ export default function InteligenciaTerritorial({
   onCirculoAnalisado,
   onRecortes,
   recorteEmFoco,
-  onRecorteEmFoco
+  onRecorteEmFoco,
+  metricaDaCamada = null,
+  nivelDaCamada = 'bairros',
+  onMetricaDaCamada,
+  onNivelDaCamada
 }: InteligenciaTerritorialProps) {
+  /**
+   * O painel trabalha fechado quando a camada está ligada.
+   *
+   * Cobertura, município e malha são cargas de rede, e antes todas esperavam
+   * o painel abrir. Com a camada na barra de cima, ligar "População" tem de
+   * pintar o mapa sem abrir painel nenhum — então quem libera as cargas é
+   * isto, não o `aberto`.
+   */
+  const camadaLigada = metricaDaCamada !== null;
   const [aba, setAba] = useState<Aba>('raio');
   /**
    * Meia tela ou tela cheia.
@@ -163,9 +192,15 @@ export default function InteligenciaTerritorial({
 
   /* ---------------------------------------------------------- desenho --- */
   const [desenharNoMapa, setDesenharNoMapa] = useState(true);
-  const [metrica, setMetrica] = useState<'populacao' | 'densidade' | 'domicilios'>(
-    'populacao'
-  );
+  const [metricaLocal, setMetricaLocal] = useState<
+    'populacao' | 'densidade' | 'domicilios'
+  >('populacao');
+  /** Uma métrica só, venha da gaveta ou da régua deste painel. */
+  const metrica = metricaDaCamada ?? metricaLocal;
+  const setMetrica = (nova: 'populacao' | 'densidade' | 'domicilios') => {
+    setMetricaLocal(nova);
+    onMetricaDaCamada?.(nova);
+  };
   const [carregandoDesenho, setCarregandoDesenho] = useState(false);
   /** Bairro cujos setores estão abertos: o recorte mais fino, um por vez. */
   const [bairroDosSetores, setBairroDosSetores] = useState<BairroDoTerritorio | null>(
@@ -220,7 +255,7 @@ export default function InteligenciaTerritorial({
   // Cobertura primeiro: malha e indicadores são cargas separadas no CCO, e uma
   // UF sem malha responde 404 em tudo — o que não é erro de quem chamou.
   useEffect(() => {
-    if (!aberto || ufsComTerritorio.length > 0) return;
+    if ((!aberto && !camadaLigada) || ufsComTerritorio.length > 0) return;
     setCarregandoCobertura(true);
     lerUfs()
       .then((dados) => {
@@ -242,11 +277,11 @@ export default function InteligenciaTerritorial({
       })
       .catch((falha) => setErro(falha))
       .finally(() => setCarregandoCobertura(false));
-  }, [aberto, ufsComTerritorio.length]);
+  }, [aberto, camadaLigada, ufsComTerritorio.length]);
 
   // Achar o município do cliente pelo nome, uma vez que a UF esteja escolhida.
   useEffect(() => {
-    if (!aberto || !uf || municipios.length > 0) return;
+    if ((!aberto && !camadaLigada) || !uf || municipios.length > 0) return;
     if (ufsComTerritorio.length > 0 && !ufsComTerritorio.includes(uf)) return;
 
     setCarregandoMunicipios(true);
@@ -270,7 +305,7 @@ export default function InteligenciaTerritorial({
       .catch((falha) => setErro(falha))
       .finally(() => setCarregandoMunicipios(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aberto, uf, ufsComTerritorio, cidadeDoCliente]);
+  }, [aberto, camadaLigada, uf, ufsComTerritorio, cidadeDoCliente]);
 
   const escolherMunicipio = async (alvo: MunicipioDoTerritorio) => {
     setErro(null);
@@ -401,11 +436,13 @@ export default function InteligenciaTerritorial({
    * está na memória, nada acontece; se não está, ela começa a vir.
    */
   useEffect(() => {
-    if (!aberto || aba !== 'setores' || !municipio) return;
+    const querSetores =
+      (aberto && aba === 'setores') || (camadaLigada && nivelDaCamada === 'setores');
+    if (!querSetores || !municipio) return;
     if (setoresDe === municipio.codigo) return;
     carregarSetoresDaCidade();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aberto, aba, municipio?.codigo]);
+  }, [aberto, aba, camadaLigada, nivelDaCamada, municipio?.codigo]);
 
   /** O bairro deixa de ser porta de entrada e vira filtro do que já está aqui. */
   const abrirSetores = async (bairro: BairroDoTerritorio) => {
@@ -494,7 +531,17 @@ export default function InteligenciaTerritorial({
    * entre os dez.
    */
   useEffect(() => {
-    if (!aberto || !desenharNoMapa) {
+    /*
+     * A mancha sobrevive ao painel.
+     *
+     * Antes o desenho morria junto com o fechamento: quem tinha acabado de
+     * escolher "densidade por setor" fechava o painel para ver o mapa e
+     * perdia exatamente o que tinha ido ver. Agora, com a camada ligada na
+     * barra, é ela quem manda — e o painel só desenha por conta própria
+     * enquanto está aberto.
+     */
+    const desenhar = camadaLigada || (aberto && desenharNoMapa);
+    if (!desenhar) {
       onRecortes([], []);
       return;
     }
@@ -508,7 +555,9 @@ export default function InteligenciaTerritorial({
      * mostrando setores, e a lista ao lado falaria de uma coisa enquanto o mapa
      * mostraria outra.
      */
-    const doSetor = aba === 'setores' && setoresNaTela.length > 0;
+    const doSetor = camadaLigada
+      ? nivelDaCamada === 'setores' && setoresNaTela.length > 0
+      : aba === 'setores' && setoresNaTela.length > 0;
     const fonte: {
       id: string;
       nome: string;
@@ -618,7 +667,17 @@ export default function InteligenciaTerritorial({
 
     onRecortes(comGeometria, escala);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aberto, desenharNoMapa, metrica, bairros, setores, bairroDosSetores, aba]);
+  }, [
+    aberto,
+    desenharNoMapa,
+    metrica,
+    bairros,
+    setores,
+    bairroDosSetores,
+    aba,
+    camadaLigada,
+    nivelDaCamada
+  ]);
 
   if (!aberto) return null;
 
@@ -804,6 +863,16 @@ export default function InteligenciaTerritorial({
               onClick={() => {
                 setAba(item.id);
                 if (item.id === 'bairros' && bairros.length === 0) carregarBairros();
+                /*
+                  A aba também é o recorte do desenho.
+
+                  Com a camada ligada na barra, quem escolhe aqui e vê o mapa
+                  continuar em bairros acha que a tela travou — são o mesmo
+                  controle em dois lugares, e precisam contar a mesma coisa.
+                */
+                if (item.id === 'bairros' || item.id === 'setores') {
+                  onNivelDaCamada?.(item.id);
+                }
               }}
               className={`flex-1 h-7 rounded-lg text-[11px] font-black uppercase tracking-wider cursor-pointer transition-all ${
                 aba === item.id

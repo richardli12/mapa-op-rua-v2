@@ -31,6 +31,9 @@ import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
 import FichaEstabelecimento from "./components/FichaEstabelecimento";
 import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import FichaDoRecorteNoMapa from "./components/FichaDoRecorteNoMapa";
+import CamadasDeInteligencia, {
+  EstadoDasCamadas,
+} from "./components/CamadasDeInteligencia";
 import { Estabelecimento } from "./services/estabelecimentos";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat, { MissaoDoCampo } from "./components/CheckInChat";
@@ -89,7 +92,6 @@ import {
   Star,
   Crosshair,
   Store,
-  Layers3,
   Maximize2,
   Navigation,
   TrendingUp,
@@ -996,6 +998,19 @@ export default function App() {
     { corte: number; cor: string }[]
   >([]);
   const [recorteEmFoco, setRecorteEmFoco] = useState<string | null>(null);
+  /**
+   * A gaveta de camadas da barra de cima.
+   *
+   * Ela é a dona do que o mapa pinta — métrica, recorte e força da mancha. O
+   * painel de meia tela virou o lugar de aprofundar, não o de ligar e
+   * desligar: ligar uma camada é gesto de barra, ao lado do recorte de data.
+   */
+  const [camadasAbertas, setCamadasAbertas] = useState(false);
+  const [camadas, setCamadas] = useState<EstadoDasCamadas>({
+    metrica: null,
+    nivel: "bairros",
+    opacidade: 1,
+  });
   const receberRecortes = React.useCallback(
     (lista: any[], escala: { corte: number; cor: string }[]) => {
       setRecortesTerritoriais(lista);
@@ -12770,21 +12785,6 @@ export default function App() {
               ]
             : []),
           {
-            id: "territorio",
-            grupo: "camadas",
-            rotulo: "Inteligência territorial",
-            ajuda: "População, bairros e dados do Censo",
-            cor: "#0D9488",
-            ativa: territorioAberto || !!circuloAnalisado,
-            icone: <Layers3 className="w-4 h-4" />,
-            aoClicar: (e) => {
-              e.stopPropagation();
-              setTerritorioAberto((v) => !v);
-              setPesquisaLojasAberta(false);
-              setIsFilterDropdownOpen(false);
-            },
-          },
-          {
             id: "estabelecimentos",
             grupo: "camadas",
             rotulo: "Estabelecimentos",
@@ -13205,6 +13205,12 @@ export default function App() {
         onRecortes={receberRecortes}
         recorteEmFoco={recorteEmFoco}
         onRecorteEmFoco={setRecorteEmFoco}
+        metricaDaCamada={camadas.metrica}
+        nivelDaCamada={camadas.nivel}
+        onMetricaDaCamada={(metrica) =>
+          setCamadas((atual) => ({ ...atual, metrica }))
+        }
+        onNivelDaCamada={(nivel) => setCamadas((atual) => ({ ...atual, nivel }))}
       />
 
       {/* PESQUISA DE ESTABELECIMENTOS */}
@@ -14585,6 +14591,7 @@ export default function App() {
           recortesTerritoriais={recortesTerritoriais}
           escalaTerritorial={escalaTerritorial}
           recorteEmFoco={recorteEmFoco}
+          opacidadeDosRecortes={camadas.opacidade}
           onRecorteSobOCursor={setRecorteEmFoco}
           enquadrarRecortes={territorioAberto}
           onRecorteClicado={(id) => {
@@ -14636,13 +14643,34 @@ export default function App() {
           */
           acoesDaBarra={
             adminUser && adminTab === "map" ? (
-              <FiltroDePeriodo
-                aberto={periodoAberto}
-                onAbrir={setPeriodoAberto}
-                valor={estadoDoPeriodo}
-                onMudar={mudarPeriodo}
-                contagem={contagemDoPeriodo}
-              />
+              <>
+                <FiltroDePeriodo
+                  aberto={periodoAberto}
+                  onAbrir={setPeriodoAberto}
+                  valor={estadoDoPeriodo}
+                  onMudar={mudarPeriodo}
+                  contagem={contagemDoPeriodo}
+                />
+                {/*
+                  As camadas do território ficam ao lado do recorte de data:
+                  são os dois filtros do que se vê no mapa, e filtro que mora
+                  em gaveta diferente do irmão obriga a procurar duas vezes.
+                */}
+                <CamadasDeInteligencia
+                  aberto={camadasAbertas}
+                  onAbrir={(v) => {
+                    setCamadasAbertas(v);
+                    if (v) setPeriodoAberto(false);
+                  }}
+                  valor={camadas}
+                  onMudar={setCamadas}
+                  inteligenciaAberta={territorioAberto}
+                  onInteligencia={(v) => {
+                    setTerritorioAberto(v);
+                    if (v) setPesquisaLojasAberta(false);
+                  }}
+                />
+              </>
             ) : null
           }
           tempPlacementColor={
