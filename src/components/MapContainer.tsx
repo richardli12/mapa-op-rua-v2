@@ -3786,6 +3786,9 @@ export default function MapContainer({
                       }}
                       notificar={notificar || (() => {})}
                       ligado
+                      galeria
+                      rotulo="Arquivos da ação"
+                      vazio="Foto, vídeo ou áudio do que foi feito. É o que prova a ação quando alguém perguntar."
                     />
                   </div>
                 </div>
