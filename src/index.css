@@ -894,3 +894,64 @@
   border: 3px solid #ffffff;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
 }
+
+/* ---------------------------------------------------------------------------
+ * Impressão do relatório do NEO
+ *
+ * O PDF sai pelo próprio navegador, e não por uma biblioteca que fotografa a
+ * tela: assim o texto continua texto no arquivo — dá para buscar e copiar, e o
+ * zoom não borra.
+ *
+ * O relatório é montado fora da árvore do app (portal para o body), então
+ * esconder o resto é uma regra só: some tudo que for filho direto do body e
+ * não for ele. `visibility` não serviria — o elemento escondido continuaria
+ * ocupando páginas em branco no arquivo.
+ * ------------------------------------------------------------------------ */
+@media print {
+  body.imprimindo-neo > *:not(.relatorio-neo-raiz) {
+    display: none !important;
+  }
+
+  body.imprimindo-neo .relatorio-neo-raiz {
+    position: static !important;
+    overflow: visible !important;
+    background: #fff !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+  }
+
+  body.imprimindo-neo .relatorio-neo-folha {
+    max-width: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  /* Botões e cabeçalho da janela não são conteúdo do documento. */
+  .nao-imprimir {
+    display: none !important;
+  }
+
+  /* Cartão partido ao meio entre duas páginas é o que estraga um relatório. */
+  .quebra-evitar {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /*
+   * Fundo escuro impresso vira mancha cinza, ou some, conforme o navegador.
+   * Pedir a impressão das cores exatas mantém o resumo executivo legível no
+   * papel, que é onde ele mais é lido.
+   */
+  body.imprimindo-neo .relatorio-neo-raiz * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+@page {
+  margin: 14mm;
+}

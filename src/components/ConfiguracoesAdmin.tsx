@@ -8,6 +8,7 @@ import {
   Loader2,
   RotateCcw,
   Save,
+  Brain,
   Search,
   ShieldCheck,
   X
@@ -26,7 +27,9 @@ import SecaoAcesso from './configuracoes/SecaoAcesso';
 import SecaoMidias from './configuracoes/SecaoMidias';
 import SecaoTurnos from './configuracoes/SecaoTurnos';
 import SecaoPrioridades from './configuracoes/SecaoPrioridades';
+import SecaoNeo from './configuracoes/SecaoNeo';
 import { EstadoDoCartao } from './configuracoes/pecas';
+import { CHAVE_PROMPT_NEO, PROMPT_NEO_PADRAO } from '../neo';
 
 interface Props {
   /** Endereço de saída usado quando nada foi configurado. */
@@ -74,6 +77,12 @@ const SECOES = [
     titulo: 'Níveis de prioridade',
     Icone: Flag,
     termos: 'prioridade prioridades nivel niveis grave urgente gravidade cor classificacao missao'
+  },
+  {
+    id: 'neo',
+    titulo: 'NEO — relatório de missão',
+    Icone: Brain,
+    termos: 'neo ia inteligencia artificial relatorio prompt analise modelo gpt missao documento pdf'
   }
 ];
 
@@ -119,6 +128,8 @@ export default function ConfiguracoesAdmin({
   const [turnos, setTurnos] = useState<JanelaDeTurno[]>(TURNOS_PADRAO);
   const [turnosSalvos, setTurnosSalvos] = useState<JanelaDeTurno[]>(TURNOS_PADRAO);
   const [niveis, setNiveis] = useState<PriorityLevel[]>([]);
+  const [promptNeo, setPromptNeo] = useState(PROMPT_NEO_PADRAO);
+  const [promptNeoSalvo, setPromptNeoSalvo] = useState(PROMPT_NEO_PADRAO);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [busca, setBusca] = useState('');
@@ -127,11 +138,12 @@ export default function ConfiguracoesAdmin({
 
   useEffect(() => {
     (async () => {
-      const [saida, midia, janelas, listaDeNiveis] = await Promise.all([
+      const [saida, midia, janelas, listaDeNiveis, neo] = await Promise.all([
         DatabaseService.lerConfiguracao(CHAVE_REDIRECIONAMENTO),
         DatabaseService.lerConfiguracao(CHAVE_GALERIA),
         DatabaseService.lerConfiguracao(CHAVE_TURNOS),
-        DatabaseService.fetchPriorityLevels()
+        DatabaseService.fetchPriorityLevels(),
+        DatabaseService.lerConfiguracao(CHAVE_PROMPT_NEO)
       ]);
       setRedirecionamento(saida.value || '');
       setRedirecionamentoSalvo(saida.value || '');
@@ -140,6 +152,11 @@ export default function ConfiguracoesAdmin({
       setTurnos(lidos);
       setTurnosSalvos(lidos);
       setNiveis(listaDeNiveis.data);
+      // Banco sem o ajuste ainda cai no prompt de fábrica, e não num campo
+      // vazio que faria o NEO recusar a primeira missão.
+      const instrucoes = neo.value || PROMPT_NEO_PADRAO;
+      setPromptNeo(instrucoes);
+      setPromptNeoSalvo(instrucoes);
       setCarregando(false);
     })();
   }, []);
@@ -151,6 +168,7 @@ export default function ConfiguracoesAdmin({
 
   const redirecionamentoPendente = redirecionamento.trim() !== redirecionamentoSalvo.trim();
   const turnosPendentes = JSON.stringify(turnos) !== JSON.stringify(turnosSalvos);
+  const promptNeoPendente = promptNeo.trim() !== promptNeoSalvo.trim();
 
   const pendencias = useMemo(() => {
     const lista: { id: string; rotulo: string; impedido?: string }[] = [];
@@ -170,12 +188,23 @@ export default function ConfiguracoesAdmin({
         impedido: conferenciaDeTurnos.erros[0]
       });
     }
+    if (promptNeoPendente) {
+      lista.push({
+        id: 'neo',
+        rotulo: 'Instruções do NEO',
+        impedido: promptNeo.trim()
+          ? undefined
+          : 'O NEO não roda sem instruções. Escreva algo ou restaure o texto de fábrica.'
+      });
+    }
     return lista;
   }, [
     redirecionamentoPendente,
     redirecionamentoInvalido,
     turnosPendentes,
-    conferenciaDeTurnos.erros
+    conferenciaDeTurnos.erros,
+    promptNeoPendente,
+    promptNeo
   ]);
 
   const impedimento = pendencias.find(p => p.impedido)?.impedido;
@@ -209,6 +238,13 @@ export default function ConfiguracoesAdmin({
         )
       );
     }
+    if (promptNeoPendente) {
+      tarefas.push(
+        DatabaseService.gravarConfiguracao(CHAVE_PROMPT_NEO, promptNeo.trim()).then(
+          r => !!r.success
+        )
+      );
+    }
     const resultados = await Promise.all(tarefas);
     setSalvando(false);
 
@@ -221,6 +257,7 @@ export default function ConfiguracoesAdmin({
       setTurnosSalvos(turnos);
       onTurnosMudarem?.(turnos);
     }
+    if (promptNeoPendente) setPromptNeoSalvo(promptNeo.trim());
     notify(
       pendencias.length === 1
         ? `${pendencias[0].rotulo}: salvo!`
@@ -543,6 +580,14 @@ export default function ConfiguracoesAdmin({
               onRemover={removerNivel}
               onReordenar={reordenarNiveis}
               ligado={isDatabaseConfigured}
+            />
+          )}
+
+          {visivel('neo') && (
+            <SecaoNeo
+              valor={promptNeo}
+              onMudar={setPromptNeo}
+              estado={estadoDo(promptNeoPendente)}
             />
           )}
 
