@@ -5,7 +5,7 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Link2 as LinkIcon } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Sparkles, Link2 as LinkIcon } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
 import {
@@ -3795,7 +3795,9 @@ export default function MapContainer({
                     {
                       topico: 'missao' as const,
                       titulo: 'Feedback Missão',
-                      ajuda: 'O que saiu da ordem que foi dada.',
+                      ajuda: '',
+                      cor: missaoAberta.cor,
+                      Icone: Target,
                       itens: narrativasNaTela,
                       aoMudar: setNarrativasNaTela,
                       vazio:
@@ -3805,24 +3807,71 @@ export default function MapContainer({
                       topico: 'organico' as const,
                       titulo: 'Feedback Orgânico',
                       ajuda: 'O que apareceu sem ordem nenhuma.',
+                      // Cor própria, e não a da missão: a origem diferente
+                      // precisa ser vista antes de ser lida.
+                      cor: '#7C3AED',
+                      Icone: Sparkles,
                       itens: organicasNaTela,
                       aoMudar: setOrganicasNaTela,
                       vazio:
                         'O que chegou por fora: print de grupo, vídeo de morador, áudio que alguém mandou.'
                     }
-                  ].map((bloco) => (
+                  ].map((bloco) => {
+                    const prontos = bloco.itens.filter(
+                      (i) => i.estado === 'pronto'
+                    ).length;
+                    return (
                     <div
                       key={bloco.topico}
-                      className="border-t border-slate-200/70 pt-3"
+                      className="rounded-xl bg-white border border-slate-200 overflow-hidden"
                     >
-                      <div className="flex items-baseline gap-2 mb-2">
-                        <p className="text-[11.5px] font-black text-[#0D233A]">
-                          {bloco.titulo}
-                        </p>
-                        <p className="text-[10.5px] font-semibold text-slate-400 truncate">
-                          {bloco.ajuda}
-                        </p>
+                      {/*
+                        O TÍTULO COMO FAIXA, NÃO COMO LINHA DE TEXTO.
+
+                        São duas listas de arquivo parecidíssimas uma com a
+                        outra: mesma galeria, mesmos três botões. O que separa
+                        as duas é só o nome — então o nome precisa ser a coisa
+                        mais visível do bloco, com cor, ícone e a contagem do
+                        que tem dentro. Um rótulo cinza de onze pixels entre
+                        duas grades de fotos não separa nada.
+                      */}
+                      <div
+                        className="flex items-center gap-2.5 px-3 py-2.5 border-l-[3px]"
+                        style={{
+                          borderLeftColor: bloco.cor,
+                          backgroundColor: `${bloco.cor}0F`
+                        }}
+                      >
+                        <span
+                          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-sm"
+                          style={{ backgroundColor: bloco.cor }}
+                        >
+                          <bloco.Icone className="w-4 h-4 text-white stroke-[2.5]" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className="text-[13px] font-black leading-tight tracking-tight"
+                            style={{ color: bloco.cor }}
+                          >
+                            {bloco.titulo}
+                          </p>
+                          {bloco.ajuda && (
+                            <p className="text-[10.5px] font-semibold text-slate-500 leading-snug truncate">
+                              {bloco.ajuda}
+                            </p>
+                          )}
+                        </div>
+                        <span
+                          className="shrink-0 px-2.5 h-[22px] rounded-full bg-white text-[10px] font-black uppercase tracking-wider flex items-center border"
+                          style={{ color: bloco.cor, borderColor: `${bloco.cor}33` }}
+                        >
+                          {prontos === 0
+                            ? 'vazio'
+                            : `${prontos} ${prontos === 1 ? 'arquivo' : 'arquivos'}`}
+                        </span>
                       </div>
+
+                      <div className="p-3">
                       <EditorDeMaterial
                         itens={bloco.itens}
                         onMudar={(itens) => {
@@ -3846,8 +3895,10 @@ export default function MapContainer({
                         rotulo="Arquivos"
                         vazio={bloco.vazio}
                       />
+                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
