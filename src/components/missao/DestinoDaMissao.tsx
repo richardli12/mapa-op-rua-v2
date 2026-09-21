@@ -1,9 +1,8 @@
 import React from 'react';
 import { Check, Users } from 'lucide-react';
-import { EditorDeMaterial, ItemMaterial } from '../MaterialDaMissao';
 
 /**
- * Para quem a missão vai — cliente, material e equipe.
+ * Para quem a missão vai — cliente e equipe.
  *
  * Este bloco existia duas vezes, palavra por palavra: uma no formulário da
  * área e outra no do ponto. Cento e setenta e cinco linhas iguais, que
@@ -26,11 +25,6 @@ interface Props {
   mostrarSeletor: boolean;
   /** O cliente que o mapa impõe, quando o seletor não aparece. */
   clienteDoMapa: string;
-
-  material: ItemMaterial[];
-  onMaterial: (itens: ItemMaterial[]) => void;
-  notificar: (texto: string, tipo?: 'success' | 'error' | 'info') => void;
-  bancoLigado: boolean;
 
   equipe: any[];
   selecionados: string[];
@@ -55,10 +49,6 @@ export default function DestinoDaMissao({
   clientes,
   mostrarSeletor,
   clienteDoMapa,
-  material,
-  onMaterial,
-  notificar,
-  bancoLigado,
   equipe,
   selecionados,
   onSelecionados
@@ -103,13 +93,6 @@ export default function DestinoDaMissao({
           </select>
         </div>
       )}
-
-      <EditorDeMaterial
-        itens={material}
-        onMudar={onMaterial}
-        notificar={notificar}
-        ligado={bancoLigado}
-      />
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-2">
