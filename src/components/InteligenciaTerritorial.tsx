@@ -10,6 +10,8 @@ import {
   Search,
   Info,
   ChevronRight,
+  Maximize2,
+  Minimize2,
   Map as MapIcon
 } from 'lucide-react';
 import {
@@ -106,6 +108,14 @@ export default function InteligenciaTerritorial({
   onRecorteEmFoco
 }: InteligenciaTerritorialProps) {
   const [aba, setAba] = useState<Aba>('raio');
+  /**
+   * Meia tela ou tela cheia.
+   *
+   * O mesmo par do Mapa Mental, de propósito: são os dois painéis grandes do
+   * mapa, e aprender dois comportamentos para a mesma pergunta — "quero mais
+   * espaço" — seria trabalho de quem usa, não do sistema.
+   */
+  const [telaCheia, setTelaCheia] = useState(false);
   const [erro, setErro] = useState<ErroDoTerritorio | null>(null);
 
   /* ------------------------------------------------------- cobertura --- */
@@ -460,7 +470,27 @@ export default function InteligenciaTerritorial({
   ];
 
   return (
-    <div className="absolute left-[5.5rem] top-1/2 -translate-y-1/2 z-[1200] w-[360px] max-h-[88vh] bg-white rounded-3xl shadow-2xl border border-slate-200/80 flex flex-col font-sans animate-in fade-in slide-in-from-left-2 duration-150">
+    /*
+     * PAINEL DE MEIA TELA, NÃO CARTÃO FLUTUANTE.
+     *
+     * Isto era um cartão de 360px boiando sobre o mapa, e o conteúdo não
+     * cabia: nome de aba cortado no meio ("Domicílios e sanea..."), pirâmide
+     * etária espremida em barras de dois centímetros, tabela de indicadores
+     * rolando sem fim. Uma tela de análise territorial precisa de largura
+     * para ser lida — é disso que ela trata.
+     *
+     * Agora ela entra no fluxo da página, como o Mapa Mental: metade da tela
+     * para ela, metade para o mapa, os dois visíveis ao mesmo tempo. Empurrar
+     * o mapa em vez de cobri-lo é o que deixa clicar num bairro da lista e
+     * ver onde ele fica, sem fechar nada.
+     */
+    <div
+      className={
+        telaCheia
+          ? 'fixed inset-0 z-[3200] bg-white flex flex-col font-sans animate-in fade-in duration-150'
+          : 'order-3 h-full w-1/2 min-w-[380px] shrink-0 z-[1002] bg-white border-l border-slate-200 shadow-2xl flex flex-col font-sans animate-in fade-in slide-in-from-right-4 duration-200'
+      }
+    >
       {/* CABEÇALHO */}
       <div className="px-4 pt-4 pb-3 border-b border-slate-100 shrink-0">
         <div className="flex items-start justify-between gap-2">
@@ -475,14 +505,29 @@ export default function InteligenciaTerritorial({
                 : 'População e Censo do território'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onFechar}
-            title="Fechar"
-            className="w-8 h-8 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition-colors shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setTelaCheia((v) => !v)}
+              title={telaCheia ? 'Voltar para meia tela' : 'Abrir em tela cheia'}
+              aria-label={telaCheia ? 'Voltar para meia tela' : 'Abrir em tela cheia'}
+              className="w-8 h-8 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition-colors"
+            >
+              {telaCheia ? (
+                <Minimize2 className="w-4 h-4" />
+              ) : (
+                <Maximize2 className="w-4 h-4" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={onFechar}
+              title="Fechar"
+              className="w-8 h-8 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* UF e município */}
@@ -581,7 +626,17 @@ export default function InteligenciaTerritorial({
       </div>
 
       {/* CORPO */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3.5">
+      {/*
+        O CONTEÚDO RESPONDE À LARGURA DO PAINEL, NÃO À DA JANELA.
+ 
+        Meia tela num notebook e meia tela num monitor grande são larguras
+        muito diferentes, e o painel ainda abre em tela cheia. Consulta de
+        container (`@container`) mede a caixa em que o conteúdo está, que é a
+        medida que decide se cabem duas colunas — `md:` e `lg:` mediriam a
+        janela e dariam duas colunas num painel estreito ao lado de um monitor
+        largo.
+      */}
+      <div className="@container flex-1 min-h-0 overflow-y-auto px-4 py-3.5">
         {erro && (
           <div className="mb-3 p-3 rounded-xl bg-rose-50 border border-rose-100">
             <p className="text-[11.5px] font-bold text-rose-700 flex items-start gap-1.5 leading-snug">
@@ -835,7 +890,7 @@ export default function InteligenciaTerritorial({
                     Carregando bairros...
                   </p>
                 ) : (
-                  <div className="mt-2 flex flex-col gap-1.5">
+                  <div className="mt-2 grid grid-cols-1 @2xl:grid-cols-2 @5xl:grid-cols-3 gap-1.5">
                     {bairrosNaTela.map((bairro, posicao) => {
                       const densidade =
                         bairro.areaKm2 && bairro.populacao
@@ -975,7 +1030,7 @@ export default function InteligenciaTerritorial({
                   </p>
                 )}
 
-                <div className="mt-2 flex flex-col gap-1.5">
+                <div className="mt-2 grid grid-cols-1 @2xl:grid-cols-2 @5xl:grid-cols-3 gap-1.5">
                   {setores.map((setor) => {
                     const densidade =
                       setor.areaKm2 && setor.populacao !== null
@@ -1079,7 +1134,15 @@ export default function InteligenciaTerritorial({
                 )}
 
                 {censo?.status === 'ok' && (
-                  <div className="mt-3 space-y-2">
+                  /*
+                   * Os grupos viram colunas de alvenaria quando há largura.
+                   *
+                   * Empilhados, "Domicílios" ficava a três rolagens de
+                   * "População" e comparar os dois virava exercício de
+                   * memória. Lado a lado, a leitura é de relance — que é a
+                   * única razão de existir uma tela de indicadores.
+                   */
+                  <div className="mt-3 @2xl:columns-2 @5xl:columns-3 gap-2 space-y-2 [&>*]:break-inside-avoid">
                     {censo.grupos.map((grupo) => {
                       const aberto2 = grupoAberto === grupo.id;
                       const lista = aberto2
