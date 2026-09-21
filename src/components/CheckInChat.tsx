@@ -8,6 +8,7 @@ import {
   Loader2,
   Maximize2,
   MapPin,
+  Navigation,
   MessageSquare,
   Pencil,
   Plus,
@@ -77,7 +78,16 @@ import FolhaDeSaida from './checkin/FolhaDeSaida';
 import Concluido from './checkin/Concluido';
 import OrdemDoComite from './checkin/OrdemDoComite';
 import { MidiaItem, MidiaTipo, MissaoDoCampo, ObservacaoItem } from './checkin/tipos';
-import { cumpridaHoje, eUrgente, nivelDoTopo } from './checkin/missoes';
+import {
+  cumpridaHoje,
+  distanciaCurta,
+  distanciaEmMetros,
+  eUrgente,
+  linkDeRota,
+  nivelDoTopo,
+  situacaoDeChegada
+} from './checkin/missoes';
+import Chegada from './checkin/Chegada';
 
 /*
  * O tipo continua saindo daqui para quem já o importava — o painel monta as
@@ -304,6 +314,21 @@ function FioDoCheckIn({
   const ultimoGeocodeRef = useRef<{ lat: number; lng: number } | null>(null);
   /** Espelho de `seguirGps` para ser lido dentro dos avisos do GPS e do mapa. */
   const seguirGpsRef = useRef(true);
+  /**
+   * Indo para uma missão: o GPS não pode parar.
+   *
+   * No registro livre a captura é uma foto do lugar — pega a melhor leitura,
+   * desliga e economiza bateria. Indo para a missão é outra coisa: a tela diz
+   * "faltam 640 m" e esse número tem de encolher enquanto a pessoa anda. Com
+   * o acompanhamento desligado ela caminharia até a porta e o botão de
+   * iniciar continuaria apagado, jurando que ela está a seiscentos metros de
+   * onde está pisando.
+   *
+   * Por isso, enquanto a missão não começa, toda leitura vale — inclusive a
+   * de precisão pior, porque ela não é um chute melhor sobre o mesmo ponto: é
+   * um ponto novo.
+   */
+  const seguindoMissaoRef = useRef(false);
   /** Id do check-in: nasce com a tela e acompanha o rascunho até o fim. */
   const checkInIdRef = useRef('checkin_' + Math.random().toString(36).substr(2, 9));
   /** Prévias locais criadas com objectURL, para devolver a memória no fim. */
@@ -415,6 +440,29 @@ function FioDoCheckIn({
 
   /** A ordem urgente chegou com um registro livre já em andamento. */
   const urgenteEsperando = urgentesPendentes.length > 0 && !travado;
+
+  /**
+   * O check-in é de missão?
+   *
+   * É a pergunta que muda a forma da tela inteira. Com missão, o comitê já
+   * decidiu o que é para fazer e o quanto aquilo é grave — perguntar de novo
+   * na rua é pedir para a pessoa concordar consigo mesma, com o risco de ela
+   * contradizer a classificação de quem mandou. Então a etapa da ação some,
+   * e o que sobra é o que só quem está lá pode dar: chegar, fotografar,
+   * contar o que viu.
+   */
+  const modoMissao = !!missao;
+
+  /**
+   * Escolhida a missão, a etapa da ação não existe mais.
+   *
+   * Vale também para a ordem urgente que entra sozinha: a tela tranca e já
+   * abre na chegada, sem passar por uma pergunta que não é mais dela.
+   */
+  useEffect(() => {
+    if (modoMissao && etapa === 1) setEtapa(2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoMissao]);
 
   /** O turno que está acontecendo agora, recalculado a cada pulso. */
   const turnoAgora = React.useMemo(() => turnoDeAgora(janelas), [janelas, pulso]);
@@ -562,13 +610,10 @@ function FioDoCheckIn({
      * escondida pela própria rolagem automática. Enquanto ela não confirma a
      * primeira etapa, quem manda na tela é a ordem.
      */
-    const ancora =
-      travado && !operacoesConfirmadas ? blocoMissoesRef.current : fimRef.current;
+    const naOrdem = travado && etapa <= 2 && !localConfirmado;
+    const ancora = naOrdem ? blocoMissoesRef.current : fimRef.current;
     const ir = () =>
-      ancora?.scrollIntoView({
-        behavior: 'smooth',
-        block: travado && !operacoesConfirmadas ? 'start' : 'end'
-      });
+      ancora?.scrollIntoView({ behavior: 'smooth', block: naOrdem ? 'start' : 'end' });
     const perto = setTimeout(ir, 90);
     const longe = setTimeout(ir, 520);
     return () => {
@@ -584,7 +629,7 @@ function FioDoCheckIn({
     operacoes,
     mapaPronto,
     travado,
-    operacoesConfirmadas
+    localConfirmado
   ]);
 
   /**
@@ -657,7 +702,7 @@ function FioDoCheckIn({
    * Cada chamada leva um número de ordem: resposta atrasada de um ponto antigo
    * é descartada, senão o endereço de um arrasto anterior sobrescreveria o atual.
    */
-  const atualizarEndereco = async (lat: number, lng: number) => {
+  const atualizarEndereco = async (lat: number, lng: number, forcado = false) => {
     // Recentralizar no GPS repete o mesmo ponto: o Nominatim não precisa saber.
     const anterior = ultimoGeocodeRef.current;
     if (
@@ -667,6 +712,24 @@ function FioDoCheckIn({
     ) {
       setAjustando(false);
       return;
+    }
+    /*
+     * Andando até a missão, o endereço espera.
+     *
+     * O acompanhamento entrega uma leitura por segundo, e uma consulta de
+     * endereço por leitura é uma consulta por segundo no Nominatim — que
+     * responde a isso bloqueando o serviço inteiro. Durante o trajeto o
+     * endereço também não serve para nada: quem está andando olha a
+     * distância, não o nome da rua em que pisa agora. Ele é buscado de novo a
+     * cada oitenta metros, para o cartão não ficar mentindo, e sempre na hora
+     * de iniciar a missão, que é quando ele vira parte do registro.
+     */
+    if (!forcado && seguindoMissaoRef.current && anterior) {
+      const longe = distanciaEmMetros(anterior, { lat, lng });
+      if (longe < 80) {
+        setAjustando(false);
+        return;
+      }
     }
     ultimoGeocodeRef.current = { lat, lng };
 
@@ -713,8 +776,9 @@ function FioDoCheckIn({
     };
 
     const receber = (pos: GeolocationPosition) => {
+      const seguindo = seguindoMissaoRef.current;
       const anterior = melhor?.coords.accuracy ?? Infinity;
-      if (melhor && pos.coords.accuracy > anterior) return;
+      if (!seguindo && melhor && pos.coords.accuracy > anterior) return;
       melhor = pos;
 
       const { latitude, longitude, accuracy } = pos.coords;
@@ -730,17 +794,35 @@ function FioDoCheckIn({
       }
 
       // Boa o bastante: não adianta gastar bateria atrás de mais precisão.
-      if (accuracy && accuracy <= 20) encerrarBusca();
+      // Indo para a missão, porém, o que interessa não é a precisão: é o
+      // próximo passo que a pessoa dá.
+      if (!seguindo && accuracy && accuracy <= 20) encerrarBusca();
     };
 
     watchRef.current = navigator.geolocation.watchPosition(
       receber,
       err => {
+        /*
+         * Erro de GPS quase nunca é o fim do GPS.
+         *
+         * Quem anda dois quarteirões entra numa galeria, passa embaixo de uma
+         * marquise e o aparelho devolve "posição indisponível" por alguns
+         * segundos — e volta sozinho assim que enxerga o céu. Encerrar o
+         * acompanhamento no primeiro tropeço congelava a distância até a
+         * missão: a pessoa chegava na porta e o botão de iniciar continuava
+         * apagado, jurando que ela estava a dois quilômetros dali.
+         *
+         * Então, indo para a missão e já tendo uma leitura no bolso, o erro é
+         * ignorado. Só a negativa de permissão e o erro antes da primeira
+         * leitura encerram de verdade.
+         */
+        const negado = err?.code === 1;
+        if (!negado && melhor && seguindoMissaoRef.current) return;
         encerrarBusca();
         setBuscandoGps(false);
         if (melhor) return; // já havia uma leitura boa; o erro seguinte não apaga
         setErroGps(
-          err?.code === 1
+          negado
             ? 'Permita o acesso à localização para continuar.'
             : 'Não foi possível capturar sua localização agora.'
         );
@@ -748,7 +830,9 @@ function FioDoCheckIn({
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
 
-    setTimeout(encerrarBusca, 12000);
+    setTimeout(() => {
+      if (!seguindoMissaoRef.current) encerrarBusca();
+    }, 12000);
   };
 
   useEffect(() => {
@@ -758,6 +842,19 @@ function FioDoCheckIn({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Pegando uma missão depois de o GPS já ter desligado, ele volta a ligar.
+   *
+   * O acompanhamento se encerra sozinho quando a leitura fica boa — e é aí
+   * que a pessoa costuma escolher a missão. Sem isto, ela sairia andando com
+   * a distância congelada no valor de quando abriu a tela.
+   */
+  useEffect(() => {
+    seguindoMissaoRef.current = modoMissao && !localConfirmado;
+    if (seguindoMissaoRef.current && watchRef.current === null) capturarLocal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoMissao, localConfirmado]);
 
   /**
    * Fim do arrasto: o centro do mapa vira a coordenada do check-in.
@@ -790,7 +887,7 @@ function FioDoCheckIn({
       storagePath: o.storagePath,
       durationSeconds: o.duracao
     }));
-    const operations: CheckInOperationRef[] = operacoes.map(op => ({
+    const operations: CheckInOperationRef[] = operacoesDoRegistro.map(op => ({
       operationTypeId: op.id,
       operationTypeLabel: op.label
     }));
@@ -815,11 +912,11 @@ function FioDoCheckIn({
       mode: missao ? 'missao' : 'livre',
       missionId: missao?.id,
       missionTitle: missao?.title,
-      priority: prioridade || undefined,
+      priority: prioridadeDoRegistro || undefined,
       status,
       // Primeiro tipo escolhido, para as telas antigas que leem uma operação só.
-      operationTypeId: operacoes[0]?.id,
-      operationTypeLabel: operacoes[0]?.label,
+      operationTypeId: operacoesDoRegistro[0]?.id,
+      operationTypeLabel: operacoesDoRegistro[0]?.label,
       accuracy: precisao,
       memberId: member?.id || '',
       memberPhoto: fotoMembro
@@ -829,6 +926,21 @@ function FioDoCheckIn({
   const confirmarLocal = () => {
     // O ponto salvo é o centro do mapa neste instante, já ajustado pela pessoa.
     if (!coords || ajustando) return;
+    /*
+     * Missão só começa no lugar dela.
+     *
+     * A doca já mantém o botão apagado enquanto a pessoa está longe, mas a
+     * checagem mora aqui também: o botão da tela cheia do mapa chama esta
+     * mesma função, e uma regra que vale em um caminho e não no outro não é
+     * regra.
+     */
+    if (modoMissao && !chegada.pode) {
+      avisar(
+        `Você ainda está a ${distanciaCurta(chegada.faltam)} do ponto da missão.`,
+        'error'
+      );
+      return;
+    }
     // A partir daqui o ponto está fechado: o GPS para de acompanhar.
     if (watchRef.current !== null) {
       navigator.geolocation.clearWatch(watchRef.current);
@@ -837,6 +949,8 @@ function FioDoCheckIn({
     definirSeguirGps(false);
     setLocalConfirmado(true);
     marcarHora('local');
+    // O endereço do ponto gravado é buscado agora, sem a espera do trajeto.
+    if (modoMissao) atualizarEndereco(coords.lat, coords.lng, true);
     // Veio da revisão para corrigir? Confirmado o ajuste, volta direto para lá.
     setEtapa(midiasConfirmadas && obsConfirmadas ? 5 : 3);
     // O rascunho passa a existir no banco: é nele que as mídias vão se ligar.
@@ -1002,6 +1116,48 @@ function FioDoCheckIn({
     return [...porId.values()];
   }, [operationTypes, tiposCriados]);
 
+  /**
+   * A ação e a prioridade que vão para o banco.
+   *
+   * No registro livre são as que a pessoa marcou. Na missão são as que o
+   * comitê definiu quando mandou a ordem — o rótulo sai do cadastro do
+   * cliente pelo id que veio junto, e não do texto solto, para o painel poder
+   * agrupar depois. Missão de área não traz tipo nenhum: aí o check-in vai
+   * sem operação, e quem classifica é o título da missão.
+   */
+  const operacoesDoRegistro = React.useMemo<OperationType[]>(() => {
+    if (!modoMissao) return operacoes;
+    const doCadastro = missao?.tipoId
+      ? tiposDisponiveis.find(t => t.id === missao.tipoId)
+      : undefined;
+    if (doCadastro) return [doCadastro];
+    if (missao?.tipoId && missao?.tipoLabel) {
+      // Tipo apagado do cadastro depois de a missão ter sido criada.
+      return [{ id: missao.tipoId, label: missao.tipoLabel } as OperationType];
+    }
+    return [];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoMissao, operacoes, missao, tiposDisponiveis]);
+
+  const prioridadeDoRegistro = modoMissao ? missao?.priority || '' : prioridade;
+
+  /** O nível que vai gravado: o da ordem na missão, o marcado no livre. */
+  const nivelDoRegistro = opcoesPrioridade.find(n => n.id === prioridadeDoRegistro);
+
+  /**
+   * A trava de chegada da missão escolhida.
+   *
+   * Recalculada a cada leitura nova do GPS: é ela que faz o "faltam 640 m"
+   * encolher enquanto a pessoa anda, e é ela que acende o botão de iniciar.
+   */
+  const chegada = React.useMemo(
+    () =>
+      missao
+        ? situacaoDeChegada(missao, coords, precisao)
+        : { pode: false, semLocal: false, distancia: null, faltam: 0, limite: 0 },
+    [missao, coords, precisao]
+  );
+
   /** Nome já usado no cliente, olhando também as categorias desligadas. */
   const nomeJaExiste = (nome: string) =>
     [...tiposDisponiveis.map(t => t.label), ...nomesReservados].some(
@@ -1109,8 +1265,14 @@ function FioDoCheckIn({
   };
 
   // ------------------------------------------------------------ confirmação
+  /*
+   * Na missão são três etapas, e não quatro: a ação veio com a ordem.
+   */
   const pronto =
-    localConfirmado && midiasConfirmadas && obsConfirmadas && operacoesConfirmadas;
+    localConfirmado &&
+    midiasConfirmadas &&
+    obsConfirmadas &&
+    (modoMissao || operacoesConfirmadas);
 
   const confirmar = async () => {
     if (!pronto || !coords || salvando) return;
@@ -1184,18 +1346,28 @@ function FioDoCheckIn({
 
   const AvatarMembro = <Avatar nome={nomeMembro} foto={fotoMembro} />;
 
-  /** As cinco etapas do jeito que a trilha do cabeçalho precisa. */
+  /**
+   * A trilha muda de tamanho conforme o caminho.
+   *
+   * Registro livre tem cinco etapas; missão tem quatro, porque a ação já veio
+   * decidida. Mostrar uma etapa "Ação" apagada e intocável na missão seria
+   * dizer que falta alguma coisa que não falta.
+   */
   const etapasDaTrilha: EtapaDaTrilha[] = [
-    {
-      numero: 1,
-      rotulo: 'Ação',
-      icone: <Flag className="w-3.5 h-3.5" />,
-      feita: operacoesConfirmadas
-    },
+    ...(modoMissao
+      ? []
+      : [
+          {
+            numero: 1,
+            rotulo: 'Ação',
+            icone: <Flag className="w-3.5 h-3.5" />,
+            feita: operacoesConfirmadas
+          }
+        ]),
     {
       numero: 2,
-      rotulo: 'Local',
-      icone: <MapPin className="w-3.5 h-3.5" />,
+      rotulo: modoMissao ? 'Chegada' : 'Local',
+      icone: modoMissao ? <Navigation className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />,
       feita: localConfirmado
     },
     {
@@ -1503,24 +1675,41 @@ function FioDoCheckIn({
                     setMissaoId(id);
                     // Tocou: já viu. A marca de novidade sai daqui.
                     if (id) setMissoesNovas(prev => prev.filter(n => n !== id));
+                    /*
+                     * A escolha muda o caminho, e o caminho muda de etapa.
+                     * Pegando missão, a pergunta da ação deixa de existir;
+                     * largando a missão antes de ter respondido a ela, é para
+                     * lá que a conversa tem de voltar.
+                     */
+                    if (id && etapa === 1) setEtapa(2);
+                    if (!id && !operacoesConfirmadas) setEtapa(1);
                   }}
                   novas={novasDePe}
                   niveis={niveis}
                   janelas={janelas}
                   turnoAgora={turnoAgora}
                   coords={coords}
+                  rotaNaDoca={etapa === 2 && modoMissao}
                 />
               </div>
             </div>
           </>
         )}
 
-        {/* ETAPA 1: tipo de ação do cliente */}
-        <Fala hora={horas.abertura} atraso={missoes.length > 0 ? 700 : 450}>
-          O que você vai fazer aqui, e qual a prioridade disso?
-        </Fala>
+        {/*
+          ETAPA 1: a ação e a prioridade — só no registro livre.
 
-        {etapa === 1 && (
+          Na missão esta conversa não acontece: o comitê já respondeu as duas
+          coisas quando mandou a ordem, e repetir a pergunta na rua é só
+          chance de a resposta sair diferente da ordem.
+        */}
+        {!modoMissao && (
+          <Fala hora={horas.abertura} atraso={missoes.length > 0 ? 700 : 450}>
+            O que você vai fazer aqui, e qual a prioridade disso?
+          </Fala>
+        )}
+
+        {!modoMissao && etapa === 1 && (
           <BlocoDoIntegrante>
             {tiposDisponiveis.length === 0 ? (
               <p className="text-[12px] text-slate-400 font-semibold text-right">
@@ -1673,7 +1862,7 @@ function FioDoCheckIn({
           </BlocoDoIntegrante>
         )}
 
-        {operacoesConfirmadas && etapa > 1 && (
+        {!modoMissao && operacoesConfirmadas && etapa > 1 && (
           <Resposta hora={horas.operacoes} avatar={AvatarMembro}>
             <span className="flex flex-wrap gap-1.5">
               {nivelEscolhido && (
@@ -1705,13 +1894,47 @@ function FioDoCheckIn({
 
         {/* ETAPA 2: mapa arrastável + confirmação do ponto ajustado */}
         {etapa >= 2 && (
-          <Fala hora={horas.operacoes} atraso={400}>
-            Agora o lugar. Confira o pino e arraste se ele não estiver na porta
-            certa.
+          <Fala hora={horas.operacoes || horas.abertura} atraso={400}>
+            {modoMissao ? (
+              missao?.semLocal ? (
+                <>
+                  Esta missão não tem lugar marcado: ela acontece onde você
+                  estiver. Pode começar.
+                </>
+              ) : (
+                <>
+                  Vá até o ponto da missão. Quando você chegar, o botão de
+                  iniciar acende aqui embaixo.
+                </>
+              )
+            ) : (
+              <>
+                Agora o lugar. Confira o pino e arraste se ele não estiver na
+                porta certa.
+              </>
+            )}
           </Fala>
         )}
 
-        {etapa === 2 && (
+        {etapa === 2 && modoMissao && missao && (
+          <div className="ck-entra flex items-end gap-2">
+            <span className="w-7 shrink-0" />
+            <div className="max-w-[88%] w-full">
+              <Chegada
+                missao={missao}
+                coords={coords}
+                precisao={precisao}
+                endereco={endereco}
+                buscandoGps={buscandoGps}
+                erroGps={erroGps}
+                chegada={chegada}
+                onAtualizarGps={capturarLocal}
+              />
+            </div>
+          </div>
+        )}
+
+        {etapa === 2 && !modoMissao && (
           <div className="ck-entra flex items-end gap-2">
             <span className="w-7 shrink-0" />
             <div className="max-w-[88%] w-full">
@@ -1802,6 +2025,11 @@ function FioDoCheckIn({
             >
               <MiniMapa lat={coords.lat} lng={coords.lng} height={124} />
               <div className="p-3">
+                {modoMissao && (
+                  <p className="text-[9.5px] font-black uppercase tracking-widest text-white/50 mb-1">
+                    Missão iniciada
+                  </p>
+                )}
                 <p className="text-[13.5px] font-bold text-white leading-tight">{endereco?.rua}</p>
                 <p className="text-[11px] text-white/70 font-semibold mt-0.5">
                   {endereco?.resto}
@@ -1901,17 +2129,49 @@ function FioDoCheckIn({
                     </span>
                   </li>
                 )}
-                <LinhaResumo
-                  icone={<Flag className="w-3.5 h-3.5" />}
-                  rotulo="O que"
-                  texto={`${operacoes.map(o => o.label).join(', ') || 'Nenhuma operação'}${
-                    nivelEscolhido ? ` · ${nivelEscolhido.label}` : ''
-                  }`}
-                  etapaDestino={1}
-                />
+                {/*
+                  Na missão a linha da ação não tem "corrigir": ela não é uma
+                  escolha da rua, é a ordem de quem mandou. Mostrar o lápis ao
+                  lado dela prometeria um poder que a pessoa não tem.
+                */}
+                {modoMissao ? (
+                  <li className="flex items-center gap-2.5 py-2.5">
+                    <span
+                      className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 text-white"
+                      style={{ backgroundColor: VERDE }}
+                    >
+                      <Flag className="w-3.5 h-3.5" />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[9.5px] font-black uppercase tracking-widest text-emerald-700/60">
+                        O que · definido pelo comitê
+                      </span>
+                      <span
+                        className="block text-[12.5px] font-bold leading-snug"
+                        style={{ color: '#05603F' }}
+                      >
+                        {[
+                          operacoesDoRegistro.map(o => o.label).join(', '),
+                          nivelDoRegistro?.label
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'Sem classificação na ordem'}
+                      </span>
+                    </span>
+                  </li>
+                ) : (
+                  <LinhaResumo
+                    icone={<Flag className="w-3.5 h-3.5" />}
+                    rotulo="O que"
+                    texto={`${operacoes.map(o => o.label).join(', ') || 'Nenhuma operação'}${
+                      nivelEscolhido ? ` · ${nivelEscolhido.label}` : ''
+                    }`}
+                    etapaDestino={1}
+                  />
+                )}
                 <LinhaResumo
                   icone={<MapPin className="w-3.5 h-3.5" />}
-                  rotulo="Onde"
+                  rotulo={modoMissao ? 'Onde a missão foi iniciada' : 'Onde'}
                   texto={endereco?.rua || 'Local confirmado'}
                   etapaDestino={2}
                 />
@@ -1957,10 +2217,52 @@ function FioDoCheckIn({
           </BotaoPrincipal>
         )}
 
+        {/*
+          A CHEGADA DA MISSÃO.
+
+          O botão de iniciar é a trava em forma de botão: enquanto a pessoa
+          está longe ele fica apagado e diz, em metros, o que falta para
+          acender. Do lado, o caminho — porque um botão que não dá para
+          apertar sem uma saída ao lado é só uma porta trancada.
+        */}
+        {etapa === 2 && modoMissao && missao && (
+          <>
+            {!chegada.pode && !missao.semLocal && (
+              <a
+                href={linkDeRota(missao)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => vibrar()}
+                className="w-full h-[46px] rounded-2xl border border-slate-200 bg-white text-slate-700 text-[12.5px] font-bold flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]"
+              >
+                <Navigation className="w-4 h-4" style={{ color: AZUL }} />
+                Como chegar até a missão
+              </a>
+            )}
+            <BotaoPrincipal
+              onClick={confirmarLocal}
+              disabled={!coords || !chegada.pode || ajustando}
+              cor={VERDE}
+              icone={<Navigation className="w-4 h-4" />}
+              motivo={
+                !coords
+                  ? 'Esperando o GPS achar você.'
+                  : missao.semLocal
+                    ? 'Missão sem lugar marcado: pode começar daqui.'
+                    : chegada.pode
+                      ? `Você está no ponto — ${endereco?.rua || 'posição confirmada'}.`
+                      : `Faltam ${distanciaCurta(chegada.faltam)} para você poder iniciar.`
+              }
+            >
+              Iniciar missão
+            </BotaoPrincipal>
+          </>
+        )}
+
         {/* A tela cheia mora no canto do mapa, onde o dedo já está arrastando:
             repetir o atalho aqui embaixo só roubava altura do botão que fecha
             a etapa. */}
-        {etapa === 2 && (
+        {etapa === 2 && !modoMissao && (
           <>
             <BotaoPrincipal
               onClick={confirmarLocal}

@@ -117,3 +117,59 @@ export const jaChegou = (
  */
 export const linkDeRota = (missao: MissaoDoCampo) =>
   `https://www.google.com/maps/dir/?api=1&destination=${missao.lat},${missao.lng}&travelmode=walking`;
+
+/**
+ * A pessoa pode iniciar esta missão daqui?
+ *
+ * Missão é trabalho no lugar certo: iniciar do sofá, do carro a dois
+ * quilômetros ou da casa de outro bairro é registro de presença que não
+ * houve. Então a tela só libera o começo quando o aparelho concorda que ela
+ * chegou.
+ *
+ * A margem não é fixa, e não pode ser. Entre prédios o GPS erra dezenas de
+ * metros, e quem está de pé na porta certa não pode ouvir que está a oitenta
+ * metros de si mesmo. Por isso o erro que o próprio aparelho declara entra na
+ * conta — com teto, para uma leitura ruim de quinhentos metros não liberar a
+ * cidade inteira.
+ *
+ * Missão sem local no mapa não tem trava: o lugar dela é onde a pessoa
+ * estiver.
+ */
+export interface Chegada {
+  /** Dá para iniciar agora. */
+  pode: boolean;
+  /** Sem lugar no mapa: a missão acontece onde a pessoa estiver. */
+  semLocal: boolean;
+  /** Distância até o ponto, ou nulo enquanto o GPS não respondeu. */
+  distancia: number | null;
+  /** Quanto ainda falta andar para a trava abrir. */
+  faltam: number;
+  /** A margem que está valendo, já somado o erro do aparelho. */
+  limite: number;
+}
+
+export const FOLGA_MAXIMA_DO_GPS = 150;
+
+export const situacaoDeChegada = (
+  missao: MissaoDoCampo,
+  coords: { lat: number; lng: number } | null,
+  precisao: number | null
+): Chegada => {
+  if (missao.semLocal) {
+    return { pode: true, semLocal: true, distancia: null, faltam: 0, limite: 0 };
+  }
+  const base = missao.raio || 60;
+  const folga = Math.min(FOLGA_MAXIMA_DO_GPS, Math.max(0, precisao ?? 0));
+  const limite = base + folga;
+  if (!coords) {
+    return { pode: false, semLocal: false, distancia: null, faltam: 0, limite };
+  }
+  const distancia = distanciaEmMetros(coords, missao);
+  return {
+    pode: distancia <= limite,
+    semLocal: false,
+    distancia,
+    faltam: Math.max(0, Math.round(distancia - limite)),
+    limite
+  };
+};

@@ -71,6 +71,14 @@ interface OrdemDoComiteProps {
   janelas: JanelaDeTurno[];
   turnoAgora: TurnoId | null;
   coords: { lat: number; lng: number } | null;
+  /**
+   * A rota já está na doca, no rodapé.
+   *
+   * Na etapa de chegada é o rodapé que carrega o "como chegar", porque ele
+   * fica fixo enquanto a conversa rola. Repetir o mesmo botão no cartão faz a
+   * mesma ação aparecer duas vezes na mesma tela.
+   */
+  rotaNaDoca?: boolean;
 }
 
 /** O nível cadastrado com este id, se ele ainda existir. */
@@ -376,6 +384,7 @@ function CartaoDeMissao({
   niveis,
   janelas,
   coords,
+  semRota,
   onTocar
 }: {
   missao: MissaoDoCampo;
@@ -386,6 +395,7 @@ function CartaoDeMissao({
   niveis: PriorityLevel[];
   janelas: JanelaDeTurno[];
   coords: { lat: number; lng: number } | null;
+  semRota?: boolean;
   onTocar: () => void;
 }) {
   const realce = urgente ? VERMELHO : VERDE;
@@ -443,7 +453,8 @@ function CartaoDeMissao({
 
       {detalhado && <FatosDaMissao missao={missao} coords={coords} janelas={janelas} />}
 
-      {detalhado && !missao.semLocal && (
+      {/* Chegando, o caminho deixa de ser pergunta: o botão sai da frente. */}
+      {detalhado && !missao.semLocal && !semRota && !jaChegou(missao, coords) && (
         <div className="flex items-center gap-2 px-3.5 pb-3">
           <ComoChegar missao={missao} forte={urgente} />
         </div>
@@ -474,7 +485,8 @@ export default function OrdemDoComite({
   niveis,
   janelas,
   turnoAgora,
-  coords
+  coords,
+  rotaNaDoca
 }: OrdemDoComiteProps) {
   const [verTodas, setVerTodas] = React.useState(false);
 
@@ -531,6 +543,7 @@ export default function OrdemDoComite({
                 niveis={niveis}
                 janelas={janelas}
                 coords={coords}
+                semRota={rotaNaDoca}
                 onTocar={() => {
                   vibrar();
                   // Trancado, largar a ordem não é opção: só trocar entre elas.
@@ -558,8 +571,10 @@ export default function OrdemDoComite({
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-3.5 py-3 flex items-center gap-2.5">
             <Lock className="w-4 h-4 text-slate-400 shrink-0" />
             <p className="flex-1 text-[11.5px] font-bold text-slate-400 leading-snug">
-              {contar(outras.length, 'outra missão espera', 'outras missões esperam')} a
-              sua vez. Elas voltam assim que a ordem urgente for gravada.
+              {outras.length === 1
+                ? 'Outra missão espera a sua vez. Ela volta'
+                : `${outras.length} outras missões esperam a sua vez. Elas voltam`}{' '}
+              assim que a ordem urgente for gravada.
             </p>
           </div>
         )}
@@ -604,6 +619,7 @@ export default function OrdemDoComite({
           niveis={niveis}
           janelas={janelas}
           coords={coords}
+          semRota={rotaNaDoca}
           onTocar={() => {
             vibrar();
             onEscolher(missao.id === missaoId ? null : missao.id);
