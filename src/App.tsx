@@ -977,6 +977,18 @@ export default function App() {
   } | null>(null);
   /** Ferramenta de desenhar o raio da busca, armada no mapa. */
   const [desenhandoRaioDeBusca, setDesenhandoRaioDeBusca] = useState(false);
+  /**
+   * O círculo mandado para a Inteligência territorial medir.
+   *
+   * É o mesmo desenho que vira área de panfletagem e que vira recorte de
+   * busca. Um gesto, três respostas: onde a equipe vai, o que existe lá e
+   * quem mora ali.
+   */
+  const [circuloParaTerritorio, setCirculoParaTerritorio] = useState<{
+    lat: number;
+    lng: number;
+    raio: number;
+  } | null>(null);
   /** Bairros ou setores desenhados no mapa, e a escala que os pinta. */
   const [recortesTerritoriais, setRecortesTerritoriais] = useState<any[]>([]);
   const [escalaTerritorial, setEscalaTerritorial] = useState<
@@ -13002,7 +13014,12 @@ export default function App() {
       {/* INTELIGÊNCIA TERRITORIAL */}
       <InteligenciaTerritorial
         aberto={territorioAberto}
-        onFechar={() => setTerritorioAberto(false)}
+        onFechar={() => {
+          setTerritorioAberto(false);
+          // O círculo enviado morre com o painel: reabrir pelo trilho é uma
+          // pergunta nova, não a repetição da medida de meia hora atrás.
+          setCirculoParaTerritorio(null);
+        }}
         /*
          * A UF sai de `candidateLocation`, que é a mesma que o resto do mapa
          * usa. Muito cadastro tem só a cidade ("Maceió", "Parauapebas"), e é
@@ -13024,6 +13041,7 @@ export default function App() {
           null
         }
         centroDoMapa={() => lerVistaDoMapaRef.current?.() || null}
+        circuloExterno={circuloParaTerritorio}
         onCirculoAnalisado={setCirculoAnalisado}
         onRecortes={receberRecortes}
         recorteEmFoco={recorteEmFoco}
@@ -13477,6 +13495,32 @@ export default function App() {
             >
               <Store className="w-3 h-3" />
               Estabelecimentos aqui
+            </button>
+          )}
+          {/*
+            E QUEM MORA AQUI.
+
+            O CCO sabe responder isso para qualquer círculo — população,
+            domicílios e densidade, com a parte contada separada da estimada.
+            O painel só não sabia medir um círculo que não fosse o centro da
+            tela com um dos quatro raios da régua. Agora sabe, e o desenho que
+            já está na mão é o que ele mede.
+          */}
+          {pickedCoords && Number(areaRadius) > 0 && (
+            <button
+              onClick={() => {
+                setCirculoParaTerritorio({
+                  lat: pickedCoords.lat,
+                  lng: pickedCoords.lng,
+                  raio: Number(areaRadius),
+                });
+                setTerritorioAberto(true);
+              }}
+              title="Ver quantas pessoas moram dentro deste raio"
+              className="px-3 py-1 bg-white/10 hover:bg-white/20 text-[10px] text-white rounded-full font-bold border border-white/20 cursor-pointer transition-all flex items-center gap-1.5"
+            >
+              <Users className="w-3 h-3" />
+              Quem mora aqui
             </button>
           )}
           <button
