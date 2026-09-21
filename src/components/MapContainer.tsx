@@ -5,8 +5,8 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, corDaDependencia, getCheckInPriority } from '../types';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Link2 as LinkIcon } from 'lucide-react';
+import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
 import {
   VisorDoMaterial,
@@ -417,6 +417,11 @@ interface MapContainerProps {
     missao: { id: string; tipo: 'pin' | 'area' },
     narrativas: MaterialDeApoio[]
   ) => void;
+  /** Guarda os links das postagens que saíram da missão. */
+  onLinksDaMissao?: (
+    missao: { id: string; tipo: 'pin' | 'area' },
+    links: LinkDeAcao[]
+  ) => void;
   /** Avisos na tela, para o editor de arquivos poder reclamar de um envio. */
   notificar?: (texto: string, tipo?: 'success' | 'error' | 'info') => void;
   /** Tipos de Operação cadastrados, usados para achar o ícone de cada ponto. */
@@ -632,6 +637,7 @@ export default function MapContainer({
   onDeleteCheckIn,
   onVincularCheckInAMissao,
   onNarrativasDaMissao,
+  onLinksDaMissao,
   notificar,
   operationTypes = [],
   priorityLevels = [],
@@ -704,6 +710,9 @@ export default function MapContainer({
    * o que terminou é entregue a quem grava.
    */
   const [narrativasNaTela, setNarrativasNaTela] = useState<ItemMaterial[]>([]);
+  /** O link sendo digitado, e o apelido opcional dele. */
+  const [linkNovo, setLinkNovo] = useState('');
+  const [tituloDoLinkNovo, setTituloDoLinkNovo] = useState('');
   /** Camadas por id, para acender a do item que a lista apontar. */
   const recortesPorIdRef = useRef<{ [id: string]: any }>({});
   /** Assinatura do último enquadramento, para não reenquadrar à toa. */
@@ -1415,6 +1424,7 @@ export default function MapContainer({
         prioridade: pin.position?.priority,
         material: (pin.position?.material || []) as MaterialDeApoio[],
         narrativas: (pin.position?.narrativas || []) as MaterialDeApoio[],
+        links: (pin.position?.acoesLinks || []) as LinkDeAcao[],
         pessoas: equipeDaMissao(ids),
         totalDesignados: ids.length,
         raio: null as number | null,
@@ -1442,6 +1452,7 @@ export default function MapContainer({
       prioridade: area.center?.priority,
       material: (area.center?.material || []) as MaterialDeApoio[],
       narrativas: (area.center?.narrativas || []) as MaterialDeApoio[],
+      links: (area.center?.acoesLinks || []) as LinkDeAcao[],
       pessoas: equipeDaMissao(ids),
       totalDesignados: ids.length,
       raio: area.radius,
@@ -1463,6 +1474,8 @@ export default function MapContainer({
         ? pins.find((p) => p.id === missaoAbertaRef.id)?.position
         : areas.find((a) => a.id === missaoAbertaRef?.id)?.center;
     const guardadas = ((missao as any)?.narrativas || []) as MaterialDeApoio[];
+    setLinkNovo('');
+    setTituloDoLinkNovo('');
     setNarrativasNaTela(
       guardadas.map((item) => ({
         ...item,
@@ -3124,7 +3137,7 @@ export default function MapContainer({
           onClick={() => setMissaoAbertaRef(null)}
         >
           <div
-            className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200"
+            className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200"
             onClick={e => e.stopPropagation()}
           >
             {/* Cabeçalho na cor da missão */}
@@ -3221,6 +3234,20 @@ export default function MapContainer({
                 )}
               </div>
 
+              {/*
+                DUAS COLUNAS, PORQUE SÃO DUAS PERGUNTAS.
+
+                À esquerda o enunciado — o que fazer, quem recebeu, o que
+                veio junto. À direita a realidade — onde é e o que já
+                voltou. Empilhado num tubo estreito, conferir o retorno
+                contra a ordem era rolar para cima, guardar de cabeça e
+                rolar para baixo. Lado a lado, a conferência é olhar.
+
+                Numa tela estreita as colunas viram uma só, na ordem em que
+                se lê: primeiro a ordem, depois o que ela produziu.
+              */}
+              <div className="grid gap-5 lg:grid-cols-12 items-start">
+                <div className="lg:col-span-7 space-y-5">
               {/* O que precisa ser feito */}
               <div
                 className="p-4 rounded-xl border"
@@ -3375,7 +3402,9 @@ export default function MapContainer({
                   </div>
                 </div>
               )}
+                </div>
 
+                <div className="lg:col-span-5 space-y-5">
               {/* Onde é */}
               <div className="space-y-2">
                 <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
@@ -3434,42 +3463,6 @@ export default function MapContainer({
                   </a>
                 </div>
               </div>
-
-              {/*
-                AÇÕES TÁTICAS (TIME DELTA).
-
-                Material de apoio é o que o comitê manda antes; narrativa é o
-                que volta — a foto do buraco, o vídeo da fila, o áudio do
-                morador. São coisas diferentes e por isso não se misturam: uma
-                é a ordem, a outra é a prova, e quem monta a peça depois
-                precisa achar a segunda sem garimpar a primeira.
-              */}
-              {onNarrativasDaMissao && (
-                <div className="space-y-2">
-                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                    Ações Táticas (Time Delta)
-                    {missaoAberta.narrativas.length > 0
-                      ? ` (${missaoAberta.narrativas.length})`
-                      : ''}
-                  </p>
-                  <EditorDeMaterial
-                    itens={narrativasNaTela}
-                    onMudar={(itens) => {
-                      setNarrativasNaTela(itens);
-                      // Só o que terminou de subir vira dado da missão: item a
-                      // meio caminho gravado agora viraria link quebrado.
-                      onNarrativasDaMissao(
-                        { id: missaoAberta.id, tipo: missaoAberta.tipo },
-                        itens
-                          .filter((i) => i.estado === 'pronto')
-                          .map(({ estado, progresso, erro, previa, jaSalvo, ...limpo }) => limpo)
-                      );
-                    }}
-                    notificar={notificar || (() => {})}
-                    ligado
-                  />
-                </div>
-              )}
 
               {/*
                 O FEEDBACK DA MISSÃO.
@@ -3618,6 +3611,185 @@ export default function MapContainer({
                   </div>
                 );
               })()}
+                </div>
+              </div>
+
+              {/*
+                AÇÕES TÁTICAS (TIME DELTA).
+
+                Material de apoio é o que o comitê manda antes; narrativa é o
+                que volta — a foto do buraco, o vídeo da fila, o áudio do
+                morador. São coisas diferentes e por isso não se misturam: uma
+                é a ordem, a outra é a prova, e quem monta a peça depois
+                precisa achar a segunda sem garimpar a primeira.
+              */}
+              {onNarrativasDaMissao && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                      style={{
+                        backgroundColor: `${missaoAberta.cor}1A`,
+                        color: missaoAberta.cor
+                      }}
+                    >
+                      <Flag className="w-3.5 h-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[11px] uppercase font-black tracking-wider text-slate-500 leading-none">
+                        Ações Táticas (Time Delta)
+                      </p>
+                      <p className="text-[10.5px] font-semibold text-slate-400 leading-snug mt-1">
+                        O que esta missão produziu: arquivos que provam a ação e
+                        os links do que foi publicado.
+                      </p>
+                    </div>
+                    {(missaoAberta.narrativas.length > 0 ||
+                      missaoAberta.links.length > 0) && (
+                      <span className="ml-auto shrink-0 text-[10px] font-black text-slate-400 tabular-nums">
+                        {missaoAberta.narrativas.length + missaoAberta.links.length}
+                      </span>
+                    )}
+                  </div>
+
+                  {/*
+                    O LINK DA POSTAGEM.
+
+                    O arquivo prova que a ação aconteceu; o link prova que ela
+                    foi publicada. É o link que se manda no grupo, que se abre
+                    para ver o alcance — e que some do histórico de quem não o
+                    guardou em lugar nenhum.
+                  */}
+                  {onLinksDaMissao && (
+                    <div>
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const bruto = linkNovo.trim();
+                          if (!bruto) return;
+                          // Coloca o esquema quando falta: "instagram.com/p/x"
+                          // sem ele vira link relativo e abre dentro do painel.
+                          const url = /^https?:\/\//i.test(bruto)
+                            ? bruto
+                            : `https://${bruto}`;
+                          const lista = [
+                            ...missaoAberta.links,
+                            {
+                              id:
+                                typeof crypto !== 'undefined' && 'randomUUID' in crypto
+                                  ? crypto.randomUUID()
+                                  : `lnk-${Date.now()}`,
+                              url,
+                              titulo: tituloDoLinkNovo.trim() || undefined,
+                              criadoEm: new Date().toISOString()
+                            }
+                          ];
+                          onLinksDaMissao(
+                            { id: missaoAberta.id, tipo: missaoAberta.tipo },
+                            lista
+                          );
+                          setLinkNovo('');
+                          setTituloDoLinkNovo('');
+                        }}
+                        className="flex flex-col sm:flex-row gap-2"
+                      >
+                        <input
+                          value={linkNovo}
+                          onChange={(e) => setLinkNovo(e.target.value)}
+                          placeholder="Cole o link da postagem"
+                          inputMode="url"
+                          className="flex-1 min-w-0 h-10 px-3 bg-white border border-slate-200 rounded-xl text-[12px] font-semibold text-slate-700 placeholder:text-slate-300 focus:outline-hidden focus:border-slate-300"
+                        />
+                        <input
+                          value={tituloDoLinkNovo}
+                          onChange={(e) => setTituloDoLinkNovo(e.target.value)}
+                          placeholder="Do que se trata (opcional)"
+                          className="sm:w-[190px] h-10 px-3 bg-white border border-slate-200 rounded-xl text-[12px] font-semibold text-slate-700 placeholder:text-slate-300 focus:outline-hidden focus:border-slate-300"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!linkNovo.trim()}
+                          className="h-10 px-4 text-white rounded-xl text-[11px] font-black uppercase tracking-wider cursor-pointer transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                          style={{ backgroundColor: missaoAberta.cor }}
+                        >
+                          Adicionar
+                        </button>
+                      </form>
+
+                      {missaoAberta.links.length > 0 && (
+                        <div className="grid sm:grid-cols-2 gap-2 mt-2.5">
+                          {missaoAberta.links.map((link: LinkDeAcao) => {
+                            let dominio = link.url;
+                            try {
+                              dominio = new URL(link.url).hostname.replace(/^www\./, '');
+                            } catch {
+                              // Link torto ainda é o que a pessoa guardou: mostra
+                              // como veio, em vez de sumir com ele.
+                            }
+                            return (
+                              <div
+                                key={link.id}
+                                className="group flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2"
+                              >
+                                <span className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0">
+                                  <LinkIcon className="w-3.5 h-3.5 text-slate-400" />
+                                </span>
+                                <a
+                                  href={link.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="min-w-0 flex-1 no-underline"
+                                >
+                                  <span className="block text-[12px] font-bold text-slate-700 truncate leading-tight">
+                                    {link.titulo || dominio}
+                                  </span>
+                                  <span className="block text-[10px] font-semibold text-slate-400 truncate">
+                                    {link.titulo ? dominio : link.url}
+                                  </span>
+                                </a>
+                                <button
+                                  type="button"
+                                  title="Tirar este link"
+                                  onClick={() =>
+                                    onLinksDaMissao(
+                                      { id: missaoAberta.id, tipo: missaoAberta.tipo },
+                                      missaoAberta.links.filter(
+                                        (l: LinkDeAcao) => l.id !== link.id
+                                      )
+                                    )
+                                  }
+                                  className="w-7 h-7 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer transition-colors shrink-0"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="border-t border-slate-200/70 pt-3">
+                    <EditorDeMaterial
+                      itens={narrativasNaTela}
+                      onMudar={(itens) => {
+                        setNarrativasNaTela(itens);
+                        // Só o que terminou de subir vira dado da missão: item a
+                        // meio caminho gravado agora viraria link quebrado.
+                        onNarrativasDaMissao(
+                          { id: missaoAberta.id, tipo: missaoAberta.tipo },
+                          itens
+                            .filter((i) => i.estado === 'pronto')
+                            .map(({ estado, progresso, erro, previa, jaSalvo, ...limpo }) => limpo)
+                        );
+                      }}
+                      notificar={notificar || (() => {})}
+                      ligado
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Rodapé */}
