@@ -3795,7 +3795,7 @@ export default function MapContainer({
                     {
                       topico: 'missao' as const,
                       titulo: 'Feedback Missão',
-                      ajuda: 'O que saiu da ordem que foi dada.',
+                      ajuda: '',
                       itens: narrativasNaTela,
                       aoMudar: setNarrativasNaTela,
                       vazio:
