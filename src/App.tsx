@@ -152,6 +152,8 @@ import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
 import OperationIcon from "./components/OperationIcon";
 import ConfirmDialog, { ConfirmRequest } from "./components/ConfirmDialog";
+import AvisoTipoParecido from "./components/AvisoTipoParecido";
+import { procurarTipoParecido } from "./services/tiposParecidos";
 import MindMapPanel from "./components/MindMapPanel";
 import PainelDeCheckIns from "./components/PainelDeCheckIns";
 import MiniMapa from "./components/MiniMapa";
@@ -3787,7 +3789,45 @@ export default function App() {
     setOpTypeActive(type.active !== false);
   };
 
-  const saveOperationType = (e: React.FormEvent) => {
+  /**
+   * Grava o tipo: na tela primeiro, no banco em seguida.
+   *
+   * Saiu de dentro do formulário porque agora há dois caminhos até aqui — o
+   * cadastro direto e o "criar mesmo assim", depois do aviso de repetido — e os
+   * dois precisam gravar exatamente a mesma coisa.
+   */
+  const gravarTipoDeOperacao = (
+    saved: OperationType,
+    editando: string | null,
+  ) => {
+    setOperationTypes((prev) =>
+      editando
+        ? prev.map((t) => (t.id === editando ? saved : t))
+        : [...prev, saved],
+    );
+
+    if (isDatabaseConfigured) {
+      DatabaseService.upsertOperationType(saved).then((res) => {
+        if (!res.success)
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+      });
+    }
+
+    triggerNotification(
+      editando
+        ? "Tipo de operação atualizado!"
+        : "Novo tipo de operação criado!",
+      "success",
+    );
+
+    // Trocar o nome de um tipo já usado não deve deixar o formulário aberto
+    // apontando para um rótulo velho.
+    if (editando === pinIconType) setPinColor(saved.color);
+
+    resetOperationTypeForm();
+  };
+
+  const saveOperationType = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const label = opTypeLabel.trim();
@@ -3837,30 +3877,65 @@ export default function App() {
           createdAt: new Date().toISOString(),
         };
 
-    setOperationTypes((prev) =>
-      editingOperationTypeId
-        ? prev.map((t) => (t.id === editingOperationTypeId ? saved : t))
-        : [...prev, saved],
-    );
+    /*
+     * A CONFERÊNCIA CONTRA O QUE JÁ EXISTE.
+     *
+     * A comparação por nome exato acima pega "Lixo" e "Lixo"; não pega "Lixo"
+     * e "Lixo Acumulado", que é o caso que de fato acontece — e que só aparece
+     * meses depois, quando o relatório mostra seis e oito onde deveria haver
+     * catorze. Quem lê o sentido dos dois nomes é o modelo, do outro lado de
+     * /api/tipo-operacao-parecido.
+     *
+     * Só para tipo novo: editar é mexer num tipo que já existe, e perguntar se
+     * ele parece com os outros acabaria perguntando se ele parece consigo
+     * mesmo. Com a lista vazia também não se pergunta — não há com o que
+     * repetir.
+     *
+     * Se a conferência não responde, o cadastro segue. Ela é uma segunda
+     * opinião, não uma tranca: modelo fora do ar não pode impedir alguém de
+     * trabalhar.
+     */
+    if (!editingOperationTypeId && clientOperationTypes.length > 0) {
+      setConferindoTipoParecido(true);
+      const parecido = await procurarTipoParecido(
+        { label, description: saved.description },
+        clientOperationTypes,
+      );
+      setConferindoTipoParecido(false);
 
-    if (isDatabaseConfigured) {
-      DatabaseService.upsertOperationType(saved).then((res) => {
-        if (!res.success) triggerNotification(`Banco de dados: ${res.error}`, "error");
-      });
+      const existente = parecido
+        ? clientOperationTypes.find((t) => t.id === parecido.id)
+        : undefined;
+      if (parecido && existente) {
+        setTipoParecido({ novo: saved, existente, motivo: parecido.motivo });
+        return;
+      }
     }
 
-    triggerNotification(
-      editingOperationTypeId
-        ? "Tipo de operação atualizado!"
-        : "Novo tipo de operação criado!",
-      "success",
-    );
+    gravarTipoDeOperacao(saved, editingOperationTypeId);
+  };
 
-    // Trocar o nome de um tipo já usado não deve deixar o formulário aberto
-    // apontando para um rótulo velho.
-    if (editingOperationTypeId === pinIconType) setPinColor(saved.color);
-
+  /**
+   * "Usar o que já existe": o tipo novo é descartado antes de nascer.
+   *
+   * E o que fica já entra escolhido no formulário do ponto — quem abriu o
+   * gerenciador estava no meio de cadastrar um ponto, e mandá-lo procurar o
+   * tipo na lista de novo seria cobrar duas vezes pela mesma decisão.
+   */
+  const usarTipoExistente = () => {
+    const existente = tipoParecido?.existente;
+    setTipoParecido(null);
+    if (!existente) return;
+    handlePinTypeChange(existente.id);
     resetOperationTypeForm();
+    triggerNotification(`"${existente.label}" já cobre isso, e foi escolhido.`, "success");
+  };
+
+  /** "Criar mesmo assim": olhou o que já existe e decidiu que não serve. */
+  const criarTipoAssimMesmo = () => {
+    const pendente = tipoParecido;
+    setTipoParecido(null);
+    if (pendente) gravarTipoDeOperacao(pendente.novo, null);
   };
 
   /**
@@ -4124,6 +4199,22 @@ export default function App() {
 
   /** O tipo escolhido para ser absorvido por outro, no gerenciador. */
   const [tipoParaMesclar, setTipoParaMesclar] = useState<string | null>(null);
+
+  /** Enquanto a conferência de tipo repetido não volta, o botão fica travado. */
+  const [conferindoTipoParecido, setConferindoTipoParecido] = useState(false);
+
+  /**
+   * Tipo novo que ficou esperando uma decisão.
+   *
+   * Guarda o registro já montado, e não o que está no formulário: entre a
+   * pergunta e a resposta a tela continua viva, e gravar o que o formulário
+   * tiver depois gravaria outra coisa, que ninguém conferiu.
+   */
+  const [tipoParecido, setTipoParecido] = useState<{
+    novo: OperationType;
+    existente: OperationType;
+    motivo: string | null;
+  } | null>(null);
 
   /**
    * Mescla dois tipos de operação: tudo do primeiro passa a ser do segundo.
@@ -12971,6 +13062,22 @@ export default function App() {
       {/* Confirmação no meio da tela, com a cara do sistema */}
       <ConfirmDialog request={confirmRequest} onClose={closeConfirmation} />
 
+      {/*
+        AVISO DE TIPO REPETIDO.
+
+        Fica fora do gerenciador, e não dentro dele, porque precisa cobrir o
+        gerenciador: a decisão é sobre o que aquele formulário ia gravar, e
+        deixar o formulário clicável por baixo é convidar a gravar duas vezes.
+      */}
+      <AvisoTipoParecido
+        novoNome={tipoParecido?.novo.label || ""}
+        existente={tipoParecido?.existente || null}
+        motivo={tipoParecido?.motivo || null}
+        onUsarExistente={usarTipoExistente}
+        onCriarAssimMesmo={criarTipoAssimMesmo}
+        onFechar={() => setTipoParecido(null)}
+      />
+
       {/* Ficha de aparelhos de um integrante — visível só aqui, na área do
           administrador. Nenhuma tela de integrante mostra estes dados. */}
       <DispositivosMembroModal
@@ -15282,11 +15389,22 @@ export default function App() {
                       Cancelar edição
                     </button>
                   )}
+                  {/*
+                    Enquanto a conferência não volta, o botão fica travado e
+                    diz o que está fazendo: clicar de novo criaria o tipo duas
+                    vezes, e um botão parado sem explicação parece quebrado.
+                  */}
                   <button
                     type="submit"
-                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer active:scale-95"
+                    disabled={conferindoTipoParecido}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer active:scale-95"
                   >
-                    {editingOperationTypeId ? (
+                    {conferindoTipoParecido ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Conferindo os que já existem...</span>
+                      </>
+                    ) : editingOperationTypeId ? (
                       <>
                         <Check className="w-3.5 h-3.5 stroke-[3]" />
                         <span>Salvar alterações</span>
