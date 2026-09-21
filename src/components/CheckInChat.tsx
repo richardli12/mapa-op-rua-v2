@@ -602,6 +602,32 @@ function FioDoCheckIn({
    * carrega, a bolha entra animada. Com um tempo só, a ficha da revisão ficava
    * cortada pela doca e parecia que faltava alguma coisa.
    */
+  /*
+   * O que faz o fio CRESCER — e só isso.
+   *
+   * A rolagem tem de acompanhar o que entra na conversa: uma etapa
+   * confirmada, uma foto, um recado, o mapa que terminou de montar. Ela não
+   * pode disparar no que apenas muda de valor dentro do que já está na tela,
+   * e era isso que acontecia: cada leitura do GPS, cada 1% de upload, cada
+   * endereço rebuscado e cada letra digitada na edição de um recado geravam
+   * um objeto novo, o efeito rodava de novo e a tela descia sozinha debaixo
+   * do dedo de quem estava lendo ou escrevendo. Andando para uma missão, com
+   * o GPS acompanhando cada passo, isso era uma tela que não parava quieta.
+   *
+   * Por isso a dependência deixa de ser o conteúdo e passa a ser a forma
+   * dele: as contagens e os marcos que mudam a altura do fio.
+   */
+  const formaDoFio = [
+    etapa,
+    midias.length,
+    observacoes.length,
+    operacoes.length,
+    coords ? 1 : 0,
+    mapaPronto ? 1 : 0,
+    travado ? 1 : 0,
+    localConfirmado ? 1 : 0
+  ].join('|');
+
   useEffect(() => {
     /*
      * Com ordem urgente aberta e nada feito ainda, o fim do fio é o lugar
@@ -620,17 +646,9 @@ function FioDoCheckIn({
       clearTimeout(perto);
       clearTimeout(longe);
     };
-  }, [
-    etapa,
-    coords,
-    endereco,
-    midias,
-    observacoes,
-    operacoes,
-    mapaPronto,
-    travado,
-    localConfirmado
-  ]);
+    // A forma do fio já resume as dependências; o resto é leitura de valor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formaDoFio]);
 
   /**
    * O que mudou nas missões enquanto a tela estava aberta.
