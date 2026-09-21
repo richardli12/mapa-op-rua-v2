@@ -114,7 +114,6 @@ export interface MissaoDoCampo {
 interface CheckInChatProps {
   member: any;
   clientId: string;
-  clientName: string;
   operationTypes: OperationType[];
   /**
    * Rótulos já cadastrados no cliente, ligados ou desligados.
@@ -214,7 +213,6 @@ export default function CheckInChat(props: CheckInChatProps) {
 function FioDoCheckIn({
   member,
   clientId,
-  clientName,
   operationTypes,
   nomesReservados = [],
   onTipoCriado,
@@ -1220,7 +1218,6 @@ function FioDoCheckIn({
       <Cabecalho
         nome={nomeMembro}
         foto={fotoMembro}
-        cliente={clientName}
         online={online}
         precisao={precisao}
         buscandoGps={buscandoGps}
@@ -1545,7 +1542,7 @@ function FioDoCheckIn({
           <BlocoDoIntegrante>
             {tiposDisponiveis.length === 0 ? (
               <p className="text-[12px] text-slate-400 font-semibold text-right">
-                Nenhuma operação cadastrada para {clientName}. Crie a sua abaixo.
+                Nenhuma operação cadastrada ainda. Crie a sua abaixo.
               </p>
             ) : (
               <div className="w-full grid grid-cols-2 gap-2">

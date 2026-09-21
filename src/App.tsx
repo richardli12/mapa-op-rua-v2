@@ -5892,14 +5892,13 @@ export default function App() {
     }
 
     // Check-in em forma de conversa: uma etapa por vez, com os dados reais do
-    // integrante, do cliente e do aparelho.
+    // integrante e do aparelho. O cliente entra só como id — o nome dele não
+    // aparece em lugar nenhum desta tela.
     if (!checkInSuccess) {
-      const clienteDoLink = candidates.find((c) => c.id === checkInCandidateId);
       return (
         <CheckInChat
           member={authenticatedSupporter}
           clientId={checkInCandidateId}
-          clientName={clienteDoLink?.name || ""}
           operationTypes={operationTypes
             // Tipo desligado não aparece no check-in; o histórico dele fica.
             .filter(
