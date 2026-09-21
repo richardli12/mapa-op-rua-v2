@@ -42,6 +42,16 @@ interface InteligenciaTerritorialProps {
   /** UF e município do cliente em foco, para abrir já no lugar certo. */
   ufDoCliente?: string | null;
   cidadeDoCliente?: string | null;
+  /**
+   * Um círculo desenhado lá fora, para medir ESTE lugar.
+   *
+   * Quem marcou um raio no mapa já disse onde e já disse quanto. Fazer essa
+   * pessoa reabrir o painel, centralizar o mapa no mesmo ponto e escolher um
+   * raio de tabela seria pedir de novo o que ela acabou de fazer — e com menos
+   * precisão, porque a régua do painel tem quatro tamanhos e o desenho dela
+   * tem o tamanho que ela quis.
+   */
+  circuloExterno?: { lat: number; lng: number; raio: number } | null;
   /** Centro e zoom do mapa agora — é o ponto que a análise de raio mede. */
   centroDoMapa: () => { lat: number; lng: number; zoom: number } | null;
   /** Desenha no mapa o círculo que foi medido. */
@@ -107,6 +117,7 @@ export default function InteligenciaTerritorial({
   ufDoCliente,
   cidadeDoCliente,
   centroDoMapa,
+  circuloExterno,
   onCirculoAnalisado,
   onRecortes,
   recorteEmFoco,
@@ -166,6 +177,15 @@ export default function InteligenciaTerritorial({
   const [raio, setRaio] = useState(1000);
   const [analise, setAnalise] = useState<AnaliseDeArea | null>(null);
   const [analisando, setAnalisando] = useState(false);
+  /**
+   * O centro que a análise está usando, quando não é o do mapa.
+   *
+   * Nulo significa "o que estiver no meio da tela" — o jeito antigo, e ainda o
+   * padrão. Preenchido, é um ponto que a pessoa marcou: o mapa pode rolar à
+   * vontade que a medida continua sendo daquele lugar, que é o que faz dela
+   * uma medida e não um acaso de enquadramento.
+   */
+  const [centroFixo, setCentroFixo] = useState<{ lat: number; lng: number } | null>(null);
 
   /**
    * A UF do cliente chega depois.
@@ -331,16 +351,28 @@ export default function InteligenciaTerritorial({
     }
   };
 
-  const analisar = async () => {
-    const vista = centroDoMapa();
-    if (!vista || !uf || analisando) return;
+  /**
+   * Mede um círculo.
+   *
+   * Os argumentos existem para quem chama logo depois de mudar o estado: o
+   * React ainda não aplicou a troca, e ler `raio` aqui dentro mediria o valor
+   * velho. Quem não passa nada usa o que está na tela — centro marcado, se
+   * houver, e o centro do mapa quando não houver.
+   */
+  const analisar = async (
+    alvo?: { lat: number; lng: number } | null,
+    raioAlvo?: number
+  ) => {
+    const centro = alvo || centroFixo || centroDoMapa();
+    const metros = raioAlvo || raio;
+    if (!centro || !uf || analisando) return;
     setAnalisando(true);
     setErro(null);
     setAnalise(null);
     try {
-      const dados = await analisarRaio(uf, vista.lat, vista.lng, raio);
+      const dados = await analisarRaio(uf, centro.lat, centro.lng, metros);
       setAnalise(dados.analise);
-      onCirculoAnalisado({ lat: vista.lat, lng: vista.lng, raio });
+      onCirculoAnalisado({ lat: centro.lat, lng: centro.lng, raio: metros });
     } catch (falha: any) {
       setErro(falha);
       onCirculoAnalisado(null);
@@ -348,6 +380,23 @@ export default function InteligenciaTerritorial({
       setAnalisando(false);
     }
   };
+
+  /**
+   * Chegou um círculo de fora: é ele que manda.
+   *
+   * A aba do raio passa à frente, o tamanho vira o que foi desenhado — mesmo
+   * que não seja nenhum dos quatro da régua — e a medida sai sozinha. Abrir o
+   * painel e ainda pedir um toque em "analisar" seria guardar a resposta atrás
+   * de uma porta que a pessoa já abriu.
+   */
+  useEffect(() => {
+    if (!circuloExterno || !aberto) return;
+    setAba('raio');
+    setRaio(circuloExterno.raio);
+    setCentroFixo({ lat: circuloExterno.lat, lng: circuloExterno.lng });
+    analisar({ lat: circuloExterno.lat, lng: circuloExterno.lng }, circuloExterno.raio);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circuloExterno?.lat, circuloExterno?.lng, circuloExterno?.raio, aberto]);
 
   /**
    * O que o mapa desenha, e com que cores.
@@ -660,16 +709,63 @@ export default function InteligenciaTerritorial({
         {aba === 'raio' && (
           <div>
             <p className="text-[11.5px] font-semibold text-slate-500 leading-snug">
-              Quantas pessoas moram em volta do centro do mapa. Mova o mapa até
-              o ponto, escolha o raio e analise.
+              {centroFixo ? (
+                <>
+                  Quantas pessoas moram dentro do raio que você marcou no mapa.
+                  O mapa pode rolar: a medida continua sendo daquele lugar.
+                </>
+              ) : (
+                <>
+                  Quantas pessoas moram em volta do centro do mapa. Mova o mapa
+                  até o ponto, escolha o raio e analise.
+                </>
+              )}
             </p>
 
+            {/*
+              O CENTRO MARCADO FICA ESCRITO, E TEM COMO SAIR.
+
+              Uma medida presa a um ponto que não é o que está na tela precisa
+              dizer isso em voz alta — senão a pessoa rola o mapa, vê outro
+              bairro e acredita que o número é daquele. E precisa ter a porta de
+              volta, no mesmo lugar em que conta a história.
+            */}
+            {centroFixo && (
+              <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-2.5 py-1.5">
+                <Target className="w-3.5 h-3.5 shrink-0 text-emerald-700" />
+                <p className="flex-1 text-[10.5px] font-bold text-emerald-900 leading-snug">
+                  Medindo o círculo que você desenhou no mapa.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCentroFixo(null);
+                    const vista = centroDoMapa();
+                    if (vista) analisar({ lat: vista.lat, lng: vista.lng });
+                  }}
+                  className="shrink-0 text-[10px] font-black uppercase tracking-wider text-emerald-700 hover:underline cursor-pointer"
+                >
+                  usar o centro do mapa
+                </button>
+              </div>
+            )}
+
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {RAIOS.map((metros) => (
+              {/*
+                O raio desenhado quase nunca é um dos quatro da régua. Ele entra
+                na fila como mais um botão, aceso: esconder o valor que está
+                valendo faria a régua mostrar um tamanho e a conta usar outro.
+              */}
+              {(RAIOS.includes(raio) ? RAIOS : [raio, ...RAIOS].sort((a, b) => a - b)).map((metros) => (
                 <button
                   key={metros}
                   type="button"
-                  onClick={() => setRaio(metros)}
+                  onClick={() => {
+                    setRaio(metros);
+                    // Raio novo no mesmo lugar: a medida sai na hora, porque o
+                    // ponto já está decidido e não há mais nada a perguntar.
+                    if (centroFixo) analisar(centroFixo, metros);
+                  }}
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all border ${
                     raio === metros
                       ? 'bg-emerald-600 border-emerald-600 text-white'
@@ -683,7 +779,7 @@ export default function InteligenciaTerritorial({
 
             <button
               type="button"
-              onClick={analisar}
+              onClick={() => analisar()}
               disabled={!uf || analisando || !!semMalha}
               className="mt-3 w-full h-10 bg-emerald-600 hover:bg-emerald-700 text-white text-[11.5px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
             >
