@@ -64,10 +64,14 @@ Quase sempre é uma destas duas:
 
 - **A senha foi trocada por `update ... set password = '...'`.** Não vale mais:
   o login lê `password_hash`. Refaça com `set_admin_password`.
-- **As funções não estão no banco** (schema antigo, aplicado antes delas). O
-  app avisa no console do navegador: *"Senhas ainda em texto puro: rode a
-  migração..."*. Rode o `schema.sql` de novo — ele cria as funções sem tocar
-  nos dados.
+- **As funções não estão no banco** (schema antigo, aplicado antes delas). A
+  tela diz *"O banco de dados precisa ser atualizado para conferir a senha"*.
+  Rode
+  [`migrations/2026-09-21-login-admin-funcoes.sql`](./migrations/2026-09-21-login-admin-funcoes.sql):
+  ele cria só as duas funções, sem tocar em conta nem em senha. Depois entre
+  com a senha de sempre — uma conta que ainda estivesse em texto puro é aceita
+  e convertida em hash na hora. Rodar o `schema.sql` inteiro de novo também
+  resolve.
 
 Para conferir o que o banco tem:
 
