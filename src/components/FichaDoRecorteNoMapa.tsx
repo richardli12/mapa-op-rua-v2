@@ -37,14 +37,24 @@ const comUnidade = (valor: number | null, unidade: string) => {
   return `${texto} ${unidade}`;
 };
 
-/** Uma dupla rótulo/valor da grade. */
+/**
+ * Uma dupla rótulo/valor da grade.
+ *
+ * O rótulo fica EM CIMA do número, não ao lado. Lado a lado, "Índice de
+ * envelhecimento" e "Cor ou raça parda" viravam "Índice de en..." e "Cor ou
+ * raça par...", e um rótulo cortado não informa nada — é ruído ocupando a
+ * linha. Empilhado, o nome cabe inteiro em duas linhas e o número continua
+ * sendo a primeira coisa que o olho acha.
+ */
 function Linha({ rotulo, valor }: { rotulo: string; valor: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-2 min-w-0">
-      <span className="text-[10.5px] font-semibold text-slate-400 truncate">
+    <div className="min-w-0">
+      <span className="block text-[9.5px] font-semibold text-slate-400 leading-[1.25] hyphens-auto break-words">
         {rotulo}
       </span>
-      <span className="text-[11.5px] font-black text-white shrink-0">{valor}</span>
+      <span className="block text-[12px] font-black text-white leading-tight mt-px tabular-nums">
+        {valor}
+      </span>
     </div>
   );
 }
@@ -128,7 +138,7 @@ export default function FichaDoRecorteNoMapa({
   const d = recorte.dados;
 
   return (
-    <div className="absolute top-4 left-4 z-[1150] w-[300px] max-h-[calc(100%-2rem)] overflow-y-auto bg-[#0D233A]/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 px-4 py-3 font-sans pointer-events-none">
+    <div className="absolute top-4 left-4 z-[1150] w-[340px] max-h-[calc(100%-2rem)] overflow-y-auto bg-[#0D233A]/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 px-4 py-3 font-sans pointer-events-none">
       <p className="text-[13px] font-black text-white leading-tight">
         {recorte.nome}
       </p>
@@ -150,7 +160,7 @@ export default function FichaDoRecorteNoMapa({
       {d && (
         <>
           <Titulo texto={recorte.tipo === 'setor' ? 'Setor' : 'Bairro'} />
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             <Linha rotulo="População" valor={numero(d.populacao)} />
             <Linha rotulo="Domicílios" valor={numero(d.domicilios)} />
             <Linha
@@ -171,12 +181,21 @@ export default function FichaDoRecorteNoMapa({
 
       {censo?.status === 'ok' &&
         censo.grupos.map((grupo) => {
+          /*
+           * O grupo de visão geral repete população, domicílios e alfabetização
+           * — que já estão no bloco de cima, tirados do próprio desenho. Duas
+           * vezes o mesmo número em telas de distância é o que faz a pessoa
+           * conferir se são mesmo iguais.
+           */
+          if (/vis[aã]o.?geral|resumo/i.test(`${grupo.id} ${grupo.titulo}`)) {
+            return null;
+          }
           const lista = grupo.principais.filter((i) => i.valor !== null);
           if (lista.length === 0) return null;
           return (
             <React.Fragment key={grupo.id}>
               <Titulo texto={grupo.titulo} />
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                 {lista.map((indicador) => (
                   <Linha
                     key={indicador.id}

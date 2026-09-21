@@ -43,15 +43,15 @@ export interface ErroDaPesquisa {
 /** Mensagens nossas para os códigos que o manual do CCO define. */
 const RECADOS: { [codigo: string]: string } = {
   CHAVE_AUSENTE:
-    "A chave do CCO não está configurada neste ambiente. Fale com o administrador.",
+    "O acesso à base de dados não está configurado neste ambiente. Fale com o administrador.",
   CHAVE_INVALIDA:
-    "A chave do CCO não foi aceita. Confira o que foi copiado no cadastro dela.",
+    "O acesso à base de dados não foi aceito. Confira o que foi cadastrado.",
   CHAVE_REVOGADA:
-    "A chave do CCO foi revogada. Peça uma nova ao administrador do sistema.",
+    "O acesso à base de dados foi revogado. Fale com o administrador do sistema.",
   PARAMETRO_INVALIDO: "A pesquisa não foi aceita como está escrita.",
   METODO_NAO_PERMITIDO: "Esta pesquisa só responde a leitura.",
   LIMITE_EXCEDIDO:
-    "A cota de pesquisas do CCO foi atingida. Espere um pouco antes de tentar de novo.",
+    "A cota de pesquisas deste período foi atingida. Espere um pouco antes de tentar de novo.",
   SERVICO_INDISPONIVEL:
     "O serviço de pesquisa não respondeu agora. Tente de novo em instantes.",
   ERRO_INTERNO: "Algo falhou na pesquisa. Tente de novo.",
