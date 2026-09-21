@@ -1726,6 +1726,67 @@ export const DatabaseService = {
     }
   },
 
+  // ------------------------------------------------------- relatorios NEO
+  /**
+   * Guarda o relatório de uma missão.
+   *
+   * Uma linha por missão: gerar de novo substitui o que estava lá. O
+   * documento é o mesmo toda vez que for aberto -- duas leituras da mesma
+   * missão sairiam diferentes, e quem mostrasse o relatório numa reunião veria
+   * um texto que não é o que leu antes.
+   */
+  async salvarRelatorioNeo(dados: {
+    missaoId: string;
+    titulo: string;
+    relatorio: any;
+    pecas: any[];
+  }) {
+    if (!db) return { success: false, error: 'banco de dados não configurado.' };
+    try {
+      const { error } = await db.from('mission_reports').upsert({
+        mission_id: dados.missaoId,
+        titulo: dados.titulo,
+        relatorio: dados.relatorio,
+        pecas: dados.pecas,
+        criado_em: new Date().toISOString()
+      });
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao salvar o relatório:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * O relatório guardado de uma missão, se houver.
+   *
+   * Banco sem a tabela devolve "não há" em vez de erro: o sistema segue
+   * gerando relatórios normalmente, só não guarda nenhum.
+   */
+  async lerRelatorioNeo(missaoId: string) {
+    if (!db) return { success: false, relatorio: null as any, pecas: [] as any[] };
+    try {
+      const { data, error } = await db
+        .from('mission_reports')
+        .select('*')
+        .eq('mission_id', missaoId)
+        .limit(1);
+      if (error) throw error;
+      const linha = data?.[0];
+      if (!linha) return { success: true, relatorio: null as any, pecas: [] as any[] };
+      return {
+        success: true,
+        relatorio: linha.relatorio,
+        pecas: Array.isArray(linha.pecas) ? linha.pecas : [],
+        criadoEm: linha.criado_em as string
+      };
+    } catch (err: any) {
+      console.warn('Não foi possível ler o relatório guardado:', err);
+      return { success: false, relatorio: null as any, pecas: [] as any[] };
+    }
+  },
+
   async loginAdmin(email: string, password: string) {
     if (!db) {
       return { success: false, error: 'banco de dados não configurado.' };

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -10,8 +11,11 @@ import {
   Eye,
   FileWarning,
   Gavel,
+  ImageOff,
   Loader2,
   Megaphone,
+  RefreshCw,
+  Save,
   MapPin,
   ScanSearch,
   Scale,
@@ -20,7 +24,7 @@ import {
   X
 } from 'lucide-react';
 import type { ForcaDaEvidencia, RelatorioDoNeo } from '../neo';
-import type { CoberturaDoNeo, PecaDoDossie } from '../services/neo';
+import type { PecaDoDossie } from '../services/neo';
 
 /**
  * O relatório do NEO: um documento de decisão, na tela e no papel.
@@ -117,9 +121,11 @@ export default function RelatorioNeo({
   carregando,
   erro,
   relatorio,
-  cobertura,
   pecas,
   missaoTitulo,
+  guardado,
+  salvando,
+  onSalvar,
   onFechar,
   onTentarDeNovo
 }: {
@@ -127,13 +133,29 @@ export default function RelatorioNeo({
   carregando: boolean;
   erro: string | null;
   relatorio: RelatorioDoNeo | null;
-  cobertura: CoberturaDoNeo | null;
   /** As peças do dossiê: é por elas que o rótulo citado vira imagem. */
   pecas: PecaDoDossie[];
   missaoTitulo: string;
+  /** Já está guardado no banco: o botão de salvar vira um selo. */
+  guardado: boolean;
+  salvando: boolean;
+  onSalvar: () => void;
   onFechar: () => void;
+  /** Gera de novo, descartando o que está na tela. */
   onTentarDeNovo: () => void;
 }) {
+  /*
+   * A peça aberta em tela cheia.
+   *
+   * O relatório mostra as provas no tamanho que o texto pede -- miniatura ao
+   * lado do achado, maior no destaque --, e nesse tamanho não dá para conferir
+   * o que a imagem mostra. Clicar abre a peça no meio da tela, sobre o
+   * documento, e o documento continua exatamente onde estava.
+   */
+  const [pecaAberta, setPecaAberta] = useState<{ url: string; titulo: string } | null>(null);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [erroDoPdf, setErroDoPdf] = useState<string | null>(null);
+
   if (!aberto) return null;
 
   /** Rótulo → endereço da imagem. O que transforma citação em prova na página. */
@@ -166,7 +188,9 @@ export default function RelatorioNeo({
           src={url}
           alt={referencia}
           referrerPolicy="no-referrer"
-          className={`w-full object-cover rounded-lg border border-slate-200 bg-slate-100 ${
+          onClick={() => setPecaAberta({ url, titulo: referencia })}
+          title="Abrir em tamanho grande"
+          className={`w-full object-cover rounded-lg border border-slate-200 bg-slate-100 cursor-zoom-in hover:border-slate-400 transition-colors ${
             grande ? 'max-h-[320px]' : 'h-[92px]'
           }`}
         />
@@ -195,20 +219,126 @@ export default function RelatorioNeo({
   };
 
   /**
-   * Imprimir marca o body e devolve ao normal quando a janela fecha.
+   * O PDF é gerado e baixado aqui, sem passar pela impressão.
    *
-   * A classe é o que faz o resto da página sumir no papel. Tirá-la no
-   * afterprint, e não num tempo fixo, evita a tela ficar estranha se a pessoa
-   * demorar para escolher o destino da impressão.
+   * A caixa de imprimir do navegador entregava o arquivo só depois de a pessoa
+   * achar "Salvar como PDF" num menu, e carimbava cabeçalho e rodapé próprios
+   * -- com o endereço do sistema e a data -- em toda página. Endereço interno
+   * num documento que vai para fora não é detalhe de acabamento.
+   *
+   * Aqui o documento é desenhado num canvas e fatiado em páginas A4. Sai um
+   * arquivo com o nome do relatório, sem uma URL em lugar nenhum.
+   *
+   * As duas bibliotecas entram por import dinâmico: juntas passam de meio
+   * megabyte, e quem só abre o mapa não deveria baixá-las para nada.
    */
-  const baixarPdf = () => {
-    const limpar = () => {
-      document.body.classList.remove('imprimindo-neo');
-      window.removeEventListener('afterprint', limpar);
-    };
-    window.addEventListener('afterprint', limpar);
-    document.body.classList.add('imprimindo-neo');
-    window.print();
+  const baixarPdf = async () => {
+    const folha = document.querySelector('.relatorio-neo-documento') as HTMLElement | null;
+    if (!folha || gerandoPdf) return;
+
+    setGerandoPdf(true);
+    setErroDoPdf(null);
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf')
+      ]);
+
+      const canvas = await html2canvas(folha, {
+        scale: 2,
+        // As imagens vêm de outro domínio; sem isto o canvas fica marcado como
+        // contaminado e o navegador recusa transformá-lo em arquivo.
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false
+      });
+
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const larguraPagina = pdf.internal.pageSize.getWidth();
+      const alturaPagina = pdf.internal.pageSize.getHeight();
+
+      /*
+       * ONDE A PÁGINA PODE SER CORTADA.
+       *
+       * Fatiar o documento de 297 em 297 milímetros parte um cartão de
+       * evidência ao meio: metade da foto no fim de uma página, a legenda no
+       * começo da outra. É o defeito que faz um relatório parecer improvisado.
+       *
+       * Cada bloco que não deve ser partido carrega a classe `quebra-evitar`.
+       * Aqui medimos onde cada um começa e termina, em pixels do canvas, e a
+       * página que fosse cair no meio de um deles termina antes dele -- a
+       * sobra de papel é preferível ao corte.
+       */
+      const escala = canvas.width / folha.offsetWidth;
+      const topoDaFolha = folha.getBoundingClientRect().top;
+      const blocos = Array.from(
+        folha.querySelectorAll('.quebra-evitar')
+      ).map((el) => {
+        const r = (el as HTMLElement).getBoundingClientRect();
+        return {
+          topo: (r.top - topoDaFolha) * escala,
+          base: (r.bottom - topoDaFolha) * escala
+        };
+      });
+
+      const alturaDaPaginaEmPixels = (alturaPagina * canvas.width) / larguraPagina;
+
+      let inicio = 0;
+      let primeira = true;
+      while (inicio < canvas.height) {
+        let fim = Math.min(inicio + alturaDaPaginaEmPixels, canvas.height);
+
+        if (fim < canvas.height) {
+          // O bloco mais alto que o corte atravessa manda a página terminar
+          // onde ele começa. Bloco maior que uma folha inteira não tem jeito:
+          // aí o corte normal vale, senão a página sairia vazia.
+          const atravessado = blocos
+            .filter((b) => b.topo > inicio + 40 && b.topo < fim && b.base > fim)
+            .sort((a, b) => a.topo - b.topo)[0];
+          if (atravessado) fim = atravessado.topo;
+        }
+
+        const altura = Math.max(1, Math.round(fim - inicio));
+        const pedaco = document.createElement('canvas');
+        pedaco.width = canvas.width;
+        pedaco.height = altura;
+        const pincel = pedaco.getContext('2d');
+        if (!pincel) break;
+        pincel.fillStyle = '#ffffff';
+        pincel.fillRect(0, 0, pedaco.width, pedaco.height);
+        pincel.drawImage(canvas, 0, -inicio);
+
+        if (!primeira) pdf.addPage();
+        primeira = false;
+        pdf.addImage(
+          pedaco.toDataURL('image/jpeg', 0.92),
+          'JPEG',
+          0,
+          0,
+          larguraPagina,
+          (altura * larguraPagina) / canvas.width
+        );
+
+        inicio = fim;
+      }
+
+      const nome =
+        (relatorio?.titulo || 'relatorio-neo')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 60) || 'relatorio-neo';
+
+      pdf.save(`${nome}.pdf`);
+    } catch (err: any) {
+      console.error('Erro ao gerar o PDF:', err);
+      setErroDoPdf(
+        'Não deu para montar o PDF. Se alguma imagem do relatório não abrir, é ela que impede.'
+      );
+    } finally {
+      setGerandoPdf(false);
+    }
   };
 
   const destaques = (relatorio?.evidencias || []).filter(e => e.destaque && imagemDe(e.referencia));
@@ -218,7 +348,7 @@ export default function RelatorioNeo({
     <div className="relatorio-neo-raiz fixed inset-0 z-[5000] bg-slate-900/70 backdrop-blur-xs overflow-y-auto p-4 md:p-8 font-sans">
       <div className="relatorio-neo-folha bg-white rounded-3xl shadow-2xl max-w-3xl mx-auto overflow-hidden">
         {/* Barra da janela: some no papel, onde ela não é conteúdo. */}
-        <div className="nao-imprimir sticky top-0 z-10 bg-slate-950 text-white px-6 py-3.5 flex items-center justify-between gap-3">
+        <div className="sticky top-0 z-10 bg-slate-950 text-white px-6 py-3.5 flex items-center justify-between gap-3">
           <span className="flex items-center gap-2.5 min-w-0">
             <Brain className="w-5 h-5 text-emerald-400 shrink-0" />
             <span className="min-w-0">
@@ -230,14 +360,59 @@ export default function RelatorioNeo({
           </span>
           <span className="flex items-center gap-2 shrink-0">
             {relatorio && (
-              <button
-                type="button"
-                onClick={baixarPdf}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Baixar PDF
-              </button>
+              <>
+                {/*
+                  Gerar de novo é uma decisão, e por isso é um botão -- e não
+                  o que acontece sozinho ao reabrir a missão. Custa uma chamada
+                  com imagens, e o texto sai diferente do que já foi lido.
+                */}
+                <button
+                  type="button"
+                  onClick={onTentarDeNovo}
+                  title="Descartar este e pedir uma leitura nova ao NEO"
+                  className="px-3 py-2 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer flex items-center gap-1.5 transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Gerar de novo
+                </button>
+                <button
+                  type="button"
+                  onClick={onSalvar}
+                  disabled={salvando || guardado}
+                  title={
+                    guardado
+                      ? 'Este relatório está guardado: abrir a missão de novo mostra ele.'
+                      : 'Guardar este relatório'
+                  }
+                  className={`px-3.5 py-2 rounded-xl text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 transition-all ${
+                    guardado
+                      ? 'bg-white/10 text-emerald-300 cursor-default'
+                      : 'bg-white/10 hover:bg-white/20 text-white cursor-pointer active:scale-95'
+                  }`}
+                >
+                  {salvando ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : guardado ? (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
+                  {guardado ? 'Guardado' : 'Salvar'}
+                </button>
+                <button
+                  type="button"
+                  onClick={baixarPdf}
+                  disabled={gerandoPdf}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 disabled:cursor-wait text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
+                >
+                  {gerandoPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  {gerandoPdf ? 'Montando...' : 'Baixar PDF'}
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -250,17 +425,29 @@ export default function RelatorioNeo({
           </span>
         </div>
 
+        {erroDoPdf && (
+          <p className="px-6 py-2.5 bg-rose-50 border-b border-rose-100 text-[11px] font-bold text-rose-700 flex items-center gap-2">
+            <ImageOff className="w-3.5 h-3.5 shrink-0" />
+            {erroDoPdf}
+          </p>
+        )}
+
         {carregando && (
-          <div className="px-6 py-20 flex flex-col items-center text-center gap-4">
-            <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
-            <div>
-              <p className="font-black text-slate-800 text-sm">O NEO está lendo a missão</p>
-              <p className="text-[11.5px] text-slate-500 font-semibold mt-1 max-w-sm leading-snug">
-                Entendendo a ordem e a prioridade, abrindo cada imagem do material
-                de apoio e do feedback, transcrevendo os áudios e cruzando o que
-                foi alegado com o que a equipe encontrou. Leva até um minuto.
-              </p>
-            </div>
+          <div className="px-8 py-20 flex flex-col items-center text-center gap-5">
+            <span className="w-12 h-12 rounded-2xl bg-slate-900 text-emerald-400 flex items-center justify-center">
+              <Brain className="w-6 h-6" />
+            </span>
+            <p className="font-black text-slate-800 text-sm">O NEO está lendo a missão</p>
+            {/*
+              Barra sem porcentagem, de propósito.
+              O modelo não informa progresso, e um número inventado subindo até
+              90% para travar ali é pior do que barra nenhuma: ensina a não
+              confiar na próxima. A faixa varre a barra enquanto se espera --
+              diz "está andando", que é tudo que se sabe de verdade.
+            */}
+            <span className="block w-full max-w-xs h-1.5 rounded-full bg-slate-200 overflow-hidden">
+              <span className="barra-do-neo block h-full w-2/5 rounded-full bg-emerald-500" />
+            </span>
           </div>
         )}
 
@@ -286,7 +473,7 @@ export default function RelatorioNeo({
         )}
 
         {relatorio && !carregando && (
-          <article className="text-slate-800">
+          <article className="relatorio-neo-documento bg-white text-slate-800">
             {/* =================================================== CAPA === */}
             <header className="quebra-evitar bg-slate-950 text-white px-6 md:px-10 py-8 space-y-5">
               <div className="flex items-center gap-2 text-[9.5px] font-black uppercase tracking-[0.25em] text-emerald-400">
@@ -698,23 +885,6 @@ export default function RelatorioNeo({
                 </Secao>
               )}
 
-              {/* -------------------------------------------- lacunas --- */}
-              {relatorio.lacunas.length > 0 && (
-                <Secao numero="09" titulo="O que faltou" Icone={FileWarning}>
-                  <ul className="space-y-1.5">
-                    {relatorio.lacunas.map((l, i) => (
-                      <li
-                        key={i}
-                        className="text-[11.5px] font-semibold text-slate-600 leading-relaxed flex gap-2"
-                      >
-                        <span className="text-slate-300 font-black shrink-0">—</span>
-                        {l}
-                      </li>
-                    ))}
-                  </ul>
-                </Secao>
-              )}
-
               {/* ------------------------------------------- veredito --- */}
               {relatorio.veredito && (
                 <div className="quebra-evitar bg-slate-950 text-white rounded-2xl p-6">
@@ -728,42 +898,6 @@ export default function RelatorioNeo({
                 </div>
               )}
 
-              {/*
-                A COBERTURA.
-
-                Todo relatório de análise precisa dizer sobre o que ele foi
-                feito. Quem lê decide quanto peso dar sabendo que foram nove
-                imagens e dois áudios -- e sabendo, principalmente, o que ficou
-                de fora.
-              */}
-              {cobertura && (
-                <footer className="quebra-evitar border-t-2 border-slate-900 pt-4 space-y-2">
-                  <p className="text-[9.5px] font-black uppercase tracking-wider text-slate-400">
-                    Sobre o que este relatório foi feito
-                  </p>
-                  <p className="text-[11px] font-bold text-slate-500 leading-relaxed">
-                    {cobertura.imagensAnalisadas} imagem(ns) analisada(s) ·{' '}
-                    {cobertura.audiosTranscritos} áudio(s) transcrito(s) · modelo{' '}
-                    {cobertura.modelo} · gerado em{' '}
-                    {new Date(cobertura.geradoEm).toLocaleString('pt-BR')}
-                  </p>
-                  {cobertura.naoAnalisado.length > 0 && (
-                    <ul className="space-y-0.5 pt-1">
-                      {cobertura.naoAnalisado.map((n, i) => (
-                        <li key={i} className="text-[10.5px] font-semibold text-amber-700">
-                          • {n}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="text-[10px] font-semibold text-slate-400 leading-snug pt-1">
-                    Documento gerado por um modelo de linguagem a partir do material
-                    desta missão. É uma leitura do material, não uma perícia: o que
-                    for usado publicamente deve ser conferido contra as evidências
-                    citadas, que estão reproduzidas acima.
-                  </p>
-                </footer>
-              )}
             </div>
           </article>
         )}
@@ -771,5 +905,44 @@ export default function RelatorioNeo({
     </div>
   );
 
-  return createPortal(conteudo, document.body);
+  /*
+   * A PEÇA EM TELA CHEIA.
+   *
+   * Fora do elemento que vira PDF, e acima dele: o documento é fotografado
+   * pela classe `relatorio-neo-documento`, e uma imagem aberta por cima
+   * entraria no arquivo, gigante, no meio do texto.
+   */
+  const visor = pecaAberta && (
+    <div
+      onClick={() => setPecaAberta(null)}
+      className="fixed inset-0 z-[6000] bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center p-4 md:p-10 cursor-zoom-out font-sans"
+    >
+      <button
+        type="button"
+        onClick={() => setPecaAberta(null)}
+        className="absolute top-4 right-4 p-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors cursor-pointer"
+        title="Fechar"
+      >
+        <X className="w-5 h-5" />
+      </button>
+      <img
+        src={pecaAberta.url}
+        alt={pecaAberta.titulo}
+        referrerPolicy="no-referrer"
+        onClick={e => e.stopPropagation()}
+        className="max-w-full max-h-[82vh] object-contain rounded-xl shadow-2xl cursor-default"
+      />
+      <p className="mt-4 text-[11px] font-black uppercase tracking-wider text-slate-300 text-center max-w-2xl">
+        {pecaAberta.titulo}
+      </p>
+    </div>
+  );
+
+  return createPortal(
+    <>
+      {conteudo}
+      {visor}
+    </>,
+    document.body
+  );
 }

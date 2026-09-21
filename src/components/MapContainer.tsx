@@ -18,7 +18,7 @@ import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
 import TempoDaMissao from './TempoDaMissao';
 import RelatorioNeo from './RelatorioNeo';
 import { CHAVE_PROMPT_NEO, PROMPT_NEO_PADRAO, RelatorioDoNeo } from '../neo';
-import { gerarRelatorioDaMissao, CoberturaDoNeo, PecaDoDossie } from '../services/neo';
+import { gerarRelatorioDaMissao, PecaDoDossie } from '../services/neo';
 import { JanelaDeTurno, NOME_DO_TURNO, TURNOS_PADRAO, TurnoId } from '../turnos';
 import { buildOperationIconSvg } from '../operationIcons';
 
@@ -784,7 +784,8 @@ export default function MapContainer({
   const [relatorioCarregando, setRelatorioCarregando] = useState(false);
   const [relatorioErro, setRelatorioErro] = useState<string | null>(null);
   const [relatorio, setRelatorio] = useState<RelatorioDoNeo | null>(null);
-  const [coberturaDoRelatorio, setCoberturaDoRelatorio] = useState<CoberturaDoNeo | null>(null);
+  const [relatorioGuardado, setRelatorioGuardado] = useState(false);
+  const [salvandoRelatorio, setSalvandoRelatorio] = useState(false);
   const [pecasDoRelatorio, setPecasDoRelatorio] = useState<PecaDoDossie[]>([]);
   const [missaoDoRelatorio, setMissaoDoRelatorio] = useState<{
     dados: any;
@@ -1517,15 +1518,35 @@ export default function MapContainer({
    * check-ins vinculados a ela --, então o documento fala exatamente da missão
    * que a pessoa está olhando.
    */
-  const pedirRelatorioDoNeo = async (missao: any) => {
+  const pedirRelatorioDoNeo = async (missao: any, forcarNovo = false) => {
     const titulo = missao?.titulo || 'Missão sem título';
     setMissaoDoRelatorio({ dados: missao, titulo });
     setRelatorio(null);
-    setCoberturaDoRelatorio(null);
+    setRelatorioGuardado(false);
     setPecasDoRelatorio([]);
     setRelatorioErro(null);
     setRelatorioAberto(true);
     setRelatorioCarregando(true);
+
+    /*
+     * O relatório guardado abre na hora, sem gerar de novo.
+     *
+     * Gerar custa uma chamada com imagens e até um minuto de espera, e duas
+     * leituras da mesma missão saem diferentes -- quem mostrasse o documento
+     * numa reunião veria um texto que não é o que leu antes. Quem quiser uma
+     * leitura nova pede por "Gerar de novo", que é uma decisão, não um efeito
+     * colateral de reabrir a missão.
+     */
+    if (!forcarNovo) {
+      const guardado = await DatabaseService.lerRelatorioNeo(missao.id);
+      if (guardado.relatorio) {
+        setRelatorio(guardado.relatorio);
+        setPecasDoRelatorio(guardado.pecas as PecaDoDossie[]);
+        setRelatorioGuardado(true);
+        setRelatorioCarregando(false);
+        return;
+      }
+    }
 
     const guardado = await DatabaseService.lerConfiguracao(CHAVE_PROMPT_NEO);
     const prompt = (guardado?.value || '').trim() || PROMPT_NEO_PADRAO;
@@ -1600,7 +1621,6 @@ export default function MapContainer({
       return;
     }
     setRelatorio(resposta.relatorio);
-    setCoberturaDoRelatorio(resposta.cobertura || null);
     setPecasDoRelatorio(resposta.pecas || []);
   };
 
@@ -1630,6 +1650,28 @@ export default function MapContainer({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missaoAbertaRef?.id, missaoAbertaRef?.tipo]);
+
+  /** Guarda o relatório que está na tela, para a missão dele. */
+  const guardarRelatorioDoNeo = async () => {
+    if (!relatorio || !missaoDoRelatorio?.dados?.id || salvandoRelatorio) return;
+    setSalvandoRelatorio(true);
+    const res = await DatabaseService.salvarRelatorioNeo({
+      missaoId: missaoDoRelatorio.dados.id,
+      titulo: relatorio.titulo,
+      relatorio,
+      pecas: pecasDoRelatorio
+    });
+    setSalvandoRelatorio(false);
+    if (res.success) {
+      setRelatorioGuardado(true);
+      notificar?.('Relatório guardado.', 'success');
+      return;
+    }
+    notificar?.(
+      'Não foi possível guardar. Rode db/migrations/2026-09-21-relatorios-neo.sql no banco.',
+      'error'
+    );
+  };
 
   /** Endereço da missão aberta, descoberto pela coordenada. */
   const [enderecoDaMissao, setEnderecoDaMissao] = useState<string | null>(null);
@@ -4959,12 +5001,14 @@ export default function MapContainer({
         carregando={relatorioCarregando}
         erro={relatorioErro}
         relatorio={relatorio}
-        cobertura={coberturaDoRelatorio}
         pecas={pecasDoRelatorio}
         missaoTitulo={missaoDoRelatorio?.titulo || ''}
+        guardado={relatorioGuardado}
+        salvando={salvandoRelatorio}
+        onSalvar={guardarRelatorioDoNeo}
         onFechar={() => setRelatorioAberto(false)}
         onTentarDeNovo={() => {
-          if (missaoDoRelatorio?.dados) pedirRelatorioDoNeo(missaoDoRelatorio.dados);
+          if (missaoDoRelatorio?.dados) pedirRelatorioDoNeo(missaoDoRelatorio.dados, true);
         }}
       />
     </div>

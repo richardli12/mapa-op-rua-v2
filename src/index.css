@@ -896,62 +896,31 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Impressão do relatório do NEO
+ * A barra de espera do NEO
  *
- * O PDF sai pelo próprio navegador, e não por uma biblioteca que fotografa a
- * tela: assim o texto continua texto no arquivo — dá para buscar e copiar, e o
- * zoom não borra.
- *
- * O relatório é montado fora da árvore do app (portal para o body), então
- * esconder o resto é uma regra só: some tudo que for filho direto do body e
- * não for ele. `visibility` não serviria — o elemento escondido continuaria
- * ocupando páginas em branco no arquivo.
+ * Sem porcentagem de propósito: o modelo não informa progresso, e um número
+ * inventado subindo até 90% para travar ali ensina a não confiar na barra
+ * seguinte. A faixa varre de um lado ao outro enquanto se espera — diz "está
+ * andando", que é tudo que se sabe de verdade.
  * ------------------------------------------------------------------------ */
-@media print {
-  body.imprimindo-neo > *:not(.relatorio-neo-raiz) {
-    display: none !important;
+@keyframes varredura-do-neo {
+  0% {
+    transform: translateX(-100%);
   }
-
-  body.imprimindo-neo .relatorio-neo-raiz {
-    position: static !important;
-    overflow: visible !important;
-    background: #fff !important;
-    backdrop-filter: none !important;
-    padding: 0 !important;
-  }
-
-  body.imprimindo-neo .relatorio-neo-folha {
-    max-width: none !important;
-    width: 100% !important;
-    margin: 0 !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    overflow: visible !important;
-  }
-
-  /* Botões e cabeçalho da janela não são conteúdo do documento. */
-  .nao-imprimir {
-    display: none !important;
-  }
-
-  /* Cartão partido ao meio entre duas páginas é o que estraga um relatório. */
-  .quebra-evitar {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-
-  /*
-   * Fundo escuro impresso vira mancha cinza, ou some, conforme o navegador.
-   * Pedir a impressão das cores exatas mantém o resumo executivo legível no
-   * papel, que é onde ele mais é lido.
-   */
-  body.imprimindo-neo .relatorio-neo-raiz * {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+  100% {
+    transform: translateX(350%);
   }
 }
 
-@page {
-  margin: 14mm;
+.barra-do-neo {
+  animation: varredura-do-neo 1.4s ease-in-out infinite;
+}
+
+/* Quem pediu menos movimento no sistema recebe uma barra que respira. */
+@media (prefers-reduced-motion: reduce) {
+  .barra-do-neo {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
 }
