@@ -16,6 +16,9 @@ import {
 } from './MaterialDaMissao';
 import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
 import TempoDaMissao from './TempoDaMissao';
+import RelatorioNeo from './RelatorioNeo';
+import { CHAVE_PROMPT_NEO, PROMPT_NEO_PADRAO, RelatorioDoNeo } from '../neo';
+import { gerarRelatorioDaMissao, CoberturaDoNeo } from '../services/neo';
 import { JanelaDeTurno, TURNOS_PADRAO, TurnoId } from '../turnos';
 import { buildOperationIconSvg } from '../operationIcons';
 
@@ -768,6 +771,24 @@ export default function MapContainer({
     id: string;
     tipo: 'pin' | 'area';
   } | null>(null);
+
+  /*
+   * O RELATÓRIO DO NEO.
+   *
+   * Mora aqui, e não dentro da ficha da missão, porque sobrevive a ela: quem
+   * mandou gerar pode fechar o card enquanto o modelo lê as imagens, e voltar
+   * ao relatório depois. O título da missão é copiado no momento do pedido --
+   * a ficha some, o documento continua sabendo de quem ele fala.
+   */
+  const [relatorioAberto, setRelatorioAberto] = useState(false);
+  const [relatorioCarregando, setRelatorioCarregando] = useState(false);
+  const [relatorioErro, setRelatorioErro] = useState<string | null>(null);
+  const [relatorio, setRelatorio] = useState<RelatorioDoNeo | null>(null);
+  const [coberturaDoRelatorio, setCoberturaDoRelatorio] = useState<CoberturaDoNeo | null>(null);
+  const [missaoDoRelatorio, setMissaoDoRelatorio] = useState<{
+    dados: any;
+    titulo: string;
+  } | null>(null);
   /** Índice do material aberto em tela cheia, por cima da ficha. */
   const [materialAberto, setMaterialAberto] = useState<number | null>(null);
   /**
@@ -1482,6 +1503,81 @@ export default function MapContainer({
       voluntarios: area.teamSize || 0
     };
   }, [missaoAbertaRef, pins, areas, operationTypes, equipe]);
+
+  /**
+   * Manda o NEO ler a missão e escrever o relatório.
+   *
+   * O prompt vem do banco, do que o administrador editou em Configurações; o
+   * texto de fábrica entra só quando ainda não há nada gravado. Ler na hora do
+   * pedido, e não ao montar a tela, é de propósito: prompt ajustado agora vale
+   * no próximo relatório, sem ninguém precisar recarregar a página.
+   *
+   * O dossiê é montado a partir do que já está em tela -- a missão e os
+   * check-ins vinculados a ela --, então o documento fala exatamente da missão
+   * que a pessoa está olhando.
+   */
+  const pedirRelatorioDoNeo = async (missao: any) => {
+    const titulo = missao?.titulo || 'Missão sem título';
+    setMissaoDoRelatorio({ dados: missao, titulo });
+    setRelatorio(null);
+    setCoberturaDoRelatorio(null);
+    setRelatorioErro(null);
+    setRelatorioAberto(true);
+    setRelatorioCarregando(true);
+
+    const guardado = await DatabaseService.lerConfiguracao(CHAVE_PROMPT_NEO);
+    const prompt = (guardado?.value || '').trim() || PROMPT_NEO_PADRAO;
+
+    const vinculados = (checkIns || []).filter(
+      (c: any) => c.missionId && c.missionId === missao.id
+    );
+
+    /*
+     * As observações e os áudios não vêm na lista.
+     *
+     * `check_ins` guarda o registro; o que a pessoa escreveu e gravou mora em
+     * `check_in_notes`, e as mídias em `check_in_media` -- a lista do mapa lê
+     * só a primeira tabela, porque desenhar pinos não precisa do resto. Sem
+     * buscar aqui, o NEO analisaria as fotos e não saberia que existe um áudio
+     * do morador dizendo o que aconteceu: é a metade mais importante do
+     * feedback.
+     *
+     * Em paralelo, e sem derrubar o relatório se uma falhar: check-in cujo
+     * detalhe não veio entra com o que a lista já tinha.
+     */
+    const retornos = await Promise.all(
+      vinculados.map(async (c: any) => {
+        try {
+          const detalhe = await DatabaseService.lerDetalhesCheckIn(c.id);
+          const midias =
+            detalhe.midias.length > 0
+              ? detalhe.midias.map((m: any) => ({
+                  url: m.url,
+                  type: m.kind === 'video' ? 'video' : 'image'
+                }))
+              : c.media;
+          return {
+            ...c,
+            media: midias,
+            notes: detalhe.notas.length > 0 ? detalhe.notas : c.notes,
+            operations: detalhe.operacoes.length > 0 ? detalhe.operacoes : c.operations
+          };
+        } catch {
+          return c;
+        }
+      })
+    );
+
+    const resposta = await gerarRelatorioDaMissao(missao, retornos, prompt);
+    setRelatorioCarregando(false);
+
+    if (!resposta.ok || !resposta.relatorio) {
+      setRelatorioErro(resposta.erro || 'O NEO não conseguiu montar este relatório.');
+      return;
+    }
+    setRelatorio(resposta.relatorio);
+    setCoberturaDoRelatorio(resposta.cobertura || null);
+  };
 
   /*
    * Abriu outra missão: a lista de narrativas é a dela.
@@ -4030,23 +4126,27 @@ export default function MapContainer({
               </button>
               <div className="flex items-center gap-2">
                 {/*
-                  O relatório ainda não existe, e o botão diz isso.
-
-                  Ele fica porque o lugar dele é aqui — depois de ler a missão
-                  inteira é que se quer o documento dela. Some no lugar de
-                  prometer: tocar avisa que está em manutenção, em vez de abrir
-                  uma tela vazia ou não fazer nada, que é o que ensina a
-                  desconfiar do botão seguinte.
+                  O lugar do relatório é aqui: depois de ler a missão inteira é
+                  que se quer o documento dela. Quem escreve é o NEO, com o
+                  dossiê que este card já tem em mãos.
                 */}
                 <button
                   type="button"
-                  onClick={() =>
-                    notificar?.('Gerar Relatório: em manutenção.', 'info')
-                  }
-                  className="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer transition-all flex items-center gap-2 active:scale-95"
+                  disabled={relatorioCarregando}
+                  onClick={() => pedirRelatorioDoNeo(missaoAberta)}
+                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer transition-all flex items-center gap-2 active:scale-95"
                 >
-                  <FileText className="w-3.5 h-3.5 stroke-[2.5] text-slate-400" />
-                  Gerar Relatório
+                  {relatorioCarregando ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      NEO lendo...
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="w-3.5 h-3.5 stroke-[2.5] text-emerald-400" />
+                      Gerar Relatório
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -4821,6 +4921,26 @@ export default function MapContainer({
           </div>
         </div>
       )}
+
+      {/*
+        O RELATÓRIO DO NEO.
+
+        Fica no fim, e fora de qualquer modal, porque ele mesmo se desenha num
+        portal para o body: precisa poder cobrir a ficha da missão e, na hora
+        de imprimir, ser o único filho visível do documento.
+      */}
+      <RelatorioNeo
+        aberto={relatorioAberto}
+        carregando={relatorioCarregando}
+        erro={relatorioErro}
+        relatorio={relatorio}
+        cobertura={coberturaDoRelatorio}
+        missaoTitulo={missaoDoRelatorio?.titulo || ''}
+        onFechar={() => setRelatorioAberto(false)}
+        onTentarDeNovo={() => {
+          if (missaoDoRelatorio?.dados) pedirRelatorioDoNeo(missaoDoRelatorio.dados);
+        }}
+      />
     </div>
   );
 }
