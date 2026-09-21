@@ -3990,7 +3990,7 @@ export default function MapContainer({
       {/* CHECK-IN DETALHES MODAL (CENTRALIZADO) */}
       {selectedCheckInForModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[2000] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+          <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
             {/* Header com tom esmeralda */}
             <div className="bg-emerald-600 px-6 py-4 flex items-center justify-between text-white shadow-md">
               <div className="flex items-center gap-2">
@@ -4060,6 +4060,56 @@ export default function MapContainer({
 
             {/* Conteúdo rolável */}
             <div className="p-6 overflow-y-auto space-y-5 text-left font-sans">
+
+              {/*
+                DUAS COLUNAS: QUEM REGISTROU, E O QUE ELE TROUXE.
+
+                A ficha era um tubo: para ver a foto do que a pessoa
+                encontrou era preciso rolar por baixo do nome, das
+                etiquetas, das operações e do áudio — e a foto é o motivo
+                de abrir um check-in. Agora a coluna estreita guarda a
+                identificação e o lugar, que se lê de relance, e a larga
+                guarda a prova: mídia e observações, que é onde o olho
+                precisa ficar.
+
+                Em tela estreita vira uma coluna só, na mesma ordem.
+              */}
+              <div className="grid gap-5 lg:grid-cols-12 items-start">
+                <div className="lg:col-span-5 space-y-5">
+              {/* Seção principal de identificação */}
+              <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-xl flex items-center gap-4">
+                <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+                  {(selectedCheckInForModal as any).memberPhoto ? (
+                    <img
+                      src={(selectedCheckInForModal as any).memberPhoto}
+                      alt={selectedCheckInForModal.name}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                      onError={e => {
+                        // Foto fora do ar volta para o boneco, sem quebrar a ficha.
+                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <User className="w-6 h-6" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none">Nome do Voluntário</p>
+                  <h4 className="text-lg font-bold text-slate-800 mt-1 truncate leading-snug">{selectedCheckInForModal.name}</h4>
+                  <div className="flex items-center gap-1.5 mt-1 text-slate-500 text-xs font-medium">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>
+                      {new Date(selectedCheckInForModal.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                    </span>
+                    <span className="text-slate-300">•</span>
+                    <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>
+                      {new Date(selectedCheckInForModal.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+              </div>
 
               {/* Modalidade e grau de prioridade/impacto */}
               {(() => {
@@ -4218,41 +4268,6 @@ export default function MapContainer({
                   );
                 })()}
 
-              {/* Seção principal de identificação */}
-              <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-xl flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
-                  {(selectedCheckInForModal as any).memberPhoto ? (
-                    <img
-                      src={(selectedCheckInForModal as any).memberPhoto}
-                      alt={selectedCheckInForModal.name}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                      onError={e => {
-                        // Foto fora do ar volta para o boneco, sem quebrar a ficha.
-                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <User className="w-6 h-6" />
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none">Nome do Voluntário</p>
-                  <h4 className="text-lg font-bold text-slate-800 mt-1 truncate leading-snug">{selectedCheckInForModal.name}</h4>
-                  <div className="flex items-center gap-1.5 mt-1 text-slate-500 text-xs font-medium">
-                    <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>
-                      {new Date(selectedCheckInForModal.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                    </span>
-                    <span className="text-slate-300">•</span>
-                    <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>
-                      {new Date(selectedCheckInForModal.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
               {/* Operações escolhidas */}
               {(() => {
                 const operacoes = detalhesCheckIn.operacoes.length > 0
@@ -4277,133 +4292,6 @@ export default function MapContainer({
                         </span>
                       ))}
                     </div>
-                  </div>
-                );
-              })()}
-
-              {/* Observações digitadas e áudios gravados em campo */}
-              {detalhesCheckIn.notas.length > 0 && (
-                <div>
-                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
-                    Observações ({detalhesCheckIn.notas.length})
-                  </p>
-                  <div className="space-y-2.5">
-                    {detalhesCheckIn.notas.map((nota: any) => (
-                      <div
-                        key={nota.id}
-                        className="border border-slate-150 rounded-xl p-3 bg-slate-50/60"
-                      >
-                        {nota.kind === 'audio' ? (
-                          <div className="flex items-center gap-2.5">
-                            <Mic className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <audio
-                              src={nota.url}
-                              controls
-                              preload="metadata"
-                              className="w-full h-9"
-                            />
-                            {nota.duration_seconds ? (
-                              <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                                {Math.floor(nota.duration_seconds / 60)}:
-                                {String(Math.floor(nota.duration_seconds % 60)).padStart(2, '0')}
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="flex items-start gap-2.5">
-                            <MessageSquare className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                            <p className="text-xs text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                              {nota.content}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Fotos e vídeos anexados */}
-              {(() => {
-                // A lista vem da tabela própria; o jsonb e a foto única cobrem os
-                // registros antigos, gravados antes das tabelas existirem.
-                const daTabela = detalhesCheckIn.midias.map((m: any) => ({
-                  url: m.url,
-                  type: (m.kind === 'video' ? 'video' : 'image') as 'image' | 'video'
-                }));
-                const media = daTabela.length > 0
-                  ? daTabela
-                  : selectedCheckInForModal.media && selectedCheckInForModal.media.length > 0
-                    ? selectedCheckInForModal.media
-                    : selectedCheckInForModal.photo
-                      ? [{ url: selectedCheckInForModal.photo, type: 'image' as const }]
-                      : [];
-
-                // O mesmo visor da missão: clicar abre no meio da tela, por
-                // cima de tudo, em vez de espremer a foto do buraco na rua
-                // num quadradinho da ficha.
-                midiasDoCheckInRef.current = media.map((item, index) => ({
-                  id: `checkin-midia-${index}`,
-                  tipo: item.type === 'video' ? ('video' as const) : ('imagem' as const),
-                  url: item.url,
-                  nome: `${item.type === 'video' ? 'Vídeo' : 'Foto'} ${index + 1} do check-in`
-                }));
-
-                return (
-                  <div>
-                    <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
-                      Fotos e vídeos{media.length > 1 ? ` (${media.length})` : ''}
-                    </p>
-                    {media.length > 0 ? (
-                      <div className={media.length > 1 ? 'grid grid-cols-2 gap-2.5' : ''}>
-                        {media.map((item, index) => (
-                          <button
-                            key={`${item.url}-${index}`}
-                            type="button"
-                            onClick={() => setMidiaDoCheckInAberta(index)}
-                            title="Abrir em tela cheia"
-                            className="group shadow-inner border border-slate-200 rounded-2xl overflow-hidden bg-slate-50 flex items-center justify-center relative cursor-pointer transition-all hover:border-slate-300 hover:shadow-md active:scale-[0.98]"
-                          >
-                            {item.type === 'video' ? (
-                              <video
-                                src={item.url}
-                                playsInline
-                                muted
-                                preload="metadata"
-                                className="w-full h-full object-cover max-h-64 sm:max-h-80 bg-black"
-                              />
-                            ) : (
-                              <img
-                                referrerPolicy="no-referrer"
-                                src={item.url}
-                                alt="Arquivo anexado ao check-in"
-                                className="w-full h-full object-cover max-h-64 sm:max-h-80 animate-in fade-in zoom-in-95 duration-500"
-                              />
-                            )}
-                            <span
-                              className={`absolute inset-0 flex items-center justify-center transition-opacity ${
-                                item.type === 'video'
-                                  ? 'bg-black/30'
-                                  : 'bg-slate-900/30 opacity-0 group-hover:opacity-100'
-                              }`}
-                            >
-                              <span className="w-10 h-10 rounded-full bg-white/95 flex items-center justify-center shadow-md">
-                                {item.type === 'video' ? (
-                                  <Play className="w-4 h-4 text-slate-800 fill-slate-800" />
-                                ) : (
-                                  <Maximize2 className="w-4 h-4 text-slate-800" />
-                                )}
-                              </span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center gap-1.5 select-none">
-                        <User className="w-8 h-8 text-slate-300" />
-                        <p className="text-xs text-slate-400 font-semibold" id="no-photo-attached-text">Nenhuma foto foi anexada neste check-in.</p>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
@@ -4522,6 +4410,146 @@ export default function MapContainer({
                     </p>
                   </div>
                 )}
+              </div>
+                </div>
+
+                <div className="lg:col-span-7 space-y-5">
+              {/* Fotos e vídeos anexados */}
+              {(() => {
+                // A lista vem da tabela própria; o jsonb e a foto única cobrem os
+                // registros antigos, gravados antes das tabelas existirem.
+                const daTabela = detalhesCheckIn.midias.map((m: any) => ({
+                  url: m.url,
+                  type: (m.kind === 'video' ? 'video' : 'image') as 'image' | 'video'
+                }));
+                const media = daTabela.length > 0
+                  ? daTabela
+                  : selectedCheckInForModal.media && selectedCheckInForModal.media.length > 0
+                    ? selectedCheckInForModal.media
+                    : selectedCheckInForModal.photo
+                      ? [{ url: selectedCheckInForModal.photo, type: 'image' as const }]
+                      : [];
+
+                // O mesmo visor da missão: clicar abre no meio da tela, por
+                // cima de tudo, em vez de espremer a foto do buraco na rua
+                // num quadradinho da ficha.
+                midiasDoCheckInRef.current = media.map((item, index) => ({
+                  id: `checkin-midia-${index}`,
+                  tipo: item.type === 'video' ? ('video' as const) : ('imagem' as const),
+                  url: item.url,
+                  nome: `${item.type === 'video' ? 'Vídeo' : 'Foto'} ${index + 1} do check-in`
+                }));
+
+                return (
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                      Fotos e vídeos{media.length > 0 ? ` (${media.length})` : ''}
+                    </p>
+                    {media.length > 0 ? (
+                      /*
+                        Grade sempre, e altura igual para todas.
+                        Com `max-h` cada foto terminava numa altura diferente e
+                        a coluna virava um mosaico irregular — o olho gasta na
+                        borda o que devia gastar no conteúdo. Uma sozinha ocupa
+                        a linha inteira, que é o maior que ela pode ser aqui.
+                      */
+                      <div className="grid grid-cols-2 gap-3">
+                        {media.map((item, index) => (
+                          <button
+                            key={`${item.url}-${index}`}
+                            type="button"
+                            onClick={() => setMidiaDoCheckInAberta(index)}
+                            title="Abrir em tela cheia"
+                            className={`group border border-slate-200 rounded-2xl overflow-hidden bg-slate-100 relative cursor-pointer transition-all hover:border-slate-300 hover:shadow-lg active:scale-[0.99] aspect-4/3 ${
+                              media.length === 1 ? 'col-span-2' : ''
+                            }`}
+                          >
+                            {item.type === 'video' ? (
+                              <video
+                                src={item.url}
+                                playsInline
+                                muted
+                                preload="metadata"
+                                className="w-full h-full object-cover bg-black"
+                              />
+                            ) : (
+                              <img
+                                referrerPolicy="no-referrer"
+                                src={item.url}
+                                alt="Arquivo anexado ao check-in"
+                                className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03] animate-in fade-in duration-500"
+                              />
+                            )}
+                            <span
+                              className={`absolute inset-0 flex items-center justify-center transition-opacity ${
+                                item.type === 'video'
+                                  ? 'bg-black/30'
+                                  : 'bg-slate-900/30 opacity-0 group-hover:opacity-100'
+                              }`}
+                            >
+                              <span className="w-10 h-10 rounded-full bg-white/95 flex items-center justify-center shadow-md">
+                                {item.type === 'video' ? (
+                                  <Play className="w-4 h-4 text-slate-800 fill-slate-800" />
+                                ) : (
+                                  <Maximize2 className="w-4 h-4 text-slate-800" />
+                                )}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-8 border border-dashed border-slate-200 rounded-xl bg-slate-50 text-center flex flex-col items-center justify-center gap-1.5 select-none">
+                        <User className="w-8 h-8 text-slate-300" />
+                        <p className="text-xs text-slate-400 font-semibold" id="no-photo-attached-text">Nenhuma foto foi anexada neste check-in.</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Observações digitadas e áudios gravados em campo */}
+              {detalhesCheckIn.notas.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                    Observações ({detalhesCheckIn.notas.length})
+                  </p>
+                  <div className="space-y-2.5">
+                    {detalhesCheckIn.notas.map((nota: any) => (
+                      <div
+                        key={nota.id}
+                        className="border border-slate-150 rounded-xl p-3 bg-slate-50/60"
+                      >
+                        {nota.kind === 'audio' ? (
+                          <div className="flex items-center gap-2.5">
+                            <Mic className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <audio
+                              src={nota.url}
+                              controls
+                              preload="metadata"
+                              className="w-full h-9"
+                            />
+                            {nota.duration_seconds ? (
+                              <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                                {Math.floor(nota.duration_seconds / 60)}:
+                                {String(Math.floor(nota.duration_seconds % 60)).padStart(2, '0')}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-2.5">
+                            <MessageSquare className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                            <p className="text-xs text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                              {nota.content}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+                </div>
               </div>
 
 
