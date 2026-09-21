@@ -337,6 +337,24 @@ export default function InteligenciaTerritorial({
   };
 
   /**
+   * O que o desenho e a lista mostram: a cidade inteira, ou o bairro escolhido
+   * como filtro.
+   *
+   * O filtro corta o que já está na memória — não é outra consulta, e por isso
+   * é instantâneo. Setor sem bairro (parte do território fica fora da divisão)
+   * só aparece na visão da cidade, que é onde ele existe.
+   *
+   * FICA AQUI EM CIMA, ANTES DOS EFEITOS, e não junto do resto da tela: o
+   * painel tem um `return null` quando está fechado, e com a camada ligada o
+   * efeito do desenho roda justamente nesse estado. Declarada lá embaixo, a
+   * const nem chegava a existir quando o efeito a lia — e o erro derruba a
+   * página inteira, não só o painel.
+   */
+  const setoresNaTela = bairroDosSetores
+    ? setores.filter((s) => s.bairroCodigo === bairroDosSetores.codigo)
+    : setores;
+
+  /**
    * Bairros do município.
    *
    * A geometria só é pedida quando o mapa vai desenhar — ela é o dado mais
@@ -428,6 +446,20 @@ export default function InteligenciaTerritorial({
       setProgressoSetores(null);
     }
   };
+
+  /**
+   * Camada ligada com a tela fechada: os bairros vêm sozinhos.
+   *
+   * A lista de bairros era carregada por um toque na aba — e com a gaveta da
+   * barra ligando a camada sem abrir painel nenhum, esse toque não acontece
+   * mais. Sem isto, ligar "População" pintaria o mapa de nada.
+   */
+  useEffect(() => {
+    if (!camadaLigada || nivelDaCamada !== 'bairros') return;
+    if (!municipio || bairros.length > 0 || carregandoBairros) return;
+    carregarBairros(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camadaLigada, nivelDaCamada, municipio?.codigo, bairros.length]);
 
   /**
    * Entrou na aba: a malha carrega sozinha.
@@ -684,17 +716,6 @@ export default function InteligenciaTerritorial({
   const semMalha = ufsComTerritorio.length > 0 && uf && !ufsComTerritorio.includes(uf);
   const semIndicadores =
     ufsComIndicadores.length > 0 && uf && !ufsComIndicadores.includes(uf);
-
-  /**
-   * O que a aba mostra: a cidade inteira, ou o bairro escolhido como filtro.
-   *
-   * O filtro corta o que já está na memória — não é outra consulta, e por isso
-   * é instantâneo. Setor sem bairro (parte do território fica fora da divisão)
-   * só aparece na visão da cidade, que é onde ele existe.
-   */
-  const setoresNaTela = bairroDosSetores
-    ? setores.filter((s) => s.bairroCodigo === bairroDosSetores.codigo)
-    : setores;
 
   const bairrosNaTela = bairros
     .filter((b) =>
