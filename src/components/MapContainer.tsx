@@ -18,8 +18,8 @@ import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
 import TempoDaMissao from './TempoDaMissao';
 import RelatorioNeo from './RelatorioNeo';
 import { CHAVE_PROMPT_NEO, PROMPT_NEO_PADRAO, RelatorioDoNeo } from '../neo';
-import { gerarRelatorioDaMissao, CoberturaDoNeo } from '../services/neo';
-import { JanelaDeTurno, TURNOS_PADRAO, TurnoId } from '../turnos';
+import { gerarRelatorioDaMissao, CoberturaDoNeo, PecaDoDossie } from '../services/neo';
+import { JanelaDeTurno, NOME_DO_TURNO, TURNOS_PADRAO, TurnoId } from '../turnos';
 import { buildOperationIconSvg } from '../operationIcons';
 
 // Função inteligente de normalização para ignorar acentos e caracteres especiais
@@ -785,6 +785,7 @@ export default function MapContainer({
   const [relatorioErro, setRelatorioErro] = useState<string | null>(null);
   const [relatorio, setRelatorio] = useState<RelatorioDoNeo | null>(null);
   const [coberturaDoRelatorio, setCoberturaDoRelatorio] = useState<CoberturaDoNeo | null>(null);
+  const [pecasDoRelatorio, setPecasDoRelatorio] = useState<PecaDoDossie[]>([]);
   const [missaoDoRelatorio, setMissaoDoRelatorio] = useState<{
     dados: any;
     titulo: string;
@@ -1521,6 +1522,7 @@ export default function MapContainer({
     setMissaoDoRelatorio({ dados: missao, titulo });
     setRelatorio(null);
     setCoberturaDoRelatorio(null);
+    setPecasDoRelatorio([]);
     setRelatorioErro(null);
     setRelatorioAberto(true);
     setRelatorioCarregando(true);
@@ -1568,7 +1570,29 @@ export default function MapContainer({
       })
     );
 
-    const resposta = await gerarRelatorioDaMissao(missao, retornos, prompt);
+    /*
+     * O contexto que o card conhece e o registro cru não diz.
+     *
+     * Prioridade e turno são guardados por id -- "p2", "tarde" -- e o endereço
+     * só existe depois da busca pela coordenada. Sem resolver isso aqui, o NEO
+     * receberia códigos no lugar de "Grave — risco à vida" e "Avenida Um,
+     * Apoena", e a análise da urgência sairia sem a informação que a define.
+     */
+    const nivel = (priorityLevels || []).find((n) => n.id === missao?.prioridade);
+    const janela = (janelasDeTurno || []).find((j) => j.id === missao?.turno);
+    const tipo = (operationTypes || []).find(
+      (t) => t.id === missao?.iconeChave || t.label === missao?.etiqueta
+    );
+
+    const resposta = await gerarRelatorioDaMissao(missao, retornos, prompt, {
+      endereco: enderecoDaMissao,
+      prioridade: nivel ? { label: nivel.label, description: nivel.description } : null,
+      turno: janela
+        ? { rotulo: NOME_DO_TURNO[janela.id], inicio: janela.inicio, fim: janela.fim }
+        : null,
+      tipoDeOperacao: tipo ? { label: tipo.label, description: tipo.description } : null,
+      cliente: candidates?.find((c) => c.id === selectedCandidateId)?.name || null
+    });
     setRelatorioCarregando(false);
 
     if (!resposta.ok || !resposta.relatorio) {
@@ -1577,6 +1601,7 @@ export default function MapContainer({
     }
     setRelatorio(resposta.relatorio);
     setCoberturaDoRelatorio(resposta.cobertura || null);
+    setPecasDoRelatorio(resposta.pecas || []);
   };
 
   /*
@@ -4935,6 +4960,7 @@ export default function MapContainer({
         erro={relatorioErro}
         relatorio={relatorio}
         cobertura={coberturaDoRelatorio}
+        pecas={pecasDoRelatorio}
         missaoTitulo={missaoDoRelatorio?.titulo || ''}
         onFechar={() => setRelatorioAberto(false)}
         onTentarDeNovo={() => {

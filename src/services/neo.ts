@@ -34,7 +34,32 @@ export interface RespostaDoNeo {
   ok: boolean;
   relatorio?: RelatorioDoNeo;
   cobertura?: CoberturaDoNeo;
+  /**
+   * As peças, com o mesmo rótulo que o NEO cita.
+   *
+   * Voltam para quem pediu porque o relatório mostra as imagens ao lado do
+   * texto: sem esta lista, a tela teria o rótulo "Imagem 3" e nenhum endereço
+   * para buscá-la.
+   */
+  pecas?: PecaDoDossie[];
   erro?: string;
+}
+
+/**
+ * O que o card sabe e o registro cru não diz.
+ *
+ * Prioridade e turno são guardados por id -- "p2", "tarde" --, e o tipo de
+ * operação vira um rótulo só. Mandar os ids para o analista seria mandar um
+ * código de barras: ele precisa de "Grave — risco à vida", "Tarde, 12h às
+ * 18h", e do endereço por extenso, que o próprio card já descobriu pela
+ * coordenada.
+ */
+export interface ContextoDaMissao {
+  endereco?: string | null;
+  prioridade?: { label?: string; description?: string } | null;
+  turno?: { rotulo?: string; inicio?: string; fim?: string } | null;
+  tipoDeOperacao?: { label?: string; description?: string } | null;
+  cliente?: string | null;
 }
 
 const dataHora = (iso?: string) => {
@@ -66,7 +91,8 @@ const tipoDaMidia = (m: any): PecaDoDossie['tipo'] => {
 export async function gerarRelatorioDaMissao(
   missao: any,
   retornos: any[],
-  prompt: string
+  prompt: string,
+  contexto: ContextoDaMissao = {}
 ): Promise<RespostaDoNeo> {
   const pecas: PecaDoDossie[] = [];
 
@@ -161,19 +187,48 @@ export async function gerarRelatorioDaMissao(
     };
   });
 
+  /*
+   * O tempo de resposta é calculado aqui, e não pedido ao analista.
+   *
+   * São duas datas subtraídas; o modelo erraria essa conta de vez em quando, e
+   * um relatório com aritmética errada perde a confiança inteira por causa da
+   * parte mais barata dele.
+   */
+  const primeiroRetorno = retornosDescritos.length > 0 ? (retornos || [])[0] : null;
+  const tempoDeResposta = (() => {
+    if (!missao?.criadaEm || !primeiroRetorno?.createdAt) return null;
+    const ordem = new Date(missao.criadaEm).getTime();
+    const chegada = Math.min(
+      ...(retornos || []).map((c: any) => new Date(c.createdAt).getTime()).filter(n => !Number.isNaN(n))
+    );
+    if (Number.isNaN(ordem) || !Number.isFinite(chegada)) return null;
+    const minutos = Math.max(0, Math.round((chegada - ordem) / 60000));
+    const horas = Math.floor(minutos / 60);
+    return horas > 0 ? `${horas}h ${minutos % 60}min` : `${minutos} min`;
+  })();
+
   const dossie = {
     missao: {
       titulo: missao?.titulo || null,
-      tipoDeOperacao: missao?.etiqueta || null,
+      tipoDeOperacao: contexto.tipoDeOperacao?.label || missao?.etiqueta || null,
+      oQueEsseTipoDeOperacaoSignifica: contexto.tipoDeOperacao?.description || null,
       ordem: missao?.descricao || null,
+      cliente: contexto.cliente || null,
       criadaEm: dataHora(missao?.criadaEm),
       prazo: missao?.prazo || null,
-      turno: missao?.turno || null,
-      prioridade: missao?.prioridade || null,
+      turno: contexto.turno?.rotulo
+        ? `${contexto.turno.rotulo}${
+            contexto.turno.inicio ? ` (${contexto.turno.inicio} às ${contexto.turno.fim})` : ''
+          }`
+        : missao?.turno || null,
+      prioridade: contexto.prioridade?.label || missao?.prioridade || null,
+      oQueEssaPrioridadeSignifica: contexto.prioridade?.description || null,
+      tempoAteOPrimeiroRetorno: tempoDeResposta,
       formato: missao?.tipo === 'area' ? 'área de trabalho (raio)' : 'ponto no mapa',
       local: missao?.semLocal
         ? 'missão sem local definido'
         : {
+            endereco: contexto.endereco || null,
             bairro: missao?.bairro || null,
             coordenadas: missao?.coords || null,
             raioMetros: missao?.raio || null
@@ -206,7 +261,12 @@ export async function gerarRelatorioDaMissao(
     if (!resposta.ok) {
       return { ok: false, erro: dados?.erro?.mensagem || 'O NEO não respondeu.' };
     }
-    return { ok: true, relatorio: dados.relatorio, cobertura: dados.cobertura };
+    return {
+      ok: true,
+      relatorio: dados.relatorio,
+      cobertura: dados.cobertura,
+      pecas
+    };
   } catch {
     return {
       ok: false,
