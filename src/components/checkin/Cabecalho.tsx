@@ -28,7 +28,6 @@ import Trilha, { EtapaDaTrilha } from './Trilha';
 export default function Cabecalho({
   nome,
   foto,
-  cliente,
   online,
   precisao,
   buscandoGps,
@@ -43,7 +42,6 @@ export default function Cabecalho({
 }: {
   nome: string;
   foto?: string;
-  cliente: string;
   online: boolean;
   precisao: number | null;
   buscandoGps: boolean;
@@ -99,8 +97,11 @@ export default function Cabecalho({
 
         <div className="min-w-0 flex-1 leading-tight">
           <p className="text-[14.5px] font-black truncate">{nome}</p>
+          {/* O nome do cliente não entra aqui: esta tela abre no aparelho de
+              quem está na rua, muitas vezes à vista de terceiros, e a campanha
+              a que o registro pertence não é informação dela. */}
           <p className="text-[11px] font-bold text-white/60 truncate">
-            {cliente ? `${cliente} · ` : ''}Check-in de campo
+            Check-in de campo
           </p>
         </div>
 
