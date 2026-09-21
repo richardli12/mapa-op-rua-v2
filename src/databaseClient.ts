@@ -1082,6 +1082,43 @@ export const DatabaseService = {
     }
   },
 
+  /**
+   * Liga um check-in a uma missão — ou solta ele dela.
+   *
+   * Quem está na rua às vezes grava como registro livre o que era missão: a
+   * lista não carregou a tempo, a ordem chegou depois, ou a pessoa simplesmente
+   * não escolheu. O trabalho foi feito e está registrado, com foto e
+   * coordenada; só o vínculo ficou faltando — e é o vínculo que faz a missão
+   * contar como cumprida nos relatórios.
+   *
+   * O `mode` anda junto com o id, sempre. Check-in com missão e modo "livre"
+   * some das contas de missão; missão nula com modo "missao" vira um registro
+   * que diz ter cumprido algo que ninguém sabe o que é. Os dois são gravados na
+   * mesma escrita para não existir um instante em que um esteja certo e o
+   * outro errado.
+   */
+  async vincularCheckInAMissao(
+    id: string,
+    missao: { id: string; titulo: string } | null
+  ) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('check_ins')
+        .update({
+          mode: missao ? 'missao' : 'livre',
+          missionid: missao?.id ?? null,
+          missiontitle: missao?.titulo ?? null
+        })
+        .eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao vincular o check-in a uma missao:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
   /** Manda o check-in para a lixeira, ou tira ele de lá. */
   async definirLixeiraCheckIn(id: string, naLixeira: boolean) {
     if (!db) return { success: false };

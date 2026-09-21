@@ -3793,6 +3793,68 @@ export default function App() {
   };
 
   /**
+   * Liga um check-in a uma missão depois de gravado.
+   *
+   * O caso comum é o registro livre que era missão: a pessoa não escolheu na
+   * hora, ou a ordem chegou depois de ela já estar na rua. O trabalho está
+   * registrado — foto, coordenada, hora — e só o vínculo ficou faltando, que é
+   * justamente o que faz a missão aparecer como cumprida.
+   *
+   * A tela muda na hora e o banco recebe em seguida; recusando, tudo volta
+   * para onde estava. Sem isso, um erro de rede deixaria o painel afirmando um
+   * vínculo que não existe em lugar nenhum.
+   */
+  const vincularCheckInAMissao = (
+    registro: any,
+    missao: { id: string; titulo: string } | null,
+  ) => {
+    const antes = {
+      mode: registro.mode,
+      missionId: registro.missionId,
+      missionTitle: registro.missionTitle,
+    };
+    const depois = {
+      mode: missao ? "missao" : "livre",
+      missionId: missao?.id,
+      missionTitle: missao?.titulo,
+    };
+    const aplicar = (valores: any) =>
+      setCheckIns((prev: any) =>
+        prev.map((c: any) => (c.id === registro.id ? { ...c, ...valores } : c)),
+      );
+
+    aplicar(depois);
+    // A ficha aberta é uma cópia do registro: sem isto ela continuaria
+    // mostrando "registro livre" logo depois de a pessoa ter escolhido.
+    setCheckInCompleto((atual: any) =>
+      atual && atual.registro?.id === registro.id
+        ? { ...atual, registro: { ...atual.registro, ...depois } }
+        : atual,
+    );
+
+    if (isDatabaseConfigured) {
+      DatabaseService.vincularCheckInAMissao(registro.id, missao).then((res) => {
+        if (!res.success) {
+          aplicar(antes);
+          setCheckInCompleto((atual: any) =>
+            atual && atual.registro?.id === registro.id
+              ? { ...atual, registro: { ...atual.registro, ...antes } }
+              : atual,
+          );
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+          return;
+        }
+        triggerNotification(
+          missao
+            ? `Check-in vinculado à missão "${missao.titulo}".`
+            : "Check-in desvinculado da missão.",
+          "success",
+        );
+      });
+    }
+  };
+
+  /**
    * Estrela do check-in: destaca o registro na lista e no mapa.
    *
    * O painel muda na hora e o banco recebe a mesma marca em seguida; se o
@@ -7886,6 +7948,102 @@ export default function App() {
                   </div>
                 ))}
               </div>
+
+              {/*
+                A MISSÃO DESTE CHECK-IN — e a chance de consertar o vínculo.
+
+                Muito registro nasce livre sendo missão: a lista não carregou a
+                tempo, a ordem chegou depois, ou a pessoa não escolheu. O
+                trabalho está aqui, com foto e coordenada; o que falta é o
+                vínculo — e é ele que faz a missão contar como cumprida.
+
+                A lista oferece as missões do MESMO cliente do registro. Ligar
+                um check-in à missão de outra campanha seria criar um dado que
+                nenhum relatório sabe ler.
+              */}
+              {(() => {
+                const doCliente = (id?: string | null) =>
+                  !checkInCompleto.registro.candidateId ||
+                  id === checkInCompleto.registro.candidateId;
+                const missoes = [
+                  ...areas
+                    .filter((a) => doCliente(a.candidateId))
+                    .map((a) => ({ id: a.id, titulo: a.title, tipo: "Área" })),
+                  ...pins
+                    .filter((p) => doCliente(p.candidateId))
+                    .map((p) => ({ id: p.id, titulo: p.title, tipo: "Ponto" })),
+                ];
+                const atual = checkInCompleto.registro.missionId || "";
+                // Missão apagada depois do check-in: o título gravado continua
+                // valendo na lista, senão o seletor apareceria vazio e a pessoa
+                // acharia que o vínculo se perdeu.
+                const orfa =
+                  atual && !missoes.some((m) => m.id === atual)
+                    ? {
+                        id: atual,
+                        titulo:
+                          checkInCompleto.registro.missionTitle ||
+                          "missão removida",
+                        tipo: "—",
+                      }
+                    : null;
+
+                return (
+                  <div className="rounded-2xl border border-slate-200 p-3.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-black text-slate-500">
+                        Missão vinculada
+                      </p>
+                      {atual && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            vincularCheckInAMissao(checkInCompleto.registro, null)
+                          }
+                          className="text-[10px] font-black uppercase tracking-wider text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
+                        >
+                          Desvincular
+                        </button>
+                      )}
+                    </div>
+
+                    <select
+                      value={atual}
+                      onChange={(e) => {
+                        const escolhida = [...missoes, ...(orfa ? [orfa] : [])].find(
+                          (m) => m.id === e.target.value,
+                        );
+                        vincularCheckInAMissao(
+                          checkInCompleto.registro,
+                          escolhida
+                            ? { id: escolhida.id, titulo: escolhida.titulo }
+                            : null,
+                        );
+                      }}
+                      className="mt-2 w-full h-10 px-2.5 bg-white border border-slate-200 rounded-xl text-[12px] font-bold text-slate-700 cursor-pointer focus:outline-hidden"
+                    >
+                      <option value="">Registro livre (sem missão)</option>
+                      {orfa && (
+                        <option value={orfa.id}>
+                          {orfa.titulo} (missão removida)
+                        </option>
+                      )}
+                      {missoes.map((missao) => (
+                        <option key={missao.id} value={missao.id}>
+                          {missao.tipo} · {missao.titulo}
+                        </option>
+                      ))}
+                    </select>
+
+                    {missoes.length === 0 && !orfa && (
+                      <p className="mt-1.5 text-[10.5px] font-semibold text-slate-400 leading-snug">
+                        Esta campanha ainda não tem missão cadastrada para
+                        vincular.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {checkInCompleto.registro.coordinates?.lat && (
                 <div className="rounded-2xl overflow-hidden border border-slate-100">
