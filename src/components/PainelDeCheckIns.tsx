@@ -11,6 +11,7 @@ import {
   Clock,
   Crosshair,
   EyeOff,
+  Filter,
   Flag,
   MapPin,
   Maximize2,
@@ -1409,19 +1410,39 @@ export default function PainelDeCheckIns({
                 aviso={`${graves.length} grave${graves.length === 1 ? '' : 's'} no período`}
               >
                 <div className="space-y-1.5">
-                  {urgentes.map((c: any) => (
-                    <button
+                  {urgentes.map((c: any) => {
+                    /*
+                      A ETIQUETA DA OCORRÊNCIA TAMBÉM FILTRA.
+
+                      A linha inteira leva o mapa até aquele registro — é o que
+                      se quer ao ler "pegando fogo". Mas quem bate o olho em
+                      "Esgoto a Céu Aberto" quase sempre quer ver TODOS os
+                      esgotos, não aquele. As duas intenções cabem na mesma
+                      linha: o corpo leva ao registro, a etiqueta filtra o mapa
+                      pelo tipo.
+                    */
+                    const etiqueta = c.operationTypeLabel || '';
+                    const doCadastro = operationTypes.find(
+                      t => t.label === etiqueta || t.id === c.operationTypeId
+                    );
+                    const chaveDoTipo = doCadastro?.id || etiqueta;
+                    const filtrando =
+                      !!chaveDoTipo && tiposSelecionados.includes(chaveDoTipo);
+                    return (
+                    <div
                       key={c.id}
-                      type="button"
-                      onClick={() => onIrParaCheckIn(c.id)}
-                      title="Levar o mapa até este registro"
-                      className="w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all cursor-pointer flex items-center gap-3"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all flex items-center gap-3"
                     >
                       <span
                         className="w-1.5 h-9 rounded-full shrink-0"
                         style={{ backgroundColor: c.nivel?.color || SITUACAO.atrasada }}
                       />
-                      <span className="min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => onIrParaCheckIn(c.id)}
+                        title="Levar o mapa até este registro"
+                        className="min-w-0 flex-1 text-left cursor-pointer"
+                      >
                         <span className="flex items-center gap-1.5">
                           <span
                             className="text-[9px] font-black uppercase tracking-wider"
@@ -1435,15 +1456,37 @@ export default function PainelDeCheckIns({
                           </span>
                         </span>
                         <span className="block text-[12px] font-bold text-slate-800 truncate mt-0.5">
-                          {c.operationTypeLabel || c.name}
+                          {etiqueta || c.name}
                         </span>
                         <span className="block text-[10px] font-semibold text-slate-400 truncate">
                           {[c.rua, c.bairro].filter(Boolean).join(', ') || 'Sem endereço'}
                         </span>
-                      </span>
-                      <Crosshair className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                    </button>
-                  ))}
+                      </button>
+
+                      {chaveDoTipo ? (
+                        <button
+                          type="button"
+                          onClick={() => onTipo(chaveDoTipo)}
+                          title={
+                            filtrando
+                              ? `Tirar o filtro de "${etiqueta}" do mapa`
+                              : `Deixar no mapa só os pins de "${etiqueta}"`
+                          }
+                          className={`shrink-0 px-2 h-7 rounded-lg border text-[9.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center gap-1 ${
+                            filtrando
+                              ? 'bg-[#015FC9] border-[#015FC9] text-white'
+                              : 'bg-white border-slate-200 text-slate-500 hover:border-[#015FC9] hover:text-[#015FC9]'
+                          }`}
+                        >
+                          <Filter className="w-3 h-3" />
+                          {filtrando ? 'filtrando' : 'filtrar'}
+                        </button>
+                      ) : (
+                        <Crosshair className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                      )}
+                    </div>
+                    );
+                  })}
                 </div>
               </Secao>
             )}
