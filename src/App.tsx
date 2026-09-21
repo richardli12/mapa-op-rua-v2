@@ -3904,14 +3904,19 @@ export default function App() {
    */
   const salvarNarrativasDaMissao = (
     missao: { id: string; tipo: "pin" | "area" },
-    narrativas: any[],
+    lista: any[],
+    topico: "missao" | "organico" = "missao",
   ) => {
+    // O tópico decide a gaveta: feedback da missão e feedback orgânico moram
+    // separados porque respondem a perguntas diferentes na hora de usar.
+    const campo =
+      topico === "organico" ? "narrativasOrganicas" : "narrativas";
     if (missao.tipo === "pin") {
       const antes = pins.find((p) => p.id === missao.id);
       if (!antes) return;
       const depois = {
         ...antes,
-        position: { ...antes.position, narrativas },
+        position: { ...antes.position, [campo]: lista },
       };
       setPins((prev) => prev.map((p) => (p.id === missao.id ? depois : p)));
       if (isDatabaseConfigured) {
@@ -3926,7 +3931,7 @@ export default function App() {
     }
     const antes = areas.find((a) => a.id === missao.id);
     if (!antes) return;
-    const depois = { ...antes, center: { ...antes.center, narrativas } };
+    const depois = { ...antes, center: { ...antes.center, [campo]: lista } };
     setAreas((prev) => prev.map((a) => (a.id === missao.id ? depois : a)));
     if (isDatabaseConfigured) {
       DatabaseService.upsertArea(depois).then((res) => {
