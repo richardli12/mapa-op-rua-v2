@@ -290,6 +290,18 @@ interface MapContainerProps {
   estabelecimentoDestacado?: string | null;
   /** Círculo que a inteligência territorial mediu, desenhado no mapa. */
   circuloAnalisado?: { lat: number; lng: number; raio: number } | null;
+  /**
+   * O círculo da pesquisa de estabelecimentos.
+   *
+   * Ele é o recorte da busca, e não uma medida: fica desenhado enquanto a
+   * pesquisa está em pé, para a lista ao lado e o mapa falarem do mesmo
+   * lugar. Quem lê "12 resultados" precisa ver os doze dentro de alguma
+   * coisa.
+   */
+  circuloDeBusca?: { lat: number; lng: number; raio: number } | null;
+  /** Ferramenta armada: o próximo gesto no mapa desenha o raio da busca. */
+  desenhandoRaioDeBusca?: boolean;
+  onRaioDeBuscaDesenhado?: (circulo: { lat: number; lng: number; raio: number }) => void;
   /** Bairros e setores desenhados por cima do mapa, pintados por intensidade. */
   recortesTerritoriais?: {
     id: string;
@@ -546,6 +558,9 @@ export default function MapContainer({
   estabelecimentoEmFoco,
   estabelecimentoDestacado,
   circuloAnalisado,
+  circuloDeBusca,
+  desenhandoRaioDeBusca,
+  onRaioDeBuscaDesenhado,
   recortesTerritoriais,
   escalaTerritorial,
   recorteEmFoco,
@@ -626,6 +641,10 @@ export default function MapContainer({
   const escolasGroupRef = useRef<L.LayerGroup | null>(null);
   const lojasGroupRef = useRef<L.LayerGroup | null>(null);
   const analiseGroupRef = useRef<L.LayerGroup | null>(null);
+  const buscaGroupRef = useRef<L.LayerGroup | null>(null);
+  /** O aviso de raio desenhado, sempre o atual, lido de dentro do gesto. */
+  const aoDesenharRaioDeBuscaRef = useRef(onRaioDeBuscaDesenhado);
+  aoDesenharRaioDeBuscaRef.current = onRaioDeBuscaDesenhado;
   const recortesGroupRef = useRef<L.LayerGroup | null>(null);
   /** Camadas por id, para acender a do item que a lista apontar. */
   const recortesPorIdRef = useRef<{ [id: string]: any }>({});
@@ -939,6 +958,8 @@ export default function MapContainer({
     escolasGroupRef.current = escolasGroup;
     lojasGroupRef.current = lojasGroup;
     analiseGroupRef.current = analiseGroup;
+    const buscaGroup = L.layerGroup().addTo(map);
+    buscaGroupRef.current = buscaGroup;
     recortesGroupRef.current = recortesGroup;
     delimitationGroupRef.current = delimitationGroup;
     mapRef.current = map;
@@ -996,14 +1017,16 @@ export default function MapContainer({
     const map = mapRef.current;
     if (!map) return;
 
-    if (clickToPickCoords) {
+    // Ferramenta armada é ferramenta que se vê: a mira diz que o próximo
+    // gesto desenha, seja ele o de uma área ou o do raio da pesquisa.
+    if (clickToPickCoords || desenhandoRaioDeBusca) {
       L.DomUtil.addClass(map.getContainer(), 'pointer-cursor');
       map.getContainer().style.cursor = 'crosshair';
     } else {
       L.DomUtil.removeClass(map.getContainer(), 'pointer-cursor');
       map.getContainer().style.cursor = '';
     }
-  }, [clickToPickCoords]);
+  }, [clickToPickCoords, desenhandoRaioDeBusca]);
 
   /** Formata a distância como se lê em campo: metros até 1 km, depois km. */
   const medida = (metros: number) =>
@@ -1979,6 +2002,57 @@ export default function MapContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [circuloAnalisado]);
 
+  /**
+   * O círculo da pesquisa de estabelecimentos.
+   *
+   * Azul e cheio, diferente do verde tracejado da análise de território: são
+   * duas perguntas diferentes e podem estar na tela ao mesmo tempo. A etiqueta
+   * mostra o raio porque é ele que explica por que um lugar não apareceu na
+   * lista.
+   */
+  useEffect(() => {
+    const grupo = buscaGroupRef.current;
+    if (!grupo) return;
+
+    grupo.clearLayers();
+    if (!circuloDeBusca) return;
+
+    const centro = L.latLng(circuloDeBusca.lat, circuloDeBusca.lng);
+
+    L.circle(centro, {
+      radius: circuloDeBusca.raio,
+      color: '#015FC9',
+      weight: 2,
+      opacity: 0.9,
+      fillColor: '#015FC9',
+      fillOpacity: 0.07,
+      interactive: false
+    }).addTo(grupo);
+
+    L.marker(centro, {
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({
+        className: '',
+        html:
+          '<span style="display:block;width:12px;height:12px;border-radius:50%;' +
+          'background:#015FC9;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></span>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      })
+    })
+      .addTo(grupo)
+      .bindTooltip(
+        `Busca · ${
+          circuloDeBusca.raio >= 1000
+            ? `${(circuloDeBusca.raio / 1000).toFixed(1).replace('.0', '')} km`
+            : `${Math.round(circuloDeBusca.raio)} m`
+        }`,
+        { permanent: true, direction: 'top', offset: [0, -10], className: 'medida-raio' }
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circuloDeBusca]);
+
   // Camada de escolas do municipio: so desenha quando ligada no dock.
   useEffect(() => {
     const grupo = escolasGroupRef.current;
@@ -2056,7 +2130,16 @@ export default function MapContainer({
    */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !clickToPickCoords || tempPlacementType !== 'area') return;
+    /*
+     * O mesmo gesto serve a dois donos: a área de panfletagem, que vira
+     * cadastro, e o raio da pesquisa de estabelecimentos, que vira recorte de
+     * busca. Desenhar é idêntico — aperta, arrasta, solta —, então o que muda
+     * é só a cor do traço e para quem o resultado é entregue no fim.
+     */
+    const modoBusca = !!desenhandoRaioDeBusca;
+    const modoArea = clickToPickCoords && tempPlacementType === 'area';
+    if (!map || (!modoArea && !modoBusca)) return;
+    const corDoTraco = modoBusca ? '#015FC9' : tempPlacementColor;
     const container = map.getContainer();
 
     let centro: any = null;
@@ -2109,11 +2192,11 @@ export default function MapContainer({
 
       previa = L.circle(centro, {
         radius: 0,
-        color: tempPlacementColor,
+        color: corDoTraco,
         weight: 2,
         opacity: 0.9,
         dashArray: '5, 5',
-        fillColor: tempPlacementColor,
+        fillColor: corDoTraco,
         fillOpacity: 0.15,
         interactive: false
       }).addTo(map);
@@ -2125,7 +2208,7 @@ export default function MapContainer({
           className: '',
           html:
             '<span style="display:block;width:12px;height:12px;border-radius:50%;' +
-            `background:${tempPlacementColor};border:2px solid #fff;` +
+            `background:${corDoTraco};border:2px solid #fff;` +
             'box-shadow:0 1px 4px rgba(0,0,0,.4)"></span>',
           iconSize: [12, 12],
           iconAnchor: [6, 6]
@@ -2177,6 +2260,18 @@ export default function MapContainer({
         arrastandoRaioRef.current = false;
       }, 0);
 
+      if (modoBusca) {
+        /*
+         * Clique seco no modo busca não fica sem raio: um círculo de raio
+         * zero não procura nada, e a pessoa ficaria olhando uma lista vazia
+         * sem entender. Sem arrasto, vale o raio de bolso — cem metros, a
+         * distância de uma quadra — e a lista oferece os outros tamanhos.
+         */
+        const raio = arrastou && metros > 0 ? metros : 100;
+        aoDesenharRaioDeBuscaRef.current?.({ lat: destino.lat, lng: destino.lng, raio });
+        return;
+      }
+
       aoEscolherCoordenadaRef.current({ lat: destino.lat, lng: destino.lng });
       if (arrastou && metros > 0) aoMudarRaioRef.current?.(metros);
     };
@@ -2204,7 +2299,7 @@ export default function MapContainer({
       window.removeEventListener('pointercancel', desistir);
       desistir();
     };
-  }, [clickToPickCoords, tempPlacementType, tempPlacementColor]);
+  }, [clickToPickCoords, tempPlacementType, tempPlacementColor, desenhandoRaioDeBusca]);
 
   // Render Temporary Placement Marker (when placing or picking coords)
   useEffect(() => {

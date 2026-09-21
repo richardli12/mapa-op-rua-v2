@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Search,
   X,
@@ -9,19 +9,91 @@ import {
   MapPin,
   Loader2,
   AlertCircle,
-  Crosshair
+  Crosshair,
+  Circle as CirculoIcone,
+  Footprints,
+  Maximize2,
+  Building2,
+  Trash2
 } from 'lucide-react';
 import {
   pesquisarEstabelecimentos,
+  varrerRaio,
   Estabelecimento,
+  EstabelecimentoNoRaio,
   ErroDaPesquisa
 } from '../services/estabelecimentos';
+import { distanciaCurta, tempoAPeCurto } from './checkin/missoes';
+
+/** O círculo que recorta a busca: centro marcado no mapa e raio em metros. */
+export interface CirculoDeBusca {
+  lat: number;
+  lng: number;
+  raio: number;
+}
+
+/** Onde a busca procura. */
+type Modo = 'cidade' | 'area' | 'raio';
+
+/**
+ * Raios de bolso.
+ *
+ * Não são números redondos por estética: cem metros é a quadra em volta,
+ * duzentos e cinquenta é o quarteirão inteiro, quinhentos é a caminhada de
+ * cinco minutos e mil é o limite do que se faz a pé numa manhã.
+ */
+const RAIOS = [100, 250, 500, 1000];
+
+/**
+ * O que se procura em volta de um ponto, sem precisar digitar.
+ *
+ * Quem está no mapa decidindo onde panfletar não quer escrever: quer saber o
+ * que existe ali. Estes são os lugares onde há fila, sombra e gente parada —
+ * que é o que interessa para o trabalho de rua.
+ */
+const ATALHOS = [
+  'Farmácia',
+  'Mercado',
+  'Padaria',
+  'Escola',
+  'Posto de saúde',
+  'Igreja',
+  'Bar',
+  'Restaurante',
+  'Salão de beleza',
+  'Posto de gasolina'
+];
+
+/** "1 km" em vez de "1000 m": é assim que se fala de distância na rua. */
+const raioCurto = (metros: number) =>
+  metros >= 1000
+    ? `${(metros / 1000).toFixed(1).replace('.0', '').replace('.', ',')} km`
+    : `${Math.round(metros)} m`;
+
+/**
+ * O menor raio redondo que alcançaria uma distância.
+ *
+ * Serve para a oferta de ampliar: ninguém quer "ampliar para 137 m". Sobe
+ * para a dezena, a cinquentena ou a centena mais próxima acima, conforme o
+ * tamanho — e sempre um pouco além do alvo, para ele entrar com folga.
+ */
+const raioQueAlcanca = (metros: number) => {
+  const alvo = metros + 1;
+  const passo = alvo <= 200 ? 25 : alvo <= 1000 ? 50 : 250;
+  return Math.ceil(alvo / passo) * passo;
+};
 
 interface PesquisaEstabelecimentosProps {
   aberto: boolean;
   onFechar: () => void;
   /** Centro do mapa agora, usado como área da busca. */
   centroDoMapa: () => { lat: number; lng: number; zoom: number } | null;
+  /** O círculo da busca, desenhado no mapa por quem é dono dele: o mapa. */
+  circulo: CirculoDeBusca | null;
+  onCirculo: (circulo: CirculoDeBusca | null) => void;
+  /** Ferramenta de desenhar o raio armada no mapa. */
+  desenhando: boolean;
+  onDesenhar: (armar: boolean) => void;
   /** Resultados desenhados no mapa. */
   onResultados: (lugares: Estabelecimento[]) => void;
   /** Levar o mapa até um resultado escolhido na lista. */
@@ -56,13 +128,29 @@ export default function PesquisaEstabelecimentos({
   aberto,
   onFechar,
   centroDoMapa,
+  circulo,
+  onCirculo,
+  desenhando,
+  onDesenhar,
   onResultados,
   onEscolher,
   emFoco,
   onDestacar
 }: PesquisaEstabelecimentosProps) {
   const [termo, setTermo] = useState('');
-  const [usarArea, setUsarArea] = useState(true);
+  const [modo, setModo] = useState<Modo>('area');
+  /** Tudo que a última varredura mediu, inclusive o que caiu fora do raio. */
+  const [medidos, setMedidos] = useState<EstabelecimentoNoRaio[]>([]);
+  const [truncado, setTruncado] = useState(false);
+  /**
+   * Já houve varredura neste raio?
+   *
+   * Separado do `pesquisou` da busca por texto de propósito: trocar de "nesta
+   * área" para "no raio" com resultados na tela mostrava "nada encontrado"
+   * antes de a pessoa ter procurado qualquer coisa dentro do círculo. Cada
+   * recorte responde pelo que ele mesmo procurou.
+   */
+  const [varreu, setVarreu] = useState(false);
   const [lugares, setLugares] = useState<Estabelecimento[]>([]);
   const [buscando, setBuscando] = useState(false);
   const [buscandoMais, setBuscandoMais] = useState(false);
@@ -71,6 +159,61 @@ export default function PesquisaEstabelecimentos({
   const [pesquisou, setPesquisou] = useState(false);
   /** Termo da busca em tela, para a paginação repetir exatamente ele. */
   const termoBuscadoRef = useRef('');
+  /** O raio da última varredura, para saber quando refazê-la. */
+  const raioBuscadoRef = useRef(0);
+
+  const noRaio = modo === 'raio' && circulo;
+
+  /*
+   * O raio manda na lista na hora.
+   *
+   * Mudar de cem para duzentos metros refiltra o que já está na mão, sem
+   * esperar a rede — e é essa resposta imediata que deixa o raio virar um
+   * controle, e não um formulário. A busca é refeita logo depois, por baixo,
+   * porque um círculo maior alcança lugares que a escala anterior nem pediu.
+   */
+  const dentroDoRaio = circulo
+    ? medidos.filter(l => l.distancia <= circulo.raio)
+    : [];
+  const foraDoRaio = circulo ? medidos.filter(l => l.distancia > circulo.raio) : [];
+  const maisPertoDeFora = foraDoRaio.length > 0 ? foraDoRaio[0].distancia : null;
+
+  const mostrados: (Estabelecimento | EstabelecimentoNoRaio)[] = noRaio
+    ? dentroDoRaio
+    : lugares;
+
+  /*
+   * O mapa desenha o que a lista está mostrando — sempre os dois de acordo.
+   *
+   * Sem isto, apertar o raio deixaria na tela pinos que a lista já não conta,
+   * e a pessoa passaria a contar pinos com o dedo para saber em quem
+   * acreditar.
+   */
+  useEffect(() => {
+    onResultados(noRaio ? dentroDoRaio : lugares);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noRaio, circulo?.raio, medidos, lugares]);
+
+  /*
+   * CENTRO NOVO, MESMA PERGUNTA.
+   *
+   * Depois da primeira varredura, remarcar o círculo noutra esquina é
+   * perguntar a mesma coisa sobre outro lugar — "e aqui, quantas farmácias
+   * tem?". Obrigar a apertar Pesquisar de novo seria cobrar duas vezes pelo
+   * mesmo pedido: o gesto no mapa já é o pedido. Só o centro dispara isto; o
+   * raio tem o caminho dele, que refiltra na hora.
+   */
+  const varrerRef = useRef<((texto: string, alvo: CirculoDeBusca) => void) | null>(null);
+  const centroVarridoRef = useRef('');
+  useEffect(() => {
+    if (!circulo || modo !== 'raio') return;
+    const chave = `${circulo.lat.toFixed(6)},${circulo.lng.toFixed(6)}`;
+    if (centroVarridoRef.current === chave) return;
+    centroVarridoRef.current = chave;
+    const texto = (termo || termoBuscadoRef.current).trim();
+    if (texto) varrerRef.current?.(texto, circulo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circulo?.lat, circulo?.lng, modo]);
 
   if (!aberto) return null;
 
@@ -88,7 +231,7 @@ export default function PesquisaEstabelecimentos({
     try {
       const pagina = await pesquisarEstabelecimentos({
         termo: texto,
-        centro: usarArea ? centroDoMapa() : null,
+        centro: modo === 'area' ? centroDoMapa() : null,
         inicio: continuando ? proximoInicio || 0 : 0
       });
 
@@ -114,13 +257,91 @@ export default function PesquisaEstabelecimentos({
     }
   };
 
+  /**
+   * A varredura do círculo.
+   *
+   * Aqui não há "carregar mais": o recorte é fechado, e o que existe dentro
+   * dele é finito. O serviço busca as páginas que forem necessárias, mede
+   * cada lugar e devolve tudo medido — a lista só escolhe o que mostrar.
+   */
+  const varrer = async (texto: string, alvo: CirculoDeBusca) => {
+    const limpo = texto.trim();
+    if (!limpo) return;
+
+    setBuscando(true);
+    setErro(null);
+    try {
+      const varredura = await varrerRaio({
+        termo: limpo,
+        centro: { lat: alvo.lat, lng: alvo.lng },
+        raio: alvo.raio
+      });
+      termoBuscadoRef.current = limpo;
+      raioBuscadoRef.current = alvo.raio;
+      setMedidos(varredura.todos);
+      setTruncado(varredura.truncado);
+      // Quem marca "já procurei" aqui é o `varreu`: `pesquisou` é da busca
+      // por texto, e marcá-lo faria a volta para "nesta área" anunciar zero
+      // resultados de uma pesquisa que nunca aconteceu lá.
+      setVarreu(true);
+      setProximoInicio(null);
+      onResultados(varredura.dentro);
+    } catch (falha: any) {
+      setErro(falha as ErroDaPesquisa);
+      setMedidos([]);
+      onResultados([]);
+      setVarreu(true);
+    } finally {
+      setBuscando(false);
+    }
+  };
+
+  // O efeito do centro roda antes desta linha existir: o aviso passa por ref.
+  varrerRef.current = varrer;
+
+  /** O botão de pesquisar e o Enter: cada modo sabe para onde ir. */
+  const disparar = (texto = termo) => {
+    if (modo === 'raio') {
+      if (!circulo) {
+        onDesenhar(true);
+        return;
+      }
+      varrer(texto, circulo);
+      return;
+    }
+    if (texto !== termo) setTermo(texto);
+    termoBuscadoRef.current = texto;
+    buscar(false);
+  };
+
+  /**
+   * Trocar o raio: a lista responde na hora, a rede responde depois.
+   *
+   * O filtro local já aconteceu (é derivado do estado), então aqui só resta
+   * refazer a varredura quando o círculo cresceu — encolher nunca revela
+   * nada novo, e gastar cota do CCO para devolver menos resultados seria
+   * trabalho para piorar.
+   */
+  const mudarRaio = (metros: number) => {
+    if (!circulo) return;
+    const novo = { ...circulo, raio: metros };
+    onCirculo(novo);
+    if (termoBuscadoRef.current && metros > raioBuscadoRef.current) {
+      varrer(termoBuscadoRef.current, novo);
+    }
+  };
+
   const limpar = () => {
     setTermo('');
     setLugares([]);
+    setMedidos([]);
+    setTruncado(false);
+    setVarreu(false);
     setErro(null);
     setProximoInicio(null);
     setPesquisou(false);
     termoBuscadoRef.current = '';
+    raioBuscadoRef.current = 0;
     onResultados([]);
     onDestacar?.(null);
   };
@@ -136,8 +357,14 @@ export default function PesquisaEstabelecimentos({
               Estabelecimentos
             </h3>
             <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
-              {pesquisou && !erro
-                ? `${lugares.length} ${lugares.length === 1 ? 'resultado' : 'resultados'} no mapa`
+              {(noRaio ? varreu : pesquisou) && !erro
+                ? noRaio && circulo
+                  ? `${dentroDoRaio.length} ${
+                      dentroDoRaio.length === 1 ? 'lugar' : 'lugares'
+                    } dentro de ${raioCurto(circulo.raio)}`
+                  : `${lugares.length} ${
+                      lugares.length === 1 ? 'resultado' : 'resultados'
+                    } no mapa`
                 : 'Pesquise comércios e serviços da região'}
             </p>
           </div>
@@ -166,7 +393,7 @@ export default function PesquisaEstabelecimentos({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            buscar(false);
+            disparar();
           }}
           className="mt-3"
         >
@@ -186,34 +413,187 @@ export default function PesquisaEstabelecimentos({
             )}
           </div>
 
-          <div className="mt-2 flex items-center gap-2">
-            {/* A área do mapa é o recorte natural de quem está olhando o mapa. */}
-            <button
-              type="button"
-              onClick={() => setUsarArea((v) => !v)}
-              className={`h-8 px-2.5 rounded-lg border text-[10.5px] font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
-                usarArea
-                  ? 'bg-[#EFF4FB] border-[#015FC9]/30 text-[#015FC9]'
-                  : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-              }`}
-              title={
-                usarArea
-                  ? 'Buscando na área que o mapa mostra'
-                  : 'Buscando pelo texto, sem usar a área do mapa'
-              }
-            >
-              <Crosshair className="w-3.5 h-3.5" />
-              Nesta área
-            </button>
+          {/*
+            ONDE PROCURAR — a pergunta que vinha antes da resposta e não
+            estava escrita em lugar nenhum.
 
+            Era uma chavinha só, "Nesta área", ligada ou desligada: ninguém
+            sabia o que "desligada" significava, nem que dava para recortar
+            um pedaço do mapa. Agora os três recortes possíveis estão à
+            vista, e o que está valendo tem cor.
+          */}
+          <div className="mt-2 grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl">
+            {(
+              [
+                { id: 'cidade', rotulo: 'Na cidade', icone: Building2, ajuda: 'Busca pelo texto, sem recorte de mapa' },
+                { id: 'area', rotulo: 'Nesta área', icone: Crosshair, ajuda: 'Busca no pedaço de mapa que está na tela' },
+                { id: 'raio', rotulo: 'No raio', icone: CirculoIcone, ajuda: 'Busca dentro de um círculo marcado no mapa' }
+              ] as const
+            ).map((opcao) => (
+              <button
+                key={opcao.id}
+                type="button"
+                onClick={() => setModo(opcao.id)}
+                title={opcao.ajuda}
+                className={`h-8 rounded-lg text-[10.5px] font-black flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                  modo === opcao.id
+                    ? 'bg-white text-[#015FC9] shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <opcao.icone className="w-3.5 h-3.5" />
+                {opcao.rotulo}
+              </button>
+            ))}
+          </div>
+
+          {/* O RAIO: marcar, medir e apertar — tudo no mesmo lugar. */}
+          {modo === 'raio' && (
+            <div className="mt-2 rounded-xl border border-[#015FC9]/25 bg-[#F5F9FF] p-2">
+              {!circulo ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onDesenhar(!desenhando)}
+                    className={`w-full h-9 rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.99] ${
+                      desenhando
+                        ? 'bg-[#0D233A] text-white'
+                        : 'bg-[#015FC9] hover:bg-[#0150ab] text-white'
+                    }`}
+                  >
+                    <CirculoIcone className="w-3.5 h-3.5" />
+                    {desenhando ? 'Desenhe no mapa…' : 'Marcar o raio no mapa'}
+                  </button>
+                  <p className="mt-1.5 text-[10.5px] font-semibold text-slate-500 leading-snug text-center">
+                    {desenhando ? (
+                      <>
+                        Aperte no centro e arraste até a borda. Um clique seco
+                        marca {raioCurto(100)}.
+                      </>
+                    ) : (
+                      <>
+                        Ou{' '}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const vista = centroDoMapa();
+                            if (vista) onCirculo({ lat: vista.lat, lng: vista.lng, raio: 250 });
+                          }}
+                          className="font-black text-[#015FC9] hover:underline cursor-pointer"
+                        >
+                          use o centro do mapa
+                        </button>{' '}
+                        como centro.
+                      </>
+                    )}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <span className="flex-1 min-w-0 text-[11px] font-black text-[#0D233A] flex items-center gap-1.5">
+                      <CirculoIcone className="w-3.5 h-3.5 text-[#015FC9] shrink-0" />
+                      Raio de {raioCurto(circulo.raio)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onDesenhar(true)}
+                      title="Marcar outro centro no mapa"
+                      className="h-7 px-2 rounded-lg border border-slate-200 bg-white text-[10px] font-black uppercase tracking-wider text-slate-500 hover:text-[#015FC9] hover:border-[#015FC9]/40 cursor-pointer transition-all"
+                    >
+                      Remarcar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCirculo(null);
+                        onDesenhar(false);
+                      }}
+                      title="Tirar o círculo do mapa"
+                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-rose-600 hover:border-rose-300 flex items-center justify-center cursor-pointer transition-all"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/*
+                    O raio arrastado à mão quase nunca é redondo: 137 m, 418 m.
+                    Os tamanhos de bolso ficam do lado para arredondar num
+                    toque, e o que está valendo aparece aceso mesmo sendo um
+                    número torto.
+                  */}
+                  <div className="mt-1.5 flex items-center gap-1">
+                    {RAIOS.map((metros) => (
+                      <button
+                        key={metros}
+                        type="button"
+                        onClick={() => mudarRaio(metros)}
+                        className={`flex-1 h-7 rounded-lg text-[10.5px] font-black cursor-pointer transition-all ${
+                          Math.round(circulo.raio) === metros
+                            ? 'bg-[#015FC9] text-white'
+                            : 'bg-white border border-slate-200 text-slate-500 hover:border-[#015FC9]/40 hover:text-[#015FC9]'
+                        }`}
+                      >
+                        {raioCurto(metros)}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="mt-2 flex items-center gap-2">
             <button
               type="submit"
-              disabled={!termo.trim() || buscando}
+              disabled={(!termo.trim() && !(modo === 'raio' && !circulo)) || buscando}
               className="flex-1 h-8 bg-[#015FC9] hover:bg-[#0150ab] text-white text-[11px] font-black uppercase tracking-wider rounded-lg cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
             >
-              Pesquisar
+              {modo === 'raio' && !circulo ? 'Marcar o raio' : 'Pesquisar'}
             </button>
           </div>
+
+          {/*
+            ATALHOS — a varredura sem teclado.
+
+            Com um círculo marcado, a pergunta quase nunca é "onde fica a
+            Farmácia Tal": é "o que existe aqui dentro". Cada atalho é uma
+            varredura de um toque, e é assim que se lê um quarteirão em dez
+            segundos.
+          */}
+          {modo === 'raio' && circulo && (
+            <div
+              /*
+                Antes da primeira varredura os atalhos são o convite, e ficam
+                todos à vista. Depois, quem manda na tela é a lista: eles
+                encolhem numa fila que corre de lado, ainda a um toque de
+                trocar de categoria.
+              */
+              className={
+                varreu
+                  ? 'mt-2 flex gap-1 overflow-x-auto rolagem-invisivel'
+                  : 'mt-2 flex flex-wrap gap-1'
+              }
+            >
+              {ATALHOS.map((atalho) => (
+                <button
+                  key={atalho}
+                  type="button"
+                  onClick={() => {
+                    setTermo(atalho);
+                    varrer(atalho, circulo);
+                  }}
+                  className={`h-7 px-2 shrink-0 rounded-lg border text-[10.5px] font-bold cursor-pointer transition-all ${
+                    termoBuscadoRef.current.toLowerCase() === atalho.toLowerCase()
+                      ? 'bg-[#EFF4FB] border-[#015FC9]/40 text-[#015FC9]'
+                      : 'bg-white border-slate-200 text-slate-500 hover:border-[#015FC9]/40 hover:text-[#015FC9]'
+                  }`}
+                >
+                  {atalho}
+                </button>
+              ))}
+            </div>
+          )}
         </form>
       </div>
 
@@ -233,22 +613,66 @@ export default function PesquisaEstabelecimentos({
           </div>
         )}
 
-        {!erro && pesquisou && lugares.length === 0 && (
-          <p className="py-10 text-center text-[10.5px] font-bold uppercase tracking-widest text-slate-300">
-            Nada encontrado para esta pesquisa
-          </p>
+        {/*
+          VAZIO COM RAIO NÃO É "NADA ENCONTRADO".
+
+          Se a varredura trouxe gente e o círculo recusou todo mundo, o
+          problema não é a pesquisa: é o tamanho do círculo. Dizer "nada
+          encontrado" mandaria a pessoa procurar outra palavra quando o que
+          falta é meia quadra de raio.
+        */}
+        {!erro && (noRaio ? varreu : pesquisou) && mostrados.length === 0 && (
+          noRaio && maisPertoDeFora !== null ? (
+            <div className="py-8 px-3 text-center">
+              <p className="text-[12px] font-bold text-slate-500 leading-snug">
+                Nenhum dentro de {circulo && raioCurto(circulo.raio)} — mas o
+                mais perto está a {distanciaCurta(maisPertoDeFora)} do centro.
+              </p>
+              <button
+                type="button"
+                onClick={() => mudarRaio(raioQueAlcanca(maisPertoDeFora))}
+                className="mt-2.5 h-8 px-3 rounded-lg bg-[#015FC9] hover:bg-[#0150ab] text-white text-[11px] font-black cursor-pointer inline-flex items-center gap-1.5 active:scale-[0.99] transition-all"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                Ampliar para {raioCurto(raioQueAlcanca(maisPertoDeFora))}
+              </button>
+            </div>
+          ) : (
+            <p className="py-10 text-center text-[10.5px] font-bold uppercase tracking-widest text-slate-300">
+              Nada encontrado para esta pesquisa
+            </p>
+          )
         )}
 
-        {!pesquisou && !erro && (
+        {!(noRaio ? varreu : pesquisou) && !erro && (
           <p className="py-10 px-4 text-center text-[11.5px] font-semibold text-slate-400 leading-snug">
-            Escreva o que procura e a pesquisa devolve os estabelecimentos da
-            região, com endereço, telefone e avaliação.
+            {modo === 'raio' ? (
+              circulo ? (
+                <>
+                  Toque num atalho aí em cima, ou escreva o que procura: a
+                  pesquisa devolve só o que estiver dentro do círculo, do mais
+                  perto para o mais longe.
+                </>
+              ) : (
+                <>
+                  Marque um círculo no mapa e a pesquisa passa a valer só ali
+                  dentro — com a distância e o tempo a pé de cada lugar até o
+                  centro que você marcou.
+                </>
+              )
+            ) : (
+              <>
+                Escreva o que procura e a pesquisa devolve os estabelecimentos
+                da região, com endereço, telefone e avaliação.
+              </>
+            )}
           </p>
         )}
 
         <div className="flex flex-col gap-1.5">
-          {lugares.map((lugar) => {
+          {mostrados.map((lugar) => {
             const ativo = emFoco === lugar.id;
+            const distancia = (lugar as EstabelecimentoNoRaio).distancia;
             return (
               <button
                 key={lugar.id}
@@ -281,6 +705,19 @@ export default function PesquisaEstabelecimentos({
                   <span className="block text-[12.5px] font-black text-slate-800 truncate leading-tight">
                     {lugar.nome}
                   </span>
+
+                  {/*
+                    A distância vem antes da categoria e da nota: numa lista
+                    ordenada por proximidade, ela é o que diz em que ordem
+                    andar. O tempo a pé vem junto porque é o número que decide
+                    se vale o trajeto.
+                  */}
+                  {distancia !== undefined && (
+                    <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-md bg-[#EFF4FB] text-[10.5px] font-black text-[#015FC9]">
+                      <Footprints className="w-3 h-3" />
+                      {distanciaCurta(distancia)} · {tempoAPeCurto(distancia)}
+                    </span>
+                  )}
 
                   <span className="flex items-center gap-2 mt-0.5 flex-wrap">
                     {lugar.categoria && (
@@ -353,8 +790,45 @@ export default function PesquisaEstabelecimentos({
           })}
         </div>
 
+        {/*
+          O QUE FICOU DE FORA, E O RAIO QUE O ALCANÇARIA.
+
+          Um resultado a cinco metros da borda é o caso mais comum e o mais
+          irritante: a farmácia da esquina não aparece porque o círculo parou
+          um passo antes dela. Em vez de esconder isso, a lista conta quantos
+          ficaram de fora, diz a que distância está o mais próximo e oferece o
+          raio redondo que o traria para dentro — um toque, sem redesenhar
+          nada.
+        */}
+        {noRaio && foraDoRaio.length > 0 && mostrados.length > 0 && maisPertoDeFora !== null && (
+          <div className="mt-2.5 p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+            <p className="text-[11px] font-bold text-slate-500 leading-snug">
+              {foraDoRaio.length === 1
+                ? 'Mais 1 lugar ficou fora do círculo'
+                : `Mais ${foraDoRaio.length} lugares ficaram fora do círculo`}
+              , o mais perto a {distanciaCurta(maisPertoDeFora)}.
+            </p>
+            <button
+              type="button"
+              onClick={() => mudarRaio(raioQueAlcanca(maisPertoDeFora))}
+              className="mt-1.5 h-7 px-2.5 rounded-lg bg-white border border-[#015FC9]/30 text-[#015FC9] text-[10.5px] font-black cursor-pointer inline-flex items-center gap-1.5 hover:bg-[#EFF4FB] transition-all"
+            >
+              <Maximize2 className="w-3 h-3" />
+              Ampliar para {raioCurto(raioQueAlcanca(maisPertoDeFora))}
+            </button>
+          </div>
+        )}
+
+        {/* A fonte ainda tinha páginas: o número pode não ser o total. */}
+        {noRaio && truncado && mostrados.length > 0 && (
+          <p className="mt-2 text-[10px] font-bold text-slate-400 leading-snug text-center">
+            A fonte tinha mais resultados para este termo. Um raio menor, ou um
+            termo mais específico, fecha a conta.
+          </p>
+        )}
+
         {/* A próxima página é a que a resposta indicou, não uma conta nossa. */}
-        {proximoInicio !== null && lugares.length > 0 && (
+        {!noRaio && proximoInicio !== null && lugares.length > 0 && (
           <button
             type="button"
             onClick={() => buscar(true)}
