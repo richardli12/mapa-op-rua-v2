@@ -322,6 +322,15 @@ interface MapContainerProps {
     /** Texto pronto para o balão, montado por quem tem os dados completos. */
     resumo: string;
     tipo: 'bairro' | 'setor';
+    /** Números crus do recorte, lidos pela ficha do canto do mapa. */
+    dados?: {
+      populacao: number | null;
+      domicilios: number | null;
+      areaKm2: number | null;
+      densidade: number | null;
+      mediaMoradores: number | null;
+      imputados: number | null;
+    };
   }[];
   /** Faixas da escala de cor, do mais claro ao mais escuro. */
   escalaTerritorial?: { corte: number; cor: string }[];
@@ -1941,16 +1950,29 @@ export default function MapContainer({
         }
       );
 
-      camada.bindTooltip(
-        `<div class="px-2.5 py-1.5 font-sans min-w-[130px]">
-           <p class="font-bold text-slate-900 text-[12px] leading-tight">${recorte.nome}</p>
-           <p class="text-[10px] text-slate-500 font-semibold mt-0.5 leading-snug">${recorte.resumo}</p>
-         </div>`,
-        { sticky: true, direction: 'top' }
-      );
+      /*
+       * SEM BALÃO NO PONTEIRO.
+       *
+       * O que o cursor encontra abre na ficha fixa do canto superior esquerdo,
+       * que cabe o Censo inteiro do setor. Manter os dois seria dizer a mesma
+       * coisa duas vezes, com a cópia menor tapando o mapa.
+       */
 
-      camada.on('mouseover', () => onRecorteSobOCursor?.(recorte.id));
-      camada.on('mouseout', () => onRecorteSobOCursor?.(null));
+      camada.on('mouseover', () => {
+        // O realce sai na hora, no próprio Leaflet: esperar o React repintar a
+        // malha inteira atrasaria a resposta do gesto mais barato que existe.
+        camada.setStyle({ weight: 2.5, opacity: 0.95, fillOpacity: semDado ? 0.4 : 0.72 });
+        camada.bringToFront();
+        onRecorteSobOCursor?.(recorte.id);
+      });
+      camada.on('mouseout', () => {
+        camada.setStyle({
+          weight: emFoco ? 2.5 : recorte.tipo === 'setor' ? 0.6 : 1,
+          opacity: emFoco ? 0.9 : 0.45,
+          fillOpacity: semDado ? 0.25 : emFoco ? 0.72 : 0.55
+        });
+        onRecorteSobOCursor?.(null);
+      });
       camada.on('click', () => onRecorteClicado?.(recorte.id));
 
       grupo.addLayer(camada);

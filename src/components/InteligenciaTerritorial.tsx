@@ -497,7 +497,23 @@ export default function InteligenciaTerritorial({
      * mostraria outra.
      */
     const doSetor = aba === 'setores' && setoresNaTela.length > 0;
-    const fonte: { id: string; nome: string; geometria: any; valor: number | null; resumo: string; tipo: 'bairro' | 'setor' }[] =
+    const fonte: {
+      id: string;
+      nome: string;
+      geometria: any;
+      valor: number | null;
+      resumo: string;
+      tipo: 'bairro' | 'setor';
+      /** Números crus do recorte, para a ficha que abre sob o cursor. */
+      dados: {
+        populacao: number | null;
+        domicilios: number | null;
+        areaKm2: number | null;
+        densidade: number | null;
+        mediaMoradores: number | null;
+        imputados: number | null;
+      };
+    }[] =
       doSetor
         ? setoresNaTela.map((setor) => {
             const valor =
@@ -522,7 +538,18 @@ export default function InteligenciaTerritorial({
               ]
                 .filter(Boolean)
                 .join(' · '),
-              tipo: 'setor' as const
+              tipo: 'setor' as const,
+              dados: {
+                populacao: setor.populacao,
+                domicilios: setor.domicilios,
+                areaKm2: setor.areaKm2,
+                densidade:
+                  setor.areaKm2 && setor.populacao !== null
+                    ? Math.round(setor.populacao / setor.areaKm2)
+                    : null,
+                mediaMoradores: setor.mediaMoradoresPorDomicilioOcupado,
+                imputados: setor.percentualDomiciliosImputados
+              }
             };
           })
         : bairros.map((bairro) => {
@@ -544,7 +571,15 @@ export default function InteligenciaTerritorial({
               resumo: `${numero(bairro.populacao)} hab · ${numero(bairro.domicilios)} dom${
                 densidade !== null ? ` · ${numero(densidade)} hab/km²` : ''
               }`,
-              tipo: 'bairro' as const
+              tipo: 'bairro' as const,
+              dados: {
+                populacao: bairro.populacao,
+                domicilios: bairro.domicilios,
+                areaKm2: bairro.areaKm2,
+                densidade,
+                mediaMoradores: bairro.mediaMoradoresPorDomicilioOcupado,
+                imputados: null
+              }
             };
           });
 
