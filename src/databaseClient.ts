@@ -370,6 +370,106 @@ export const DatabaseService = {
     }
   },
 
+  /**
+   * Mescla dois tipos de operação: tudo do primeiro passa a ser do segundo.
+   *
+   * Existe porque a mesma coisa acaba cadastrada duas vezes — "Buracos" e
+   * "Buraco ou Cratera na Via" —, e aí a contagem do painel divide ao meio um
+   * problema que é um só. Apagar o repetido sem mover o que está nele perderia
+   * os registros de vista; mover primeiro é o que torna o apagar seguro.
+   *
+   * Três lugares guardam o tipo e os três são atualizados:
+   * - `check_ins`, pela coluna do tipo (id e rótulo, que andam juntos);
+   * - `check_in_operations`, a tabela das operações múltiplas de um registro;
+   * - `campaign_pins`, onde o tipo é o ícone da missão.
+   *
+   * O casamento é por id OU por rótulo: registro antigo guarda só o texto, e
+   * deixá-lo de fora seria mesclar pela metade.
+   */
+  async mesclarTiposDeOperacao(
+    origem: { id: string; label: string },
+    destino: { id: string; label: string }
+  ) {
+    if (!db) return { success: false, movidos: 0 };
+    if (origem.id === destino.id) {
+      return { success: false, movidos: 0, error: 'Escolha dois tipos diferentes.' };
+    }
+    try {
+      let movidos = 0;
+
+      /* ----------------------------------------------------- check-ins --- */
+      // A grafia das colunas muda de banco para banco: a mesma regra do resto
+      // do arquivo vale aqui, com a segunda tentativa na outra grafia.
+      const gravarCheckIns = async (camel: boolean) => {
+        const campoId = camel ? 'operationTypeId' : 'operationtypeid';
+        const campoRotulo = camel ? 'operationTypeLabel' : 'operationtypelabel';
+        const { data, error } = await db!
+          .from('check_ins')
+          .update({ [campoId]: destino.id, [campoRotulo]: destino.label })
+          .or(`${campoId}.eq.${origem.id},${campoRotulo}.eq.${origem.label}`)
+          .select('id');
+        if (error) throw error;
+        return (data || []).length;
+      };
+
+      const camelPrimeiro = (detectedCasing.check_ins || 'camel') === 'camel';
+      try {
+        movidos = await gravarCheckIns(camelPrimeiro);
+      } catch (err: any) {
+        if (!colunaDesconhecida(err)) throw err;
+        movidos = await gravarCheckIns(!camelPrimeiro);
+        detectedCasing.check_ins = camelPrimeiro ? 'lower' : 'camel';
+      }
+
+      /* ------------------------------------------- operações múltiplas --- */
+      // Tabela nova pode não existir no banco antigo: a falha dela não pode
+      // desfazer a mescla que já aconteceu nos check-ins.
+      try {
+        await db
+          .from('check_in_operations')
+          .update({
+            operation_type_id: destino.id,
+            operation_type_label: destino.label
+          })
+          .or(
+            `operation_type_id.eq.${origem.id},operation_type_label.eq.${origem.label}`
+          );
+      } catch (err) {
+        console.warn('check_in_operations nao pode ser atualizada na mescla:', err);
+      }
+
+      /* -------------------------------------------------------- missões --- */
+      const gravarPins = async (camel: boolean) => {
+        const campo = camel ? 'iconType' : 'icontype';
+        const { error } = await db!
+          .from('campaign_pins')
+          .update({ [campo]: destino.id })
+          .eq(campo, origem.id);
+        if (error) throw error;
+      };
+      const camelPin = (detectedCasing.campaign_pins || 'camel') === 'camel';
+      try {
+        await gravarPins(camelPin);
+      } catch (err: any) {
+        if (!colunaDesconhecida(err)) throw err;
+        await gravarPins(!camelPin);
+        detectedCasing.campaign_pins = camelPin ? 'lower' : 'camel';
+      }
+
+      /* ------------------------------------- o repetido sai da lista --- */
+      const { error: erroDoDelete } = await db
+        .from('operation_types')
+        .delete()
+        .eq('id', origem.id);
+      if (erroDoDelete) throw erroDoDelete;
+
+      return { success: true, movidos };
+    } catch (err: any) {
+      console.error('Erro ao mesclar tipos de operação:', err);
+      return { success: false, movidos: 0, error: err.message };
+    }
+  },
+
   async deleteOperationType(id: string) {
     if (!db) return { success: false };
     try {
