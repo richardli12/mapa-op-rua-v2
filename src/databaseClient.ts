@@ -1394,8 +1394,17 @@ export const DatabaseService = {
         codigoInep: linha.codigo_inep,
         nome: linha.nome,
         endereco: linha.endereco,
-        latitude: Number(linha.latitude),
-        longitude: Number(linha.longitude),
+        /*
+         * Coordenada ausente vira `null`, e não zero.
+         *
+         * `Number(null)` é 0, e zero é uma coordenada válida no golfo da
+         * Guiné: a escola sem localização apareceria no mapa, no meio do
+         * oceano, como se fosse um dado bom.
+         */
+        latitude: linha.latitude === null ? null : Number(linha.latitude),
+        longitude: linha.longitude === null ? null : Number(linha.longitude),
+        zona: linha.zona,
+        alunosUnicos: linha.alunos_unicos,
         municipio: linha.municipio,
         uf: linha.uf,
         dependencia: linha.dependencia,
@@ -1406,17 +1415,24 @@ export const DatabaseService = {
         matriculas: linha.matriculas,
         matFeminino: linha.mat_feminino,
         matMasculino: linha.mat_masculino,
+        matGeneroNaoInformado: linha.mat_genero_nao_informado,
         matRacaNaoDeclarada: linha.mat_raca_nao_declarada,
         matBranca: linha.mat_branca,
         matPreta: linha.mat_preta,
         matParda: linha.mat_parda,
         matAmarela: linha.mat_amarela,
         matIndigena: linha.mat_indigena,
+        matIndigenaXikrin: linha.mat_indigena_xikrin,
+        matAlbina: linha.mat_albina,
+        matRacaNaoInformada: linha.mat_raca_nao_informada,
         mat0a3: linha.mat_0_3,
         mat4a5: linha.mat_4_5,
         mat6a10: linha.mat_6_10,
         mat11a14: linha.mat_11_14,
         mat15a17: linha.mat_15_17,
+        mat18a24: linha.mat_18_24,
+        mat25Mais: linha.mat_25_mais,
+        matIdadeNaoInformada: linha.mat_idade_nao_informada,
         mat18Mais: linha.mat_18_mais,
         matInfantil: linha.mat_infantil,
         matCreche: linha.mat_creche,
@@ -1427,6 +1443,7 @@ export const DatabaseService = {
         matMedio: linha.mat_medio,
         matProfissional: linha.mat_profissional,
         matEja: linha.mat_eja,
+        matAee: linha.mat_aee,
         matEjaFundamental: linha.mat_eja_fundamental,
         matEjaMedio: linha.mat_eja_medio,
         matEspecial: linha.mat_especial

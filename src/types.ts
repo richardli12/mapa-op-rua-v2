@@ -142,19 +142,37 @@ export function getCheckInPriority(value?: string) {
 }
 
 /**
- * Escola do município, vinda do Censo Escolar.
+ * Escola do município.
  *
  * É uma camada pública do mapa: não pertence a nenhum cliente, e sim ao
- * município. As colunas de etapa (`matMedio`, `matProfissional`, ...) se
- * sobrepõem entre si — no ensino médio integrado o mesmo aluno conta em duas —
- * e `matEspecial` é um recorte transversal. Nunca some essas colunas.
+ * município.
+ *
+ * DUAS CONTAGENS, E ELAS NÃO SÃO A MESMA COISA. `alunosUnicos` é a pessoa,
+ * contada uma vez; `matriculas` são os vínculos, e quem faz Ensino
+ * Fundamental e AEE aparece nos dois. Gênero, faixa etária e cor/raça fecham
+ * em `alunosUnicos`. Tipo de ensino fecha em `matriculas`. Usar um recorte
+ * contra o total errado é o engano fácil desta base.
+ *
+ * SEM COORDENADA É UM ESTADO VÁLIDO: escola que a fonte mandou sem
+ * latitude/longitude entra com os dois em `null`, conta nos totais e nas
+ * listas, e o mapa não a desenha. Zero jogaria a escola no meio do Atlântico.
+ *
+ * Os campos do Censo 2025 (`matMedio`, `matCreche`, `matEspecial`, ...)
+ * continuam declarados porque a tabela ainda os guarda, mas a base municipal
+ * de 2026 não os preenche — chegam nulos. As colunas de etapa se sobrepõem
+ * entre si e nunca devem ser somadas.
  */
 export interface Escola {
   codigoInep: string;
   nome: string;
   endereco?: string;
-  latitude: number;
-  longitude: number;
+  /** `null` quando a fonte não mandou a localização: existe, mas não no mapa. */
+  latitude: number | null;
+  longitude: number | null;
+  /** Urbana ou Rural. */
+  zona?: string | null;
+  /** A pessoa, contada uma vez — o total de gênero, idade e cor/raça. */
+  alunosUnicos?: number | null;
   municipio?: string;
   uf?: string;
   dependencia?: string;
@@ -165,17 +183,26 @@ export interface Escola {
   matriculas?: number | null;
   matFeminino?: number | null;
   matMasculino?: number | null;
+  matGeneroNaoInformado?: number | null;
   matRacaNaoDeclarada?: number | null;
   matBranca?: number | null;
   matPreta?: number | null;
   matParda?: number | null;
   matAmarela?: number | null;
   matIndigena?: number | null;
+  matIndigenaXikrin?: number | null;
+  matAlbina?: number | null;
+  /** Quem não respondeu — diferente de quem recusou responder. */
+  matRacaNaoInformada?: number | null;
   mat0a3?: number | null;
   mat4a5?: number | null;
   mat6a10?: number | null;
   mat11a14?: number | null;
   mat15a17?: number | null;
+  mat18a24?: number | null;
+  mat25Mais?: number | null;
+  matIdadeNaoInformada?: number | null;
+  /** Só na base do Censo 2025; a de 2026 separa em 18 a 24 e 25 ou mais. */
   mat18Mais?: number | null;
   matInfantil?: number | null;
   matCreche?: number | null;
@@ -186,6 +213,8 @@ export interface Escola {
   matMedio?: number | null;
   matProfissional?: number | null;
   matEja?: number | null;
+  /** Atendimento Educacional Especializado: é serviço, não etapa. */
+  matAee?: number | null;
   matEjaFundamental?: number | null;
   matEjaMedio?: number | null;
   matEspecial?: number | null;

@@ -2064,12 +2064,24 @@ export default function MapContainer({
     }
 
     escolas.forEach(escola => {
-      if (!Number.isFinite(escola.latitude) || !Number.isFinite(escola.longitude)) return;
+      /*
+       * Escola sem coordenada nao e desenhada -- e nao vira um pino no zero.
+       *
+       * A base municipal traz escolas sem latitude/longitude: elas existem,
+       * tem alunos e contam nas listas, so nao tem lugar no mapa ainda.
+       */
+      const lat = escola.latitude;
+      const lng = escola.longitude;
+      if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const cor = corDaDependencia(escola.dependencia);
       const parada = escola.situacao ? escola.situacao !== 'EM ATIVIDADE' : false;
 
-      // O tamanho conta a historia do porte da escola sem precisar de rotulo.
-      const alunos = escola.matriculas || 0;
+      /*
+       * O tamanho conta o porte da escola sem precisar de rotulo -- e conta
+       * em GENTE, nao em vinculo: aluno que faz Fundamental e AEE e uma
+       * pessoa so na porta da escola.
+       */
+      const alunos = escola.alunosUnicos ?? escola.matriculas ?? 0;
       const tamanho = alunos >= 1000 ? 38 : alunos >= 400 ? 32 : 26;
 
       const icone = L.divIcon({
@@ -2089,10 +2101,11 @@ export default function MapContainer({
         iconAnchor: [tamanho / 2, tamanho / 2]
       });
 
-      const marcador = L.marker([escola.latitude, escola.longitude], { icon: icone });
+      const marcador = L.marker([lat, lng], { icon: icone });
       marcador.bindTooltip(
-        `<b>${escola.nome}</b><br>${escola.dependencia || ''}` +
-          (escola.matriculas ? ` &middot; ${escola.matriculas} alunos` : ''),
+        `<b>${escola.nome}</b><br>` +
+          [escola.dependencia || '', escola.zona || ''].filter(Boolean).join(' &middot; ') +
+          (alunos ? ` &middot; ${alunos.toLocaleString('pt-BR')} alunos` : ''),
         { direction: 'top', offset: [0, -tamanho / 2] }
       );
       marcador.on('click', evento => {
@@ -2108,7 +2121,7 @@ export default function MapContainer({
     const mapa = mapRef.current;
     if (mapa && !camadaEscolasLigadaRef.current) {
       const pontos = escolas
-        .filter(e => Number.isFinite(e.latitude) && Number.isFinite(e.longitude))
+        .filter(e => e.latitude !== null && e.longitude !== null)
         .map(e => [e.latitude, e.longitude] as [number, number]);
       if (pontos.length > 0) {
         mapa.fitBounds(L.latLngBounds(pontos), { padding: [60, 60], maxZoom: 14 });
