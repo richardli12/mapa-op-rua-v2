@@ -30,6 +30,11 @@ import {
   AnaliseDeArea,
   ErroDoTerritorio
 } from '../services/territorio';
+import {
+  ConcentracaoDeBairros,
+  GenteJunta,
+  CertezaDoRaio
+} from './territorio/GraficosDoTerritorio';
 
 interface InteligenciaTerritorialProps {
   aberto: boolean;
@@ -705,6 +710,19 @@ export default function InteligenciaTerritorial({
                   </p>
                 ) : (
                   <>
+                    {/*
+                      O gráfico vem antes dos cartões de propósito: ele é a
+                      leitura, e os cartões são a conferência. Quem só passa o
+                      olho leva a conclusão certa — inclusive o quanto dela é
+                      chute de borda.
+                    */}
+                    <CertezaDoRaio
+                      exato={analise.exato.populacao}
+                      estimado={analise.estimativa.populacao}
+                      setoresInteiros={analise.setores.inteiros}
+                      setoresParciais={analise.setores.parciais}
+                    />
+
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3">
                       <p className="text-[10px] uppercase tracking-widest font-black text-emerald-700">
                         Estimativa
@@ -883,6 +901,61 @@ export default function InteligenciaTerritorial({
                       a lista não dá o total do município.
                     </p>
                   )}
+
+                {/*
+                  O GRÁFICO ANTES DA LISTA.
+
+                  A lista responde "quanto tem em cada um" e é ótima nisso. Ela
+                  não responde "quantos bairros eu preciso cobrir para falar com
+                  metade da cidade" — para isso o olho teria de somar barra por
+                  barra até chegar na metade, e ninguém faz isso. A soma é feita
+                  no gráfico, o corte fica desenhado, e a lista continua logo
+                  abaixo para conferir número por número.
+
+                  Ele usa TODOS os bairros carregados, e não a lista filtrada:
+                  concentração calculada em cima de uma busca por texto seria um
+                  número errado com cara de certo.
+                */}
+                {!carregandoBairros && bairros.length > 0 && (
+                  <div className="mt-3">
+                    <ConcentracaoDeBairros
+                      bairros={bairros.map((b) => ({
+                        codigo: b.codigo,
+                        nome: b.nome,
+                        populacao: b.populacao,
+                        domicilios: b.domicilios,
+                        areaKm2: b.areaKm2
+                      }))}
+                      emFoco={recorteEmFoco}
+                      onFocar={(codigo) => onRecorteEmFoco?.(codigo)}
+                      onAbrir={(bairro) =>
+                        carregarCenso('bairro', bairro.codigo, bairro.nome)
+                      }
+                    />
+
+                    {/*
+                      A segunda pergunta, logo abaixo da primeira: onde a gente
+                      está junta. Panfletagem não se mede em moradores, se mede
+                      em moradores por hora de caminhada.
+                    */}
+                    <div className="mt-2">
+                      <GenteJunta
+                        bairros={bairros.map((b) => ({
+                          codigo: b.codigo,
+                          nome: b.nome,
+                          populacao: b.populacao,
+                          domicilios: b.domicilios,
+                          areaKm2: b.areaKm2
+                        }))}
+                        emFoco={recorteEmFoco}
+                        onFocar={(codigo) => onRecorteEmFoco?.(codigo)}
+                        onAbrir={(bairro) =>
+                          carregarCenso('bairro', bairro.codigo, bairro.nome)
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {carregandoBairros ? (
                   <p className="py-8 text-center text-[11px] font-bold text-slate-400 flex items-center justify-center gap-2">
