@@ -666,6 +666,16 @@ export default function App() {
   }>({ operacoes: {}, midias: {} });
   /** Check-in aberto em tela cheia, com tudo que o integrante enviou. */
   const [checkInCompleto, setCheckInCompleto] = useState<any>(null);
+  /**
+   * De qual check-in o seletor de missão está aberto, no painel lateral.
+   *
+   * O vínculo morava só na ficha completa, atrás de mais um clique. Quem abre
+   * um check-in para descobrir que a missão não foi iniciada está a um gesto
+   * de consertar isso — e esse gesto não pode custar outra tela.
+   */
+  const [vinculandoMissaoDe, setVinculandoMissaoDe] = useState<string | null>(
+    null,
+  );
 
   /**
    * Pedido de confirmação em aberto.
@@ -11744,6 +11754,149 @@ export default function App() {
                               Carregando a ficha...
                             </p>
                           )}
+
+                          {/*
+                            O VÍNCULO COM A MISSÃO, AQUI MESMO.
+
+                            É este o momento em que se descobre que a pessoa
+                            registrou o trabalho sem iniciar a missão: o
+                            check-in está aberto, com foto e coordenada, e a
+                            missão continua em aberto no painel. Mandar para
+                            outra tela para ligar as duas coisas era cobrar um
+                            clique por um dado que já está todo aqui.
+                          */}
+                          {(() => {
+                            const doCliente = (id?: string | null) =>
+                              !escolhido.candidateId ||
+                              id === escolhido.candidateId;
+                            const missoes = [
+                              ...areas
+                                .filter((a) => doCliente(a.candidateId))
+                                .map((a) => ({
+                                  id: a.id,
+                                  titulo: a.title,
+                                  tipo: "Área",
+                                })),
+                              ...pins
+                                .filter((p) => doCliente(p.candidateId))
+                                .map((p) => ({
+                                  id: p.id,
+                                  titulo: p.title,
+                                  tipo: "Ponto",
+                                })),
+                            ];
+                            const atual = escolhido.missionId || "";
+                            // Missão apagada depois do check-in: o título
+                            // gravado continua valendo, senão o seletor viria
+                            // vazio e o vínculo pareceria perdido.
+                            const orfa =
+                              atual && !missoes.some((m) => m.id === atual)
+                                ? {
+                                    id: atual,
+                                    titulo:
+                                      escolhido.missionTitle ||
+                                      "missão removida",
+                                    tipo: "—",
+                                  }
+                                : null;
+                            const abertoAqui = vinculandoMissaoDe === escolhido.id;
+
+                            if (atual) {
+                              return (
+                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-3.5 py-2.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                                      Missão vinculada
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        vincularCheckInAMissao(escolhido, null)
+                                      }
+                                      className="text-[10px] font-black uppercase tracking-wider text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
+                                    >
+                                      Desvincular
+                                    </button>
+                                  </div>
+                                  <p className="text-[12.5px] font-black text-slate-800 leading-tight mt-0.5 truncate">
+                                    {escolhido.missionTitle ||
+                                      missoes.find((m) => m.id === atual)?.titulo ||
+                                      "Missão"}
+                                  </p>
+                                </div>
+                              );
+                            }
+
+                            if (!abertoAqui) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setVinculandoMissaoDe(escolhido.id)
+                                  }
+                                  className="h-11 w-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-2xl cursor-pointer active:scale-95 flex items-center justify-center gap-2"
+                                >
+                                  <Target className="w-3.5 h-3.5 text-[#015FC9]" />
+                                  Vincular a missão
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <div className="rounded-2xl border border-slate-200 p-3.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="text-[11px] font-black text-slate-500">
+                                    Vincular a missão
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setVinculandoMissaoDe(null)}
+                                    className="text-[10px] font-black uppercase tracking-wider text-slate-400 hover:text-slate-600 cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+
+                                <select
+                                  autoFocus
+                                  value={atual}
+                                  onChange={(e) => {
+                                    const escolhida = [
+                                      ...missoes,
+                                      ...(orfa ? [orfa] : []),
+                                    ].find((m) => m.id === e.target.value);
+                                    vincularCheckInAMissao(
+                                      escolhido,
+                                      escolhida
+                                        ? {
+                                            id: escolhida.id,
+                                            titulo: escolhida.titulo,
+                                          }
+                                        : null,
+                                    );
+                                    setVinculandoMissaoDe(null);
+                                  }}
+                                  className="mt-2 w-full h-10 px-2.5 bg-white border border-slate-200 rounded-xl text-[12px] font-bold text-slate-700 cursor-pointer focus:outline-hidden"
+                                >
+                                  <option value="">
+                                    Registro livre (sem missão)
+                                  </option>
+                                  {missoes.map((missao) => (
+                                    <option key={missao.id} value={missao.id}>
+                                      {missao.tipo} · {missao.titulo}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                {missoes.length === 0 && (
+                                  <p className="mt-1.5 text-[10.5px] font-semibold text-slate-400 leading-snug">
+                                    Esta campanha ainda não tem missão
+                                    cadastrada para vincular.
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           <button
                             onClick={() =>
