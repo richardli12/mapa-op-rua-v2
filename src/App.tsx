@@ -15112,8 +15112,8 @@ export default function App() {
                       titulo="A missão"
                       descricao={
                         creationModalType === "area"
-                          ? "equipe, raio e bairro"
-                          : "título, tipo e instrução"
+                          ? "equipe, raio, bairro e material"
+                          : "tipo, título, descrição e material"
                       }
                     >
                     {creationModalType === "area" ? (
@@ -15274,6 +15274,33 @@ export default function App() {
                       <>
                         {/* Pin specific inputs */}
                         <div>
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400">
+                              Tipo de Operação
+                            </label>
+                            <button
+                              type="button"
+                              onClick={openOperationTypesManager}
+                              className="text-[10px] uppercase font-bold tracking-wider text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                            >
+                              <PenTool className="w-3 h-3" />
+                              Gerenciar
+                            </button>
+                          </div>
+                          {/*
+                            O tipo vem antes do título porque é ele que dá a
+                            cor e o desenho do ponto no mapa: escolhido o
+                            tipo, não sobra cor nenhuma para o comitê decidir
+                            na hora de mandar a missão.
+                          */}
+                          <OperationTypeSelect
+                            types={clientOperationTypes}
+                            value={pinIconType}
+                            onChange={handlePinTypeChange}
+                          />
+                        </div>
+
+                        <div>
                           <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
                             {creationLocationMode === "sem"
                               ? "Título da missão *"
@@ -15293,63 +15320,9 @@ export default function App() {
                           />
                         </div>
 
-                        <div className="space-y-3">
-                          <div>
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                              <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400">
-                                Tipo de Operação
-                              </label>
-                              <button
-                                type="button"
-                                onClick={openOperationTypesManager}
-                                className="text-[10px] uppercase font-bold tracking-wider text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer flex items-center gap-1 shrink-0"
-                              >
-                                <PenTool className="w-3 h-3" />
-                                Gerenciar
-                              </button>
-                            </div>
-                            <OperationTypeSelect
-                              types={clientOperationTypes}
-                              value={pinIconType}
-                              onChange={handlePinTypeChange}
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                              Cor do Ponto
-                            </label>
-                            <div className="flex gap-1 bg-slate-50 border border-slate-200 rounded-xl p-1 items-center">
-                              <input
-                                type="color"
-                                value={pinColor}
-                                onChange={(e) => setPinColor(e.target.value)}
-                                className="w-8 h-8 rounded-lg cursor-pointer border-none bg-transparent shrink-0"
-                              />
-                              <span className="text-[10px] font-mono font-medium text-slate-500 translate-x-1 uppercase">
-                                {pinColor}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-3">
-                          <div>
-                            <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                              Prazo / Data do Evento (Opcional)
-                            </label>
-                            <input
-                              type="date"
-                              value={pinDate}
-                              onChange={(e) => setPinDate(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
-                            />
-                          </div>
-                        </div>
-
                         <div>
                           <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
-                            Anotações / Descrição do Marcador
+                            Descrição
                           </label>
                           <textarea
                             placeholder={
@@ -15359,7 +15332,7 @@ export default function App() {
                             }
                             value={pinDescription}
                             onChange={(e) => setPinDescription(e.target.value)}
-                            rows={2}
+                            rows={3}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
                           />
                         </div>
@@ -15367,6 +15340,18 @@ export default function App() {
                       </>
                     )}
 
+                    {/*
+                      O material vem colado na descrição: são a mesma coisa —
+                      a instrução escrita e a instrução anexada.
+                    */}
+                    <div className="pt-1">
+                      <EditorDeMaterial
+                        itens={materialMissao}
+                        onMudar={setMaterialMissao}
+                        notificar={triggerNotification}
+                        ligado={isDatabaseConfigured}
+                      />
+                    </div>
                     </PassoDoFormulario>
 
                     {/*
@@ -15383,6 +15368,20 @@ export default function App() {
                       titulo="Quando e quanto importa"
                       descricao="turno e prioridade"
                     >
+                      {creationModalType === "pin" && (
+                        <div>
+                          <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">
+                            Prazo (Opcional)
+                          </label>
+                          <input
+                            type="date"
+                            value={pinDate}
+                            onChange={(e) => setPinDate(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-800 shadow-2xs"
+                          />
+                        </div>
+                      )}
+
                       <TurnoEPrioridadeDaMissao
                         janelas={turnosDaCampanha}
                         turno={missaoTurno}
@@ -15404,7 +15403,7 @@ export default function App() {
                       id="destino"
                       numero={4}
                       titulo="Para quem vai"
-                      descricao="cliente, material e equipe"
+                      descricao="cliente e equipe"
                     >
                       <DestinoDaMissao
                         clienteId={
@@ -15424,10 +15423,6 @@ export default function App() {
                             ? selectedCandidateFilter
                             : ""
                         }
-                        material={materialMissao}
-                        onMaterial={setMaterialMissao}
-                        notificar={triggerNotification}
-                        bancoLigado={isDatabaseConfigured}
                         equipe={supporters}
                         selecionados={selectedDeltas}
                         onSelecionados={setSelectedDeltas}
