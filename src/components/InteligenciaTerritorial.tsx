@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   X,
   Layers3,
@@ -172,6 +172,13 @@ export default function InteligenciaTerritorial({
     null
   );
   const [setores, setSetores] = useState<SetorDoTerritorio[]>([]);
+  /** De qual município é a malha de setores que está na memória. */
+  const [setoresDe, setSetoresDe] = useState<string | null>(null);
+  /** Quantos setores já chegaram, e quantos são: a carga é longa e paginada. */
+  const [progressoSetores, setProgressoSetores] = useState<{
+    lidos: number;
+    total: number;
+  } | null>(null);
 
   /* ------------------------------------------------------------- raio --- */
   const [raio, setRaio] = useState(1000);
@@ -260,6 +267,18 @@ export default function InteligenciaTerritorial({
     setErro(null);
     setMunicipio(alvo);
     setBairros([]);
+    /*
+     * A malha de setores é do município, e só dele.
+     *
+     * É aqui — e em nenhum outro lugar — que ela é jogada fora. Recarregar a
+     * lista de bairros limpava os setores junto, e o efeito era invisível e
+     * cruel: a pessoa ia para a aba de bairros, voltava para setores, e o mapa
+     * ficava branco porque a carga achava que já tinha feito o trabalho.
+     */
+    setSetores([]);
+    setSetoresDe(null);
+    setBairroDosSetores(null);
+    cargaDeSetores.current = null;
     setRecorte({ nivel: 'municipio', codigo: alvo.codigo, nome: alvo.nome });
     setCenso(null);
     try {
@@ -291,10 +310,6 @@ export default function InteligenciaTerritorial({
         'bairros',
       );
       setBairros(lista);
-      // Setores abertos pertenciam ao desenho anterior; trocar de município
-      // ou recarregar a lista os invalida.
-      setBairroDosSetores(null);
-      setSetores([]);
     } catch (falha: any) {
       setErro(falha);
     } finally {
@@ -310,28 +325,84 @@ export default function InteligenciaTerritorial({
    * e um município grande passa de mil setores. Puxar a cidade inteira seriam
    * dezenas de megabytes para desenhar um mapa que ninguém lê de uma vez.
    */
-  const abrirSetores = async (bairro: BairroDoTerritorio) => {
-    if (!municipio) return;
-    if (bairroDosSetores?.codigo === bairro.codigo) {
-      setBairroDosSetores(null);
-      setSetores([]);
-      return;
-    }
+  /**
+   * A MALHA DE SETORES DA CIDADE INTEIRA, de uma vez.
+   *
+   * Antes era um bairro por vez, e a aba abria pedindo que a pessoa voltasse,
+   * escolhesse um bairro e tocasse em "Setores". A razão era o peso: o setor é
+   * a menor peça do Censo, uma cidade grande passa de mil deles e o polígono de
+   * todos são muitos megabytes.
+   *
+   * Só que o setor é justamente a camada que só faz sentido inteira. É nela que
+   * se vê o quarteirão cheio ao lado do vazio, e o recorte por bairro esconde
+   * exatamente isso — a divisa entre dois bairros é onde a diferença costuma
+   * estar. Pedir um bairro antes é pedir que a pessoa já saiba a resposta que
+   * veio procurar.
+   *
+   * Então a malha vem toda, e o peso é tratado como o que é: uma espera. Ela
+   * chega em páginas, o contador mostra quantos já entraram de quantos, e quem
+   * não quiser esperar pode sair da aba — a carga para. Uma vez na memória, ela
+   * fica: trocar de aba não recomeça nada, e só um município novo a refaz.
+   */
+  const cargaDeSetores = useRef<string | null>(null);
+
+  const carregarSetoresDaCidade = async () => {
+    if (!municipio || !uf) return;
+    if (cargaDeSetores.current === municipio.codigo) return;
+    cargaDeSetores.current = municipio.codigo;
+
     setCarregandoDesenho(true);
     setErro(null);
-    setAba('setores');
+    setProgressoSetores({ lidos: 0, total: municipio.totalSetores || 0 });
+
+    const tudo: SetorDoTerritorio[] = [];
+    let inicio: number | null = 0;
     try {
-      const lista = await todasAsPaginas<SetorDoTerritorio>(
-        (inicio) => lerSetores(uf, municipio.codigo, bairro.codigo, inicio, true),
-        'setores',
-      );
-      setBairroDosSetores(bairro);
-      setSetores(lista);
+      while (inicio !== null) {
+        const pagina = await lerSetores(uf, municipio.codigo, undefined, inicio, true);
+        // Saiu da aba no meio da carga: o resto não interessa mais a ninguém.
+        if (cargaDeSetores.current !== municipio.codigo) return;
+        tudo.push(...pagina.setores);
+        setProgressoSetores({
+          lidos: tudo.length,
+          total: pagina.paginacao.total || municipio.totalSetores || tudo.length
+        });
+        inicio = pagina.paginacao.proximoInicio ?? null;
+        // A malha já desenhada acompanha a chegada: o mapa vai se preenchendo
+        // em vez de ficar branco esperando a última página.
+        setSetores([...tudo]);
+      }
+      setSetoresDe(municipio.codigo);
     } catch (falha: any) {
+      cargaDeSetores.current = null;
       setErro(falha);
     } finally {
       setCarregandoDesenho(false);
+      setProgressoSetores(null);
     }
+  };
+
+  /**
+   * Entrou na aba: a malha carrega sozinha.
+   *
+   * A aba de setores sem setores é uma tela que só sabe pedir. Se a malha já
+   * está na memória, nada acontece; se não está, ela começa a vir.
+   */
+  useEffect(() => {
+    if (!aberto || aba !== 'setores' || !municipio) return;
+    if (setoresDe === municipio.codigo) return;
+    carregarSetoresDaCidade();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto, aba, municipio?.codigo]);
+
+  /** O bairro deixa de ser porta de entrada e vira filtro do que já está aqui. */
+  const abrirSetores = async (bairro: BairroDoTerritorio) => {
+    if (!municipio) return;
+    setAba('setores');
+    setBairroDosSetores(
+      bairroDosSetores?.codigo === bairro.codigo ? null : bairro
+    );
+    if (setoresDe !== municipio.codigo) carregarSetoresDaCidade();
   };
 
   const carregarCenso = async (nivel: string, codigo: string, nome: string) => {
@@ -416,10 +487,19 @@ export default function InteligenciaTerritorial({
       return;
     }
 
-    const doSetor = bairroDosSetores && setores.length > 0;
+    /*
+     * QUEM MANDA NA PINTURA É A ABA ABERTA.
+     *
+     * Antes era "tem setor carregado?", e isso bastava enquanto setor só
+     * existia depois de escolher um bairro. Agora a malha da cidade fica na
+     * memória: sem esta regra, voltar para a aba de bairros continuaria
+     * mostrando setores, e a lista ao lado falaria de uma coisa enquanto o mapa
+     * mostraria outra.
+     */
+    const doSetor = aba === 'setores' && setoresNaTela.length > 0;
     const fonte: { id: string; nome: string; geometria: any; valor: number | null; resumo: string; tipo: 'bairro' | 'setor' }[] =
       doSetor
-        ? setores.map((setor) => {
+        ? setoresNaTela.map((setor) => {
             const valor =
               metrica === 'densidade'
                 ? setor.areaKm2 && setor.populacao !== null
@@ -491,13 +571,24 @@ export default function InteligenciaTerritorial({
 
     onRecortes(comGeometria, escala);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aberto, desenharNoMapa, metrica, bairros, setores, bairroDosSetores]);
+  }, [aberto, desenharNoMapa, metrica, bairros, setores, bairroDosSetores, aba]);
 
   if (!aberto) return null;
 
   const semMalha = ufsComTerritorio.length > 0 && uf && !ufsComTerritorio.includes(uf);
   const semIndicadores =
     ufsComIndicadores.length > 0 && uf && !ufsComIndicadores.includes(uf);
+
+  /**
+   * O que a aba mostra: a cidade inteira, ou o bairro escolhido como filtro.
+   *
+   * O filtro corta o que já está na memória — não é outra consulta, e por isso
+   * é instantâneo. Setor sem bairro (parte do território fica fora da divisão)
+   * só aparece na visão da cidade, que é onde ele existe.
+   */
+  const setoresNaTela = bairroDosSetores
+    ? setores.filter((s) => s.bairroCodigo === bairroDosSetores.codigo)
+    : setores;
 
   const bairrosNaTela = bairros
     .filter((b) =>
@@ -972,17 +1063,15 @@ export default function InteligenciaTerritorial({
                 {bairroDosSetores && (
                   <p className="mt-2 text-[10.5px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5 leading-snug flex items-center justify-between gap-2">
                     <span>
-                      Mostrando {setores.length} setores de {bairroDosSetores.nome}
+                      Mostrando {numero(setoresNaTela.length)} setores de{' '}
+                      {bairroDosSetores.nome}
                     </span>
                     <button
                       type="button"
-                      onClick={() => {
-                        setBairroDosSetores(null);
-                        setSetores([]);
-                      }}
+                      onClick={() => setBairroDosSetores(null)}
                       className="text-[10px] font-black uppercase tracking-wider text-emerald-700 hover:underline cursor-pointer shrink-0"
                     >
-                      Voltar aos bairros
+                      Ver a cidade
                     </button>
                   </p>
                 )}
@@ -1132,75 +1221,112 @@ export default function InteligenciaTerritorial({
         {/* --------------------------------------------------- SETORES --- */}
         {aba === 'setores' && (
           <div>
-            {!bairroDosSetores ? (
-              <div className="py-6 text-center">
+            {setoresNaTela.length === 0 && carregandoDesenho ? (
+              /*
+                A ESPERA É A TELA, e ela diz de quanto é.
+                A malha vem em páginas; uma barra parada sem número faz parecer
+                travado justamente quando está funcionando.
+              */
+              <div className="py-10 text-center">
+                <Loader2 className="w-5 h-5 animate-spin mx-auto text-[#015FC9]" />
+                <p className="mt-2 text-[12px] font-black text-[#0D233A]">
+                  Carregando a malha de setores
+                </p>
+                {progressoSetores && progressoSetores.total > 0 && (
+                  <>
+                    <p className="mt-0.5 text-[11px] font-bold text-slate-400 tabular-nums">
+                      {numero(progressoSetores.lidos)} de{' '}
+                      {numero(progressoSetores.total)}
+                    </p>
+                    <span className="mt-2 mx-auto block w-40 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                      <span
+                        className="block h-full rounded-full bg-[#015FC9] transition-[width] duration-300"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            (progressoSetores.lidos / progressoSetores.total) * 100
+                          )}%`
+                        }}
+                      />
+                    </span>
+                  </>
+                )}
+                <p className="mt-2 text-[10.5px] font-semibold text-slate-400 leading-snug px-4">
+                  O setor é a menor peça do Censo — algumas centenas de
+                  domicílios. São muitos, e o desenho de cada um vem junto.
+                </p>
+              </div>
+            ) : setoresNaTela.length === 0 ? (
+              <div className="py-8 text-center">
                 <p className="text-[11.5px] font-semibold text-slate-500 leading-snug px-2">
-                  O setor censitário é a unidade fundamental do Censo: algumas
-                  centenas de domicílios. Tudo o mais é soma deles.
+                  {municipio
+                    ? 'Este município ainda não tem malha de setores carregada no CCO.'
+                    : 'Escolha um município para ver a malha de setores.'}
                 </p>
-                <p className="mt-2 text-[10.5px] font-semibold text-slate-400 leading-snug px-2">
-                  Escolha um bairro na aba anterior e toque em{' '}
-                  <span className="font-black text-slate-500">Setores</span>. É
-                  um bairro por vez de propósito: uma cidade grande passa de
-                  mil setores, e o polígono de todos eles são dezenas de
-                  megabytes.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAba('bairros');
-                    if (bairros.length === 0) carregarBairros();
-                  }}
-                  className="mt-3 h-8 px-3.5 bg-[#015FC9] hover:bg-[#0150ab] text-white text-[10.5px] font-black uppercase tracking-wider rounded-lg cursor-pointer"
-                >
-                  Escolher um bairro
-                </button>
               </div>
             ) : (
               <>
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-[12.5px] font-black text-[#0D233A] truncate">
-                      {bairroDosSetores.nome}
+                      {bairroDosSetores ? bairroDosSetores.nome : municipio?.nome}
                     </p>
                     <p className="text-[10.5px] font-semibold text-slate-400">
-                      {setores.length}{' '}
-                      {setores.length === 1 ? 'setor' : 'setores'} ·{' '}
+                      {numero(setoresNaTela.length)}{' '}
+                      {setoresNaTela.length === 1 ? 'setor' : 'setores'} ·{' '}
                       {numero(
-                        setores.reduce(
+                        setoresNaTela.reduce(
                           // null é ausência: entra fora da soma, não como zero.
                           (soma, s) => soma + (s.populacao ?? 0),
                           0,
                         ),
                       )}{' '}
                       hab somados
+                      {carregandoDesenho && progressoSetores && (
+                        <span className="text-[#015FC9]">
+                          {' '}· carregando {numero(progressoSetores.lidos)} de{' '}
+                          {numero(progressoSetores.total)}
+                        </span>
+                      )}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBairroDosSetores(null);
-                      setSetores([]);
-                      setAba('bairros');
-                    }}
-                    className="h-8 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 text-[10px] font-black uppercase tracking-wider cursor-pointer shrink-0"
-                  >
-                    Trocar
-                  </button>
+                  {/*
+                    O bairro aqui é filtro, não porta de entrada: sair dele
+                    devolve a cidade inteira, e não uma tela vazia pedindo que
+                    se escolha outro.
+                  */}
+                  {bairroDosSetores && (
+                    <button
+                      type="button"
+                      onClick={() => setBairroDosSetores(null)}
+                      className="h-8 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 text-[10px] font-black uppercase tracking-wider cursor-pointer shrink-0"
+                    >
+                      Ver a cidade
+                    </button>
+                  )}
                 </div>
 
                 {/* Setor com dado faltando na lista: avisar é melhor que somar. */}
-                {setores.some((s) => s.populacao === null) && (
+                {setoresNaTela.some((s) => s.populacao === null) && (
                   <p className="mt-2 text-[10px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug flex items-start gap-1.5">
                     <Info className="w-3 h-3 shrink-0 mt-0.5" />
-                    {setores.filter((s) => s.populacao === null).length} setor(es)
+                    {setoresNaTela.filter((s) => s.populacao === null).length} setor(es)
                     sem dado divulgado. A soma acima é parcial — ausência não é
                     zero.
                   </p>
                 )}
 
+                {/*
+                  A LISTA MOSTRA O COMEÇO, O MAPA MOSTRA TUDO.
+
+                  Dois mil setores em linhas seria meio segundo de tela travada
+                  a cada rolagem, para uma lista que ninguém lê até o fim —
+                  código de setor não se procura lendo. Quem quer um recorte usa
+                  o filtro de bairro; quem quer o conjunto olha o mapa, que é
+                  onde ele significa alguma coisa.
+                */}
                 <div className="mt-2 grid grid-cols-1 @2xl:grid-cols-2 @5xl:grid-cols-3 gap-1.5">
-                  {setores.map((setor) => {
+                  {setoresNaTela.slice(0, 120).map((setor) => {
                     const densidade =
                       setor.areaKm2 && setor.populacao !== null
                         ? Math.round(setor.populacao / setor.areaKm2)
@@ -1251,6 +1377,14 @@ export default function InteligenciaTerritorial({
                     );
                   })}
                 </div>
+
+                {setoresNaTela.length > 120 && (
+                  <p className="mt-2 text-[10.5px] font-semibold text-slate-400 leading-snug text-center">
+                    Mostrando 120 de {numero(setoresNaTela.length)} setores na
+                    lista. Todos estão desenhados no mapa — filtre por bairro
+                    para encurtar.
+                  </p>
+                )}
               </>
             )}
           </div>
