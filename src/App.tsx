@@ -69,6 +69,7 @@ import {
 } from "./turnos";
 import { lerDispositivo } from "./services/dispositivo";
 import DispositivosMembroModal from "./components/DispositivosMembroModal";
+import RelatoriosSalvos from './components/RelatoriosSalvos';
 import ConfiguracoesAdmin, {
   CHAVE_REDIRECIONAMENTO,
 } from "./components/ConfiguracoesAdmin";
@@ -82,6 +83,7 @@ import {
 import {
   MapPin,
   Users,
+  FileText,
   Settings,
   Ruler,
   Undo2,
@@ -1141,7 +1143,9 @@ export default function App() {
   const [membroDoPerfil, setMembroDoPerfil] = useState<any>(null);
 
   /** Tela aberta na área do administrador. */
-  const [telaAdm, setTelaAdm] = useState<'clientes' | 'configuracoes'>('clientes');
+  const [telaAdm, setTelaAdm] = useState<
+    'clientes' | 'configuracoes' | 'relatorios'
+  >('clientes');
 
   const [currentUrlView, setCurrentUrlView] = useState<"admin" | "checkin">(
     "admin",
@@ -8938,7 +8942,7 @@ export default function App() {
             </div>
 
             {/* AÇÕES DO ADMINISTRADOR */}
-            {telaAdm === "configuracoes" ? (
+            {telaAdm !== "clientes" ? (
               <button
                 onClick={() => setTelaAdm("clientes")}
                 className="px-5 h-11 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold text-xs rounded-2xl flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
@@ -8991,8 +8995,19 @@ export default function App() {
               </span>
             </button>
 
+            {/* RELATÓRIOS DO NEO */}
+            {!inspectedCandidate && telaAdm === "clientes" && (
+              <button
+                onClick={() => setTelaAdm("relatorios")}
+                className="p-3 bg-white hover:bg-slate-50 text-slate-400 hover:text-[#015FC9] border border-slate-200 rounded-2xl shadow-sm transition-all cursor-pointer"
+                title="Relatórios do NEO"
+              >
+                <FileText className="w-4 h-4" />
+              </button>
+            )}
+
             {/* CONFIGURAÇÕES DO SISTEMA */}
-            {!inspectedCandidate && telaAdm !== "configuracoes" && (
+            {!inspectedCandidate && telaAdm === "clientes" && (
               <button
                 onClick={() => setTelaAdm("configuracoes")}
                 className="p-3 bg-white hover:bg-slate-50 text-slate-400 hover:text-[#015FC9] border border-slate-200 rounded-2xl shadow-sm transition-all cursor-pointer"
@@ -9003,7 +9018,7 @@ export default function App() {
             )}
 
             {/* LOG OUT BADGE */}
-            {!inspectedCandidate && telaAdm !== "configuracoes" && (
+            {!inspectedCandidate && telaAdm === "clientes" && (
               <button
                 onClick={() => {
                   askConfirmation({
@@ -9043,6 +9058,14 @@ export default function App() {
             dominiosDeAcesso={DOMINIOS_DE_ACESSO}
             notify={triggerNotification}
             onTurnosMudarem={setTurnosDaCampanha}
+          />
+        )}
+
+        {/* RELATÓRIOS GUARDADOS DO NEO */}
+        {telaAdm === "relatorios" && (
+          <RelatoriosSalvos
+            notify={triggerNotification}
+            askConfirmation={askConfirmation}
           />
         )}
 
