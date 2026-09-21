@@ -23,6 +23,16 @@ import {
 import { CampaignPin, PanfletagemArea, OperationType, PriorityLevel } from '../types';
 import { IconeDoTurno } from './TurnoEPrioridade';
 import {
+  METAS_VAZIAS,
+  MetasDoCliente,
+  alvoDe,
+  alvoDoDia,
+  corDoAvanco,
+  janelaDaMeta,
+  progressoDaPessoa,
+  temMeta
+} from '../metas';
+import {
   COR_DO_TURNO,
   JanelaDeTurno,
   NOME_DO_TURNO,
@@ -117,6 +127,8 @@ interface Props {
 
   /** O relógio da campanha, para a conta de missões falar em turnos. */
   janelasDeTurno?: JanelaDeTurno[];
+  /** As metas do cliente em foco, para a equipe ser lida contra o alvo. */
+  metas?: MetasDoCliente;
 
   /** Recorte ligado na barra de cima. Vazio quer dizer "desde sempre". */
   de: string;
@@ -513,6 +525,7 @@ export default function PainelDeCheckIns({
   priorityLevels,
   pessoaDoCheckIn,
   janelasDeTurno = TURNOS_PADRAO,
+  metas = METAS_VAZIAS,
   de,
   ate,
   rotuloDoPeriodo,
@@ -1075,7 +1088,11 @@ export default function PainelDeCheckIns({
             <Secao
               titulo="Desempenho da equipe"
               Icone={Users}
-              aviso={`${emCampo} de ${pessoas.length} em campo`}
+              aviso={
+                temMeta(metas)
+                  ? `meta ${janelaDaMeta(metas).rotulo}`
+                  : `${emCampo} de ${pessoas.length} em campo`
+              }
             >
               {pessoas.length === 0 ? (
                 <p className="text-[11.5px] font-semibold text-slate-400 py-3 text-center">
@@ -1171,6 +1188,68 @@ export default function PainelDeCheckIns({
                                   }}
                                 />
                               </span>
+                              {/*
+                                A meta ao lado do feito.
+
+                                Número sem alvo é estatística: "12 check-ins"
+                                só vira resultado quando se sabe que a meta
+                                era 20. Missão cumprida entra na conta — quem
+                                fez missão trabalhou.
+                              */}
+                              {temMeta(metas) && (() => {
+                                const janelaDoAlvo = janelaDaMeta(metas);
+                                const meus = checkIns.filter(
+                                  c => pessoaDoCheckIn(c).chave === p.chave
+                                );
+                                const avanco = progressoDaPessoa(
+                                  meus,
+                                  janelasDeTurno,
+                                  janelaDoAlvo.de,
+                                  janelaDoAlvo.ate
+                                );
+                                const alvoTotal = alvoDoDia(metas, p.chave);
+                                if (alvoTotal === 0) return null;
+                                return (
+                                  <span className="flex items-center gap-2 mt-1.5">
+                                    <span
+                                      className="text-[10px] font-black tabular-nums shrink-0"
+                                      style={{
+                                        color: corDoAvanco(avanco.total, alvoTotal)
+                                      }}
+                                    >
+                                      {avanco.total}/{alvoTotal}
+                                    </span>
+                                    <span className="flex gap-1 flex-1 min-w-0">
+                                      {TURNOS.map(t => {
+                                        const alvo = alvoDe(metas, p.chave, t);
+                                        if (alvo === 0) return null;
+                                        const feito = avanco.porTurno[t];
+                                        return (
+                                          <span
+                                            key={t}
+                                            title={`${NOME_DO_TURNO[t]}: ${feito} de ${alvo}`}
+                                            className="flex-1 min-w-0"
+                                          >
+                                            <span className="block h-1 rounded-full bg-slate-100 overflow-hidden">
+                                              <span
+                                                className="block h-full rounded-full"
+                                                style={{
+                                                  width: `${Math.min(100, (feito / alvo) * 100)}%`,
+                                                  backgroundColor: COR_DO_TURNO[t]
+                                                }}
+                                              />
+                                            </span>
+                                          </span>
+                                        );
+                                      })}
+                                    </span>
+                                    <span className="text-[9px] font-black uppercase tracking-wider shrink-0 text-slate-400">
+                                      {avanco.total >= alvoTotal ? 'meta batida' : janelaDoAlvo.rotulo}
+                                    </span>
+                                  </span>
+                                );
+                              })()}
+
                               <span className="flex items-center gap-2 mt-1">
                                 {p.total === 0 ? (
                                   <span className="text-[9.5px] font-black uppercase tracking-wider text-rose-600">

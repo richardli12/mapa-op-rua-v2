@@ -40,10 +40,21 @@ import CheckInObservacoes, { ObservacaoItem } from './CheckInObservacoes';
 import { MaterialDaMissao } from './MaterialDaMissao';
 import { EtiquetaDePrioridade, EtiquetaDeTurno, IconeDoTurno } from './TurnoEPrioridade';
 import {
+  METAS_VAZIAS,
+  MetasDoCliente,
+  alvoDe,
+  alvoDoDia,
+  corDoAvanco,
+  janelaDaMeta,
+  progressoDaPessoa,
+  temMeta
+} from '../metas';
+import {
   CHAVE_TURNOS,
   COR_DO_TURNO,
   JanelaDeTurno,
   NOME_DO_TURNO,
+  TURNOS,
   TURNOS_PADRAO,
   TurnoId,
   janelaDoTurno,
@@ -106,6 +117,10 @@ interface CheckInChatProps {
    * enviada agora aparece na conversa sem ninguém recarregar nada.
    */
   missoes?: MissaoDoCampo[];
+  /** A meta que o comitê cadastrou para esta equipe. */
+  metas?: MetasDoCliente;
+  /** Os check-ins que esta pessoa já fez neste cliente. */
+  meusCheckIns?: any[];
   onSaved: (checkIn: CheckIn) => void;
   onBack: () => void;
   notify: (texto: string, tipo?: 'success' | 'error' | 'info') => void;
@@ -195,6 +210,8 @@ export default function CheckInChat({
   nomesReservados = [],
   onTipoCriado,
   missoes = [],
+  metas = METAS_VAZIAS,
+  meusCheckIns = [],
   onSaved,
   onBack,
   notify
@@ -1204,6 +1221,111 @@ export default function CheckInChat({
             </button>
           </div>
         )}
+
+        {/*
+          A meta, antes de tudo.
+
+          Quem está na rua não abre painel nenhum: ou o número dele aparece
+          aqui, ou ele trabalha no escuro e só descobre no fim do dia que
+          faltavam seis. A missão cumprida entra na conta — quem fez missão
+          trabalhou.
+        */}
+        {temMeta(metas) && alvoDoDia(metas, member?.id || '') > 0 && (() => {
+          const janelaDoAlvo = janelaDaMeta(metas);
+          const avanco = progressoDaPessoa(
+            meusCheckIns,
+            janelas,
+            janelaDoAlvo.de,
+            janelaDoAlvo.ate
+          );
+          const alvoTotal = alvoDoDia(metas, member?.id || '');
+          const cor = corDoAvanco(avanco.total, alvoTotal);
+          const batida = avanco.total >= alvoTotal;
+          const faltam = Math.max(0, alvoTotal - avanco.total);
+
+          return (
+            <div className="flex items-end gap-2 flex-row-reverse">
+              <span className="w-7 shrink-0" />
+              <div
+                className="max-w-[86%] w-full rounded-2xl border px-3.5 py-3"
+                style={{
+                  backgroundColor: batida ? '#F0FDF7' : '#FFFFFF',
+                  borderColor: batida ? '#A7F3D0' : '#E2E8F0'
+                }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-[9.5px] uppercase font-black tracking-widest text-slate-400">
+                    <Target className="w-3 h-3" />
+                    Sua meta {janelaDoAlvo.rotulo}
+                  </span>
+                  <span
+                    className="text-[9.5px] font-black uppercase tracking-wider"
+                    style={{ color: cor }}
+                  >
+                    {batida
+                      ? 'meta batida'
+                      : `${faltam} ${faltam === 1 ? 'restante' : 'restantes'}`}
+                  </span>
+                </div>
+
+                <p className="mt-1.5 flex items-baseline gap-1.5">
+                  <span
+                    className="text-[26px] font-black leading-none tabular-nums"
+                    style={{ color: cor }}
+                  >
+                    {avanco.total}
+                  </span>
+                  <span className="text-[13px] font-black text-slate-300 leading-none">
+                    de {alvoTotal}
+                  </span>
+                  {avanco.deMissao > 0 && (
+                    <span className="text-[10px] font-bold text-slate-400 leading-none">
+                      · {avanco.deMissao} de missão
+                    </span>
+                  )}
+                </p>
+
+                <div className="mt-2.5 grid grid-cols-3 gap-2">
+                  {TURNOS.map(t => {
+                    const alvo = alvoDe(metas, member?.id || '', t);
+                    if (alvo === 0) return null;
+                    const feito = avanco.porTurno[t];
+                    const eAgora = turnoAgora === t;
+                    return (
+                      <div key={t}>
+                        <span className="flex items-center gap-1 text-[9.5px] font-black uppercase tracking-wider">
+                          <IconeDoTurno
+                            turno={t}
+                            className="w-2.5 h-2.5 shrink-0"
+                          />
+                          <span style={{ color: COR_DO_TURNO[t] }}>
+                            {NOME_DO_TURNO[t]}
+                          </span>
+                          {eAgora && (
+                            <span className="text-emerald-600">· agora</span>
+                          )}
+                        </span>
+                        <span className="block text-[11px] font-black tabular-nums mt-0.5 text-slate-600">
+                          {feito}
+                          <span className="text-slate-300">/{alvo}</span>
+                        </span>
+                        <span className="block h-1.5 rounded-full bg-slate-100 overflow-hidden mt-1">
+                          <span
+                            className="block h-full rounded-full transition-all"
+                            style={{
+                              width: `${Math.min(100, (feito / alvo) * 100)}%`,
+                              backgroundColor: COR_DO_TURNO[t]
+                            }}
+                          />
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* MISSÕES: o que o comitê enviou para esta pessoa, antes de tudo */}
         {missoes.length > 0 && (

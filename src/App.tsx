@@ -42,6 +42,13 @@ import {
   EtiquetaDeTurno,
   TurnoEPrioridadeDaMissao,
 } from "./components/TurnoEPrioridade";
+import PainelDeMetas from "./components/metas/PainelDeMetas";
+import {
+  METAS_VAZIAS,
+  MetasDoCliente,
+  chaveDasMetas,
+  lerMetas,
+} from "./metas";
 import DestinoDaMissao from "./components/missao/DestinoDaMissao";
 import PreviaDaMissao from "./components/missao/PreviaDaMissao";
 import TrilhaDaMissao, {
@@ -1042,7 +1049,7 @@ export default function App() {
 
   /** Aba aberta dentro da ficha do cliente. */
   const [abaCliente, setAbaCliente] = useState<
-    "geral" | "equipe" | "tipos" | "checkins"
+    "geral" | "equipe" | "metas" | "tipos" | "checkins"
   >("geral");
 
   /** Estado da aba Equipe: busca, filtro de status, página e ranking. */
@@ -4510,6 +4517,39 @@ export default function App() {
   );
 
   /** Check-ins do cliente em foco, antes dos cortes do painel de filtro. */
+  /**
+   * As metas de cada cliente, buscadas quando o cliente entra em cena.
+   *
+   * Guardadas por id porque as duas telas que cobram meta olham clientes
+   * diferentes: a sala de situação olha o cliente em foco no mapa; a conversa
+   * do check-in, o dono do link pelo qual a pessoa entrou. Buscar de novo a
+   * cada troca de aba seria ida ao banco à toa.
+   */
+  const [metasPorCliente, setMetasPorCliente] = useState<
+    Record<string, MetasDoCliente>
+  >({});
+
+  useEffect(() => {
+    const alvo =
+      currentUrlView === "checkin"
+        ? checkInCandidateId
+        : clienteEmFoco && clienteEmFoco !== "all"
+          ? clienteEmFoco
+          : "";
+    if (!alvo || metasPorCliente[alvo]) return;
+    let vivo = true;
+    (async () => {
+      const res = await DatabaseService.lerConfiguracao(chaveDasMetas(alvo));
+      if (!vivo) return;
+      setMetasPorCliente((prev) =>
+        prev[alvo] ? prev : { ...prev, [alvo]: lerMetas(res.value) },
+      );
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [currentUrlView, checkInCandidateId, clienteEmFoco, metasPorCliente]);
+
   const checkInsDoMapa = React.useMemo(
     () =>
       checkIns.filter((c) => {
@@ -5875,6 +5915,22 @@ export default function App() {
             .filter((t) => t.candidateId === checkInCandidateId)
             .map((t) => t.label)}
           missoes={missoesDoIntegrante}
+          metas={metasPorCliente[checkInCandidateId] || METAS_VAZIAS}
+          /*
+            Os registros desta pessoa neste cliente: é contra eles que a meta
+            é medida, e eles já estão carregados — a conta não precisa de uma
+            ida nova ao banco.
+          */
+          meusCheckIns={checkIns.filter(
+            (c: any) =>
+              !c.trashed &&
+              (c.candidateId === checkInCandidateId ||
+                c.candidate_id === checkInCandidateId) &&
+              (c.memberId === authenticatedSupporter?.id ||
+                c.name ===
+                  (authenticatedSupporter?.full_name ||
+                    authenticatedSupporter?.name)),
+          )}
           onTipoCriado={(tipo) =>
             setOperationTypes((prev) =>
               prev.some((t) => t.id === tipo.id) ? prev : [...prev, tipo],
@@ -9095,6 +9151,7 @@ export default function App() {
             const abas = [
               { id: "geral" as const, rotulo: "Visão geral" },
               { id: "equipe" as const, rotulo: "Equipe" },
+              { id: "metas" as const, rotulo: "Metas" },
               { id: "tipos" as const, rotulo: "Tipos de operação" },
               { id: "checkins" as const, rotulo: "Check-ins" },
             ];
@@ -9684,6 +9741,17 @@ export default function App() {
             )}
 
             {/* EQUIPE */}
+            {abaCliente === "metas" && (
+              <PainelDeMetas
+                candidateId={inspectedCandidate.id}
+                equipe={equipeDoCliente}
+                checkIns={checkInsDoCliente}
+                janelas={turnosDaCampanha}
+                notificar={triggerNotification}
+                bancoLigado={isDatabaseConfigured}
+              />
+            )}
+
             {abaCliente === "equipe" && (() => {
               const agora = new Date();
               const inicioDeHoje = new Date(
@@ -15916,6 +15984,11 @@ export default function App() {
         priorityLevels={niveisDePrioridade}
         pessoaDoCheckIn={pessoaDoCheckIn}
         janelasDeTurno={turnosDaCampanha}
+        metas={
+          (clienteEmFoco && clienteEmFoco !== "all"
+            ? metasPorCliente[clienteEmFoco]
+            : undefined) || METAS_VAZIAS
+        }
         de={filtroDe}
         ate={filtroAte}
         rotuloDoPeriodo={rotuloDoPeriodo(filtroDe, filtroAte)}
