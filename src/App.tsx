@@ -144,6 +144,7 @@ import {
   Clock,
   BarChart3,
   GraduationCap,
+  HeartPulse,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
@@ -1016,6 +1017,8 @@ export default function App() {
    * desligar: ligar uma camada é gesto de barra, ao lado do recorte de data.
    */
   const [camadasAbertas, setCamadasAbertas] = useState(false);
+  /** A camada das Unidades Básicas de Saúde, ligada pelo trilho. */
+  const [ubsLigadas, setUbsLigadas] = useState(false);
   const [camadas, setCamadas] = useState<EstadoDasCamadas>({
     metrica: null,
     nivel: "bairros",
@@ -13048,6 +13051,21 @@ export default function App() {
               ]
             : []),
           {
+            id: "ubs",
+            grupo: "camadas",
+            rotulo: "UBS",
+            ajuda: ubsLigadas
+              ? "Esconder as unidades de saúde"
+              : "Mostrar as Unidades Básicas de Saúde do município",
+            cor: "#0E9F9F",
+            ativa: ubsLigadas,
+            icone: <HeartPulse className="w-4 h-4" />,
+            aoClicar: (e) => {
+              e.stopPropagation();
+              setUbsLigadas((ligado) => !ligado);
+            },
+          },
+          {
             id: "estabelecimentos",
             grupo: "camadas",
             rotulo: "Estabelecimentos",
@@ -14956,6 +14974,7 @@ export default function App() {
           }
           escolas={escolas}
           escolasVisiveis={escolasLigadas}
+          ubsVisiveis={ubsLigadas}
           escolaEmFoco={escolaAberta?.codigoInep || null}
           onEscolaSelecionada={(escola) => setEscolaAberta(escola)}
           tempPlacementRadius={Number(areaRadius) || 0}

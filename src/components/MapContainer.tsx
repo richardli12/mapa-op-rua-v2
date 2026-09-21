@@ -5,9 +5,10 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Sparkles, Link2 as LinkIcon } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Sparkles, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
+import { UNIDADES_DE_SAUDE, UnidadeDeSaude } from '../dados/ubs';
 import {
   VisorDoMaterial,
   formatoDoMaterial,
@@ -268,6 +269,8 @@ interface MapContainerProps {
   escolas?: Escola[];
   /** A camada de escolas so desenha quando esta ligada no dock. */
   escolasVisiveis?: boolean;
+  /** A camada das Unidades Básicas de Saúde, ligada pelo trilho. */
+  ubsVisiveis?: boolean;
   /** Clique numa escola: quem mostra a ficha e a tela de cima. */
   onEscolaSelecionada?: (escola: Escola) => void;
   /**
@@ -599,6 +602,7 @@ export default function MapContainer({
   checkIns,
   escolas,
   escolasVisiveis = false,
+  ubsVisiveis = false,
   escolaEmFoco,
   onEscolaSelecionada,
   selectedId,
@@ -695,6 +699,11 @@ export default function MapContainer({
   raioRef.current = tempPlacementRadius;
   const checkInsGroupRef = useRef<L.LayerGroup | null>(null);
   const escolasGroupRef = useRef<L.LayerGroup | null>(null);
+  const ubsGroupRef = useRef<L.LayerGroup | null>(null);
+  /** A unidade com a ficha aberta no meio da tela. */
+  const [ubsAberta, setUbsAberta] = useState<UnidadeDeSaude | null>(null);
+  /** A camada já enquadrou o mapa uma vez? */
+  const camadaUbsLigadaRef = useRef(false);
   const lojasGroupRef = useRef<L.LayerGroup | null>(null);
   const analiseGroupRef = useRef<L.LayerGroup | null>(null);
   const buscaGroupRef = useRef<L.LayerGroup | null>(null);
@@ -1056,6 +1065,7 @@ export default function MapContainer({
     const tempGroup = L.layerGroup().addTo(map);
     const checkInsGroup = L.layerGroup().addTo(map);
     const escolasGroup = L.layerGroup().addTo(map);
+    const ubsGroup = L.layerGroup().addTo(map);
     const lojasGroup = L.layerGroup().addTo(map);
     const analiseGroup = L.layerGroup().addTo(map);
     const recortesGroup = L.layerGroup().addTo(map);
@@ -1066,6 +1076,7 @@ export default function MapContainer({
     tempGroupRef.current = tempGroup;
     checkInsGroupRef.current = checkInsGroup;
     escolasGroupRef.current = escolasGroup;
+    ubsGroupRef.current = ubsGroup;
     lojasGroupRef.current = lojasGroup;
     analiseGroupRef.current = analiseGroup;
     const buscaGroup = L.layerGroup().addTo(map);
@@ -2258,6 +2269,66 @@ export default function MapContainer({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [escolaEmFoco]);
+
+  /**
+   * As Unidades Básicas de Saúde no mapa.
+   *
+   * Camada de contexto, como a das escolas: responde "quem atende aqui" antes
+   * de a equipe decidir para onde ir. O pino abre a ficha com telefone, e-mail
+   * e responsáveis — que é o que faz alguém conseguir ligar na hora, em vez de
+   * anotar o nome e procurar o contato depois.
+   */
+  useEffect(() => {
+    const grupo = ubsGroupRef.current;
+    const map = mapRef.current;
+    if (!grupo || !map) return;
+
+    grupo.clearLayers();
+    if (!ubsVisiveis) {
+      camadaUbsLigadaRef.current = false;
+      setUbsAberta(null);
+      return;
+    }
+
+    const cor = '#0E9F9F';
+    UNIDADES_DE_SAUDE.forEach(unidade => {
+      const icone = L.divIcon({
+        className: 'pino-ubs',
+        html:
+          '<span style="display:block;width:30px;height:30px">' +
+          `<span class="pino-ubs__corpo" style="--cor:${cor}">` +
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" ' +
+          'stroke="#fff" stroke-width="3" stroke-linecap="round" width="15" height="15">' +
+          '<path d="M12 5v14M5 12h14"/></svg>' +
+          '</span></span>',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+
+      const marcador = L.marker([unidade.lat, unidade.lng], { icon: icone });
+      marcador.bindTooltip(
+        `<b>${escaparHtml(unidade.nome)}</b>` +
+          (unidade.endereco ? `<br>${escaparHtml(unidade.endereco)}` : ''),
+        { direction: 'top', offset: [0, -16] }
+      );
+      marcador.on('click', evento => {
+        // O clique é da unidade: não pode virar marcação de ponto no mapa.
+        L.DomEvent.stopPropagation(evento);
+        setUbsAberta(unidade);
+      });
+      grupo.addLayer(marcador);
+    });
+
+    // Ligar a camada e não ver nada seria um botão quebrado: o mapa vai onde
+    // as unidades estão, mas só no momento em que a camada acende.
+    if (!camadaUbsLigadaRef.current) {
+      const pontos = UNIDADES_DE_SAUDE.map(u => [u.lat, u.lng] as [number, number]);
+      if (pontos.length > 0) {
+        map.fitBounds(L.latLngBounds(pontos), { padding: [60, 60], maxZoom: 13 });
+      }
+    }
+    camadaUbsLigadaRef.current = true;
+  }, [ubsVisiveis]);
 
   // Camada de escolas do municipio: so desenha quando ligada no dock.
   useEffect(() => {
@@ -4007,6 +4078,137 @@ export default function MapContainer({
             }
           />
         )}
+
+      {/*
+        A FICHA DA UNIDADE DE SAÚDE.
+
+        Telefone e e-mail são links de verdade: o número que só se pode ler é
+        um número que a pessoa copia errado no meio da rua.
+      */}
+      {ubsAberta && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[2000] flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setUbsAberta(null)}
+        >
+          <div
+            className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95 duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 flex items-start justify-between gap-3 text-white bg-[#0E9F9F]">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <span className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <HeartPulse className="w-5 h-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-white/80 leading-none">
+                    Unidade Básica de Saúde
+                  </p>
+                  <h3 className="text-[15px] font-extrabold leading-tight mt-1">
+                    {ubsAberta.nome}
+                  </h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUbsAberta(null)}
+                className="p-1.5 hover:bg-white/15 rounded-full cursor-pointer shrink-0"
+                title="Fechar"
+              >
+                <X className="w-4.5 h-4.5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4 font-sans">
+              {ubsAberta.endereco && (
+                <div className="flex items-start gap-2.5">
+                  <MapPin className="w-4 h-4 text-[#0E9F9F] shrink-0 mt-0.5" />
+                  <p className="text-[12.5px] font-semibold text-slate-700 leading-snug">
+                    {ubsAberta.endereco}
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-2">
+                {ubsAberta.celular && (
+                  <a
+                    href={`tel:${ubsAberta.celular.replace(/\D/g, '')}`}
+                    className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 no-underline transition-colors"
+                  >
+                    <Phone className="w-4 h-4 text-[#0E9F9F] shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block text-[9px] font-black uppercase tracking-widest text-slate-400">
+                        Telefone da unidade
+                      </span>
+                      <span className="block text-[12.5px] font-bold text-slate-800">
+                        {ubsAberta.celular}
+                      </span>
+                    </span>
+                  </a>
+                )}
+                {ubsAberta.email && (
+                  <a
+                    href={`mailto:${ubsAberta.email}`}
+                    className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 no-underline transition-colors"
+                  >
+                    <Mail className="w-4 h-4 text-[#0E9F9F] shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[9px] font-black uppercase tracking-widest text-slate-400">
+                        E-mail institucional
+                      </span>
+                      <span className="block text-[12px] font-bold text-slate-800 truncate">
+                        {ubsAberta.email}
+                      </span>
+                    </span>
+                  </a>
+                )}
+              </div>
+
+              {ubsAberta.responsaveis.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                    Quem responde pela unidade
+                  </p>
+                  <div className="space-y-2">
+                    {ubsAberta.responsaveis.map((r, i) => (
+                      <div
+                        key={`${r.nome}-${i}`}
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-100"
+                      >
+                        <span className="w-8 h-8 rounded-full bg-[#0E9F9F]/10 text-[#0E9F9F] flex items-center justify-center shrink-0">
+                          <User className="w-4 h-4" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[12.5px] font-bold text-slate-800 truncate">
+                            {r.nome}
+                          </span>
+                          {r.celular && (
+                            <a
+                              href={`tel:${r.celular.replace(/\D/g, '')}`}
+                              className="text-[11px] font-semibold text-[#0E9F9F] no-underline hover:underline"
+                            >
+                              {r.celular}
+                            </a>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${ubsAberta.lat},${ubsAberta.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-extrabold text-[11px] uppercase tracking-wider rounded-xl cursor-pointer flex items-center justify-center gap-2 no-underline"
+              >
+                <Navigation className="w-4 h-4 text-[#0E9F9F]" />
+                Abrir no Google Maps
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CHECK-IN DETALHES MODAL (CENTRALIZADO) */}
       {selectedCheckInForModal && (
