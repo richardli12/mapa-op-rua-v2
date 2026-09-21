@@ -1,20 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ChevronLeft,
-  Check,
-  Camera,
-  Flag,
-  MapPin,
-  Mic,
-  MessageSquare,
-  Clock,
-  Loader2,
-  Pencil,
-  Plus,
-  Maximize2,
   ArrowUp,
   BellRing,
+  Camera,
+  Check,
+  ChevronDown,
   ClipboardList,
+  Flag,
+  Loader2,
+  Maximize2,
+  MapPin,
+  MessageSquare,
+  Pencil,
+  Plus,
   Target,
   TriangleAlert,
   X
@@ -32,17 +30,13 @@ import {
   CHECKIN_PRIORITIES
 } from '../types';
 import OperationIcon from './OperationIcon';
-import BrandMark from './BrandMark';
 import MiniMapa from './MiniMapa';
 import MapaAjuste from './MapaAjuste';
-import CheckInMidias, { MidiaItem, MidiaTipo } from './CheckInMidias';
-import CheckInObservacoes, { ObservacaoItem } from './CheckInObservacoes';
 import { MaterialDaMissao } from './MaterialDaMissao';
-import { EtiquetaDePrioridade, EtiquetaDeTurno, IconeDoTurno } from './TurnoEPrioridade';
+import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
 import {
   METAS_VAZIAS,
   MetasDoCliente,
-  alvoDe,
   alvoDoDia,
   corDoAvanco,
   janelaDaMeta,
@@ -51,10 +45,8 @@ import {
 } from '../metas';
 import {
   CHAVE_TURNOS,
-  COR_DO_TURNO,
   JanelaDeTurno,
   NOME_DO_TURNO,
-  TURNOS,
   TURNOS_PADRAO,
   TurnoId,
   janelaDoTurno,
@@ -63,6 +55,30 @@ import {
   situacaoDoTurno,
   turnoDeAgora
 } from '../turnos';
+import {
+  AZUL,
+  Avatar,
+  BlocoDoIntegrante,
+  BotaoPrincipal,
+  Fala,
+  FUNDO,
+  Resposta,
+  VERDE,
+  contar,
+  horaAgora,
+  vibrar
+} from './checkin/pecas';
+import Cabecalho from './checkin/Cabecalho';
+import { EtapaDaTrilha } from './checkin/Trilha';
+import Doca from './checkin/Doca';
+import ControlesDeMidia from './checkin/ControlesDeMidia';
+import CompositorDeObservacao from './checkin/CompositorDeObservacao';
+import BolhaDeMidias from './checkin/BolhaDeMidias';
+import BolhaDeObservacoes from './checkin/BolhaDeObservacoes';
+import PainelDoDia from './checkin/PainelDoDia';
+import FolhaDeSaida from './checkin/FolhaDeSaida';
+import Concluido from './checkin/Concluido';
+import { MidiaItem, MidiaTipo, ObservacaoItem } from './checkin/tipos';
 
 /**
  * Missão enviada pelo comitê e mostrada no alto da conversa.
@@ -126,11 +142,6 @@ interface CheckInChatProps {
   notify: (texto: string, tipo?: 'success' | 'error' | 'info') => void;
 }
 
-/** Cores da marca, fixadas aqui para o fio inteiro falar a mesma língua. */
-const AZUL = '#0C3556';
-const FUNDO = '#F3F6FA';
-const VERDE = '#08A47B';
-
 const TOTAL_ETAPAS = 5;
 
 /** Distância em metros entre dois pontos, para dizer o quão longe é a missão. */
@@ -154,9 +165,6 @@ const distanciaCurta = (metros: number) =>
     ? `${Math.round(metros)} m`
     : `${(metros / 1000).toFixed(1).replace('.', ',')} km`;
 
-const horaAgora = () =>
-  new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
 /** Identificador das linhas filhas do check-in, que o banco guarda como uuid. */
 const novoId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -166,43 +174,44 @@ const novoId = () =>
         return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
       });
 
-/** Foto do integrante, do lado direito da conversa. */
-function Avatar({ nome, foto }: { nome: string; foto: string }) {
-  return (
-    <span className="w-7 h-7 rounded-full bg-slate-200 shrink-0 overflow-hidden flex items-center justify-center">
-      {foto ? (
-        <img
-          src={foto}
-          alt={nome}
-          className="w-full h-full object-cover"
-          referrerPolicy="no-referrer"
-        />
-      ) : (
-        <span className="text-[10px] font-black text-slate-500 uppercase">
-          {nome.substring(0, 2)}
-        </span>
-      )}
-    </span>
-  );
-}
-
-const contar = (n: number, um: string, varios: string) =>
-  `${n} ${n === 1 ? um : varios}`;
-
 /**
  * Check-in de campo em forma de conversa.
  *
- * Cinco etapas, uma de cada vez: localização, mídias, observações, tipos de
- * operação e revisão. Cada etapa só termina quando a pessoa confirma, e até a
- * confirmação final o check-in fica no banco como rascunho — é a ele que cada
- * foto, vídeo e áudio se liga assim que sobe para o Storage, para nenhum
- * arquivo ficar solto sem dono.
+ * O componente de fora existe só para uma coisa: trocar a chave do fio quando
+ * a pessoa pede o próximo check-in. Cada registro é uma sessão inteira — GPS,
+ * rascunho no banco, arquivos no Storage, etapas confirmadas — e a forma
+ * honesta de começar outro é nascer de novo, não limpar campo por campo e
+ * torcer para não ter esquecido nenhum.
+ */
+export default function CheckInChat(props: CheckInChatProps) {
+  const [sessao, setSessao] = useState(0);
+  /* A chave vai no fragmento: trocá-la desmonta o fio inteiro e monta outro
+     do zero, que é exatamente o que "fazer outro check-in" significa. */
+  return (
+    <React.Fragment key={sessao}>
+      <FioDoCheckIn {...props} onNovo={() => setSessao(s => s + 1)} />
+    </React.Fragment>
+  );
+}
+
+/**
+ * O fio: cinco etapas, uma de cada vez.
+ *
+ * Localização, mídias, observações, tipos de operação e revisão. Cada etapa só
+ * termina quando a pessoa confirma, e até a confirmação final o check-in fica
+ * no banco como rascunho — é a ele que cada foto, vídeo e áudio se liga assim
+ * que sobe para o Storage, para nenhum arquivo ficar solto sem dono.
  *
  * A conversa não é uma lista de mensagens acumuladas: ela é desenhada a partir
  * do estado de cada etapa. Por isso voltar para corrigir qualquer etapa é só
  * mudar o número da etapa — o fio se redesenha sozinho, sem mensagem repetida.
+ *
+ * A tela tem três faixas fixas e uma que rola. Em cima, o cabeçalho vivo
+ * (quem é, turno, GPS, sinal, meta) com a trilha das etapas. No meio, o fio.
+ * Embaixo, a doca — o único lugar onde a ação da etapa acontece. Quem está na
+ * rua nunca precisa rolar atrás de um botão.
  */
-export default function CheckInChat({
+function FioDoCheckIn({
   member,
   clientId,
   clientName,
@@ -214,8 +223,9 @@ export default function CheckInChat({
   meusCheckIns = [],
   onSaved,
   onBack,
+  onNovo,
   notify
-}: CheckInChatProps) {
+}: CheckInChatProps & { onNovo: () => void }) {
   const [etapa, setEtapa] = useState(1);
 
   /** Onde o aparelho está, segundo o GPS. Só muda com leitura nova. */
@@ -262,14 +272,36 @@ export default function CheckInChat({
   /**
    * O minuto de agora, batendo de dois em dois minutos.
    *
-   * A lista da rua diz "fecha em 12 min" e reordena sozinha quando o turno
-   * vira. Sem este pulso, quem deixa a tela aberta às 11h50 continua vendo a
-   * manhã como o turno de agora ao meio-dia e meia.
+   * O cabeçalho diz "fecha em 12 min" e a lista da rua reordena sozinha quando
+   * o turno vira. Sem este pulso, quem deixa a tela aberta às 11h50 continua
+   * vendo a manhã como o turno de agora ao meio-dia e meia.
    */
   const [pulso, setPulso] = useState(() => Date.now());
   useEffect(() => {
     const t = window.setInterval(() => setPulso(Date.now()), 120000);
     return () => window.clearInterval(t);
+  }, []);
+
+  /**
+   * Tem sinal?
+   *
+   * Câmera aberta sem rede é foto perdida e minuto perdido: o arquivo sobe,
+   * falha, e quem está na rua descobre pelo aviso vermelho. Com isto, a doca
+   * apaga os botões antes de a pessoa gastar o movimento, e o cabeçalho diz
+   * por quê.
+   */
+  const [online, setOnline] = useState(
+    typeof navigator === 'undefined' ? true : navigator.onLine !== false
+  );
+  useEffect(() => {
+    const ligou = () => setOnline(true);
+    const caiu = () => setOnline(false);
+    window.addEventListener('online', ligou);
+    window.addEventListener('offline', caiu);
+    return () => {
+      window.removeEventListener('online', ligou);
+      window.removeEventListener('offline', caiu);
+    };
   }, []);
 
   /**
@@ -280,6 +312,8 @@ export default function CheckInChat({
    * registro livre numa missão que ninguém pediu.
    */
   const [missaoId, setMissaoId] = useState<string | null>(null);
+  /** Lista longa de missões fica cortada até a pessoa pedir o resto. */
+  const [verTodasMissoes, setVerTodasMissoes] = useState(false);
   /**
    * Missões que chegaram com a tela já aberta e que a pessoa ainda não viu.
    *
@@ -307,6 +341,12 @@ export default function CheckInChat({
   const [horas, setHoras] = useState<{ [k: string]: string }>({});
   /** Enviar da galeria: desligado até o administrador liberar. */
   const [permitirGaleria, setPermitirGaleria] = useState(false);
+  /** A folha do dia (meta, turnos, o que já entrou), aberta pelo cabeçalho. */
+  const [diaAberto, setDiaAberto] = useState(false);
+  /** A pergunta antes de descartar o que já foi juntado. */
+  const [perguntandoSaida, setPerguntandoSaida] = useState(false);
+  /** O check-in gravado: daqui em diante a tela é o fecho, não o fio. */
+  const [concluido, setConcluido] = useState<CheckIn | null>(null);
 
   const fimRef = useRef<HTMLDivElement>(null);
   const watchRef = useRef<number | null>(null);
@@ -343,6 +383,7 @@ export default function CheckInChat({
     if (avisoRef.current) clearTimeout(avisoRef.current);
     // Erro fica mais tempo: é o que precisa ser lido até o fim.
     avisoRef.current = setTimeout(() => setAviso(null), tipo === 'error' ? 6500 : 4000);
+    if (tipo === 'error') vibrar([25, 70, 25]);
     // O painel continua sabendo: é dele o histórico da sessão.
     notify(texto, tipo);
   };
@@ -370,10 +411,17 @@ export default function CheckInChat({
   const missao = missoes.find(m => m.id === missaoId) || null;
 
   /** O turno que está acontecendo agora, recalculado a cada pulso. */
-  const turnoAgora = React.useMemo(
-    () => turnoDeAgora(janelas),
-    [janelas, pulso]
-  );
+  const turnoAgora = React.useMemo(() => turnoDeAgora(janelas), [janelas, pulso]);
+
+  /** "Bom dia, Daniel" — pelo relógio do aparelho, como qualquer conversa. */
+  const saudacao = React.useMemo(() => {
+    const h = new Date().getHours();
+    return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** O nível cadastrado com este id, se ele ainda existir. */
+  const nivelDaMissao = (id?: string) => (id ? niveis.find(n => n.id === id) : undefined);
 
   /**
    * O quanto um nível pesa.
@@ -382,9 +430,6 @@ export default function CheckInChat({
    * grave. Missão sem prioridade fica abaixo de qualquer nível cadastrado —
    * não é "a menos grave", é a que ninguém classificou.
    */
-  /** O nível cadastrado com este id, se ele ainda existir. */
-  const nivelDaMissao = (id?: string) => (id ? niveis.find(n => n.id === id) : undefined);
-
   const pesoDaPrioridade = (id?: string) => {
     const nivel = niveis.find(n => n.id === id);
     return nivel ? nivel.position : -1;
@@ -426,8 +471,6 @@ export default function CheckInChat({
 
   /** Quantas missões são para a hora de agora. */
   const quantasAgora = missoesEmOrdem.filter(m => m.turno && m.turno === turnoAgora).length;
-  /** Alguma missão tem turno? Sem isso a faixa do relógio não tem o que dizer. */
-  const algumaComTurno = missoes.some(m => m.turno);
 
   /**
    * Missões novas que ainda estão de pé.
@@ -461,14 +504,49 @@ export default function CheckInChat({
   const videos = midiasProntas.filter(m => m.tipo === 'video').length;
   const textos = obsProntas.filter(o => o.tipo === 'texto').length;
   const audios = obsProntas.filter(o => o.tipo === 'audio').length;
+  const enviandoMidia = midias.some(m => m.estado === 'enviando');
+  const enviandoAudio = observacoes.some(o => o.estado === 'enviando');
 
+  /**
+   * A meta desta pessoa, do jeito que o cabeçalho precisa.
+   *
+   * Sem meta cadastrada o anel some: cobrar número que ninguém definiu é
+   * inventar cobrança.
+   */
+  const meta = React.useMemo(() => {
+    if (!temMeta(metas)) return null;
+    const alvo = alvoDoDia(metas, member?.id || '');
+    if (alvo <= 0) return null;
+    const janelaDoAlvo = janelaDaMeta(metas);
+    const avanco = progressoDaPessoa(meusCheckIns, janelas, janelaDoAlvo.de, janelaDoAlvo.ate);
+    return {
+      feito: avanco.total,
+      alvo,
+      rotulo: janelaDoAlvo.rotulo,
+      cor: corDoAvanco(avanco.total, alvo)
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metas, meusCheckIns, janelas, member?.id, pulso]);
+
+  /**
+   * O fim do fio sempre à vista.
+   *
+   * São dois tempos de propósito. O primeiro acompanha a mudança que acabou de
+   * acontecer; o segundo existe porque o que entra no fio tem altura tardia —
+   * o mapa mede o container depois de montado, a foto só ocupa espaço quando
+   * carrega, a bolha entra animada. Com um tempo só, a ficha da revisão ficava
+   * cortada pela doca e parecia que faltava alguma coisa.
+   */
   useEffect(() => {
-    const t = setTimeout(
-      () => fimRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }),
-      90
-    );
-    return () => clearTimeout(t);
-  }, [etapa, coords, midias, observacoes, operacoes, mapaPronto]);
+    const irAoFim = () =>
+      fimRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const perto = setTimeout(irAoFim, 90);
+    const longe = setTimeout(irAoFim, 520);
+    return () => {
+      clearTimeout(perto);
+      clearTimeout(longe);
+    };
+  }, [etapa, coords, endereco, midias, observacoes, operacoes, mapaPronto]);
 
   /**
    * O que mudou nas missões enquanto a tela estava aberta.
@@ -494,6 +572,7 @@ export default function CheckInChat({
       ]);
       // Missão nova traz a tarja de volta, mesmo que a anterior já tenha sido lida.
       setTarjaVista(false);
+      vibrar([15, 80, 15]);
     }
 
     if (missaoId && !atuais.some(m => m.id === missaoId)) {
@@ -946,10 +1025,12 @@ export default function CheckInChat({
     avisar(`Categoria "${nome}" criada e marcada.`, 'success');
   };
 
-  const alternarOperacao = (tipo: OperationType) =>
+  const alternarOperacao = (tipo: OperationType) => {
+    vibrar();
     setOperacoes(prev =>
       prev.some(o => o.id === tipo.id) ? prev.filter(o => o.id !== tipo.id) : [...prev, tipo]
     );
+  };
 
   const confirmarOperacoes = () => {
     if (operacoes.length === 0) {
@@ -1004,12 +1085,25 @@ export default function CheckInChat({
 
     salvoRef.current = true;
     setSalvando(false);
-    avisar('Check-in confirmado!', 'success');
+    // O painel recebe o registro; o fecho quem mostra é esta tela.
     onSaved(registro);
+    setConcluido(registro);
   };
 
+  /**
+   * O que a pessoa perde se sair agora.
+   *
+   * Em palavras, não em "dados não salvos": é a diferença entre entender o
+   * aviso e tocar em "sair" no automático.
+   */
+  const perdasAoSair = [
+    midiasProntas.length > 0 ? contar(midiasProntas.length, 'foto/vídeo', 'fotos e vídeos') : '',
+    obsProntas.length > 0 ? contar(obsProntas.length, 'observação', 'observações') : '',
+    localConfirmado && endereco?.rua ? 'o ponto que você marcou' : ''
+  ].filter(Boolean);
+
   /** Sair antes do fim joga fora o rascunho e os arquivos que já subiram. */
-  const sair = () => {
+  const descartarESair = () => {
     if (!salvoRef.current) {
       const caminhos = [
         ...midias.map(m => m.storagePath),
@@ -1021,88 +1115,131 @@ export default function CheckInChat({
     onBack();
   };
 
-  const AvatarSistema = <BrandMark size={28} rounded={7} />;
+  /** O "voltar" do cabeçalho: pergunta antes, quando há o que perder. */
+  const pedirSaida = () => {
+    if (perdasAoSair.length === 0 && operacoes.length === 0) {
+      descartarESair();
+      return;
+    }
+    setPerguntandoSaida(true);
+  };
+
   const AvatarMembro = <Avatar nome={nomeMembro} foto={fotoMembro} />;
 
-  const Fala = ({ texto, hora }: { texto: string; hora?: string }) => (
-    <div className="flex items-end gap-2">
-      <span className="shrink-0">{AvatarSistema}</span>
-      <div className="max-w-[78%]">
-        <div className="px-3.5 py-2.5 text-[13px] leading-snug shadow-sm bg-white text-slate-700 rounded-2xl rounded-bl-md border border-slate-100">
-          {texto}
-        </div>
-        <span className="block text-[10px] text-slate-400 font-semibold mt-1">{hora}</span>
-      </div>
-    </div>
-  );
+  /** As cinco etapas do jeito que a trilha do cabeçalho precisa. */
+  const etapasDaTrilha: EtapaDaTrilha[] = [
+    {
+      numero: 1,
+      rotulo: 'Ação',
+      icone: <Flag className="w-3.5 h-3.5" />,
+      feita: operacoesConfirmadas
+    },
+    {
+      numero: 2,
+      rotulo: 'Local',
+      icone: <MapPin className="w-3.5 h-3.5" />,
+      feita: localConfirmado
+    },
+    {
+      numero: 3,
+      rotulo: 'Fotos',
+      icone: <Camera className="w-3.5 h-3.5" />,
+      feita: midiasConfirmadas
+    },
+    {
+      numero: 4,
+      rotulo: 'Notas',
+      icone: <MessageSquare className="w-3.5 h-3.5" />,
+      feita: obsConfirmadas
+    },
+    {
+      numero: 5,
+      rotulo: 'Revisão',
+      icone: <Check className="w-3.5 h-3.5" />,
+      feita: false
+    }
+  ];
 
-  const Resposta = ({ children, hora }: { children: React.ReactNode; hora?: string }) => (
-    <div className="flex items-end gap-2 flex-row-reverse">
-      {AvatarMembro}
-      <div className="max-w-[80%] flex flex-col items-end">
-        <div
-          className="px-3.5 py-2.5 text-[13px] leading-snug shadow-sm text-white rounded-2xl rounded-br-md font-semibold"
-          style={{ backgroundColor: AZUL }}
-        >
-          {children}
-        </div>
-        <span className="block text-[10px] text-slate-400 font-semibold mt-1 text-right">
-          {hora}
-        </span>
-      </div>
-    </div>
-  );
-
+  /** A linha do resumo da revisão, com o atalho para corrigir aquela etapa. */
   const LinhaResumo = ({
     icone,
+    rotulo,
     texto,
     etapaDestino
   }: {
     icone: React.ReactNode;
+    rotulo: string;
     texto: string;
     etapaDestino: number;
   }) => (
-    <li className="flex items-center gap-2 text-[12px] font-semibold" style={{ color: '#05603F' }}>
-      <span className="shrink-0">{icone}</span>
-      <span className="flex-1 min-w-0">{texto}</span>
+    <li className="flex items-center gap-2.5 py-2.5">
+      <span
+        className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 text-white"
+        style={{ backgroundColor: VERDE }}
+      >
+        {icone}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[9.5px] font-black uppercase tracking-widest text-emerald-700/60">
+          {rotulo}
+        </span>
+        <span className="block text-[12.5px] font-bold leading-snug" style={{ color: '#05603F' }}>
+          {texto}
+        </span>
+      </span>
       <button
         type="button"
         onClick={() => voltarPara(etapaDestino)}
-        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/70 text-[10px] font-black uppercase tracking-wider cursor-pointer active:scale-95"
+        className="shrink-0 w-9 h-9 rounded-xl bg-white/70 flex items-center justify-center cursor-pointer active:scale-95"
+        title="Corrigir"
+        aria-label="Corrigir"
         style={{ color: '#05603F' }}
       >
-        <Pencil className="w-3 h-3" />
-        Corrigir
+        <Pencil className="w-3.5 h-3.5" />
       </button>
     </li>
   );
+
+  // O check-in gravado: daqui em diante quem manda na tela é o fecho.
+  if (concluido) {
+    return (
+      <Concluido
+        registro={concluido}
+        metaDepois={meta}
+        onNovo={onNovo}
+        onSair={onBack}
+      />
+    );
+  }
 
   return (
     <div
       className="h-[100dvh] flex flex-col font-sans overflow-hidden"
       style={{ backgroundColor: FUNDO }}
     >
-      {/* CABEÇALHO */}
-      <header
-        className="text-white px-3 py-3 flex items-center gap-2.5 shrink-0"
-        style={{ backgroundColor: AZUL }}
-      >
-        <button
-          onClick={sair}
-          className="p-1.5 -ml-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-          title="Voltar"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-        <BrandMark size={32} rounded={8} />
-        <h1 className="text-[15px] font-bold tracking-tight">Check-in de campo</h1>
-      </header>
+      <Cabecalho
+        nome={nomeMembro}
+        foto={fotoMembro}
+        cliente={clientName}
+        online={online}
+        precisao={precisao}
+        buscandoGps={buscandoGps}
+        turnoAgora={turnoAgora}
+        janelas={janelas}
+        meta={meta}
+        etapas={etapasDaTrilha}
+        etapaAtual={etapa}
+        onIr={voltarPara}
+        onSair={pedirSaida}
+        onAbrirDia={() => setDiaAberto(true)}
+      />
 
       {/* AVISO: o recado do sistema, na tela que a pessoa está olhando */}
       {aviso && (
         <div
-          className="fixed top-3 left-3 right-3 z-50 rounded-2xl px-3.5 py-3 shadow-xl flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2 duration-200"
+          className="fixed left-3 right-3 z-[2000] rounded-2xl px-3.5 py-3 shadow-xl flex items-start gap-2.5 ck-desce"
           style={{
+            top: 'calc(env(safe-area-inset-top) + 0.75rem)',
             backgroundColor:
               aviso.tipo === 'error' ? '#B91C1C' : aviso.tipo === 'success' ? VERDE : AZUL
           }}
@@ -1126,36 +1263,8 @@ export default function CheckInChat({
         </div>
       )}
 
-      {/* ETAPAS */}
-      <div className="bg-white px-5 pt-3 pb-2.5 border-b border-slate-100 shrink-0">
-        <div className="flex items-center gap-1.5">
-          {Array.from({ length: TOTAL_ETAPAS }).map((_, i) => {
-            const n = i + 1;
-            const feito = n < etapa;
-            const atual = n === etapa;
-            return (
-              <React.Fragment key={n}>
-                <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0 transition-colors"
-                  style={{ backgroundColor: feito || atual ? VERDE : '#E2E8F0' }}
-                />
-                {n < TOTAL_ETAPAS && (
-                  <span
-                    className="flex-1 h-0.5 rounded-full transition-colors"
-                    style={{ backgroundColor: feito ? VERDE : '#E2E8F0' }}
-                  />
-                )}
-              </React.Fragment>
-            );
-          })}
-        </div>
-        <p className="text-[11px] text-slate-400 font-semibold mt-1.5">
-          Etapa {Math.min(etapa, TOTAL_ETAPAS)} de {TOTAL_ETAPAS}
-        </p>
-      </div>
-
       {/* FIO */}
-      <div className="flex-1 min-h-0 px-3 pt-4 pb-6 space-y-3 overflow-y-auto">
+      <div className="flex-1 min-h-0 px-3 pt-3.5 pb-5 space-y-3 overflow-y-auto">
         {/* MISSÃO NOVA: fica no alto até a pessoa tocar, não some sozinha */}
         {novasDePe.length > 0 && !tarjaVista && (
           <button
@@ -1173,7 +1282,7 @@ export default function CheckInChat({
                 60
               );
             }}
-            className="sticky top-0 z-30 w-full flex items-center gap-2.5 rounded-2xl px-3.5 py-3 shadow-lg cursor-pointer active:scale-[0.99] animate-in fade-in slide-in-from-top-2 duration-200"
+            className="sticky top-0 z-30 w-full flex items-center gap-2.5 rounded-2xl px-3.5 py-3 shadow-lg cursor-pointer active:scale-[0.99] ck-desce"
             style={{ backgroundColor: VERDE }}
           >
             <span className="w-7 h-7 rounded-full bg-white/25 flex items-center justify-center shrink-0">
@@ -1198,7 +1307,7 @@ export default function CheckInChat({
           <div
             /* Gruda no alto igual à tarja: se some da vista, o check-in vai
                ser gravado sem a missão e ninguém vai entender por quê. */
-            className="sticky top-0 z-20 rounded-2xl border px-3.5 py-3 flex items-start gap-2.5 shadow-lg animate-in fade-in duration-200"
+            className="sticky top-0 z-20 rounded-2xl border px-3.5 py-3 flex items-start gap-2.5 shadow-lg ck-desce"
             style={{ backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }}
           >
             <TriangleAlert className="w-4 h-4 shrink-0 mt-px" style={{ color: '#B45309' }} />
@@ -1222,326 +1331,202 @@ export default function CheckInChat({
           </div>
         )}
 
-        {/*
-          A meta, antes de tudo.
-
-          Quem está na rua não abre painel nenhum: ou o número dele aparece
-          aqui, ou ele trabalha no escuro e só descobre no fim do dia que
-          faltavam seis. A missão cumprida entra na conta — quem fez missão
-          trabalhou.
-        */}
-        {temMeta(metas) && alvoDoDia(metas, member?.id || '') > 0 && (() => {
-          const janelaDoAlvo = janelaDaMeta(metas);
-          const avanco = progressoDaPessoa(
-            meusCheckIns,
-            janelas,
-            janelaDoAlvo.de,
-            janelaDoAlvo.ate
-          );
-          const alvoTotal = alvoDoDia(metas, member?.id || '');
-          const cor = corDoAvanco(avanco.total, alvoTotal);
-          const batida = avanco.total >= alvoTotal;
-          const faltam = Math.max(0, alvoTotal - avanco.total);
-
-          return (
-            <div className="flex items-end gap-2 flex-row-reverse">
-              <span className="w-7 shrink-0" />
-              <div
-                className="max-w-[86%] w-full rounded-2xl border px-3.5 py-3"
-                style={{
-                  backgroundColor: batida ? '#F0FDF7' : '#FFFFFF',
-                  borderColor: batida ? '#A7F3D0' : '#E2E8F0'
-                }}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-1.5 text-[9.5px] uppercase font-black tracking-widest text-slate-400">
-                    <Target className="w-3 h-3" />
-                    Sua meta {janelaDoAlvo.rotulo}
-                  </span>
-                  <span
-                    className="text-[9.5px] font-black uppercase tracking-wider"
-                    style={{ color: cor }}
-                  >
-                    {batida
-                      ? 'meta batida'
-                      : `${faltam} ${faltam === 1 ? 'restante' : 'restantes'}`}
-                  </span>
-                </div>
-
-                <p className="mt-1.5 flex items-baseline gap-1.5">
-                  <span
-                    className="text-[26px] font-black leading-none tabular-nums"
-                    style={{ color: cor }}
-                  >
-                    {avanco.total}
-                  </span>
-                  <span className="text-[13px] font-black text-slate-300 leading-none">
-                    de {alvoTotal}
-                  </span>
-                  {avanco.deMissao > 0 && (
-                    <span className="text-[10px] font-bold text-slate-400 leading-none">
-                      · {avanco.deMissao} de missão
-                    </span>
-                  )}
-                </p>
-
-                <div className="mt-2.5 grid grid-cols-3 gap-2">
-                  {TURNOS.map(t => {
-                    const alvo = alvoDe(metas, member?.id || '', t);
-                    if (alvo === 0) return null;
-                    const feito = avanco.porTurno[t];
-                    const eAgora = turnoAgora === t;
-                    return (
-                      <div key={t}>
-                        <span className="flex items-center gap-1 text-[9.5px] font-black uppercase tracking-wider">
-                          <IconeDoTurno
-                            turno={t}
-                            className="w-2.5 h-2.5 shrink-0"
-                          />
-                          <span style={{ color: COR_DO_TURNO[t] }}>
-                            {NOME_DO_TURNO[t]}
-                          </span>
-                          {eAgora && (
-                            <span className="text-emerald-600">· agora</span>
-                          )}
-                        </span>
-                        <span className="block text-[11px] font-black tabular-nums mt-0.5 text-slate-600">
-                          {feito}
-                          <span className="text-slate-300">/{alvo}</span>
-                        </span>
-                        <span className="block h-1.5 rounded-full bg-slate-100 overflow-hidden mt-1">
-                          <span
-                            className="block h-full rounded-full transition-all"
-                            style={{
-                              width: `${Math.min(100, (feito / alvo) * 100)}%`,
-                              backgroundColor: COR_DO_TURNO[t]
-                            }}
-                          />
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
+        {/* A abertura: uma conversa começa cumprimentando */}
+        <Fala hora={horas.abertura} destaque>
+          <strong className="font-black" style={{ color: AZUL }}>
+            {saudacao}, {primeiroNome}.
+          </strong>{' '}
+          Vamos registrar o que você está fazendo agora — são cinco passos curtos
+          e eu vou junto.
+        </Fala>
 
         {/* MISSÕES: o que o comitê enviou para esta pessoa, antes de tudo */}
         {missoes.length > 0 && (
           <>
-            <Fala
-              texto={
-                missoes.length === 1
-                  ? `${primeiroNome}, o comitê enviou uma missão para você.`
-                  : `${primeiroNome}, o comitê enviou ${missoes.length} missões para você. Qual delas você está fazendo agora?`
-              }
-              hora={horas.abertura}
-            />
-            <div className="flex items-end gap-2 flex-row-reverse" ref={blocoMissoesRef}>
+            <Fala hora={horas.abertura} atraso={450}>
+              {missao ? (
+                <>Você está na missão abaixo. Se mudar de ideia, dá para trocar.</>
+              ) : missoes.length === 1 ? (
+                <>O comitê enviou uma missão para você. É essa que você está fazendo?</>
+              ) : (
+                <>
+                  O comitê enviou {missoes.length} missões para você
+                  {quantasAgora > 0 && turnoAgora && (
+                    <>
+                      {' '}
+                      — {quantasAgora === 1 ? 'uma é' : `${quantasAgora} são`} para{' '}
+                      {NOME_DO_TURNO[turnoAgora].toLowerCase()}, e {quantasAgora === 1 ? 'ela está' : 'elas estão'} no topo
+                    </>
+                  )}
+                  . Qual delas você está fazendo agora?
+                </>
+              )}
+            </Fala>
+
+            <div className="ck-entra flex items-end gap-2 flex-row-reverse" ref={blocoMissoesRef}>
               <span className="w-7 shrink-0" />
-              <div className="max-w-[86%] w-full flex flex-col items-stretch gap-2">
+              <div className="max-w-[88%] w-full flex flex-col items-stretch gap-2">
                 {/*
-                  A faixa do relógio.
-
-                  Quem está na rua não abre a tela de configuração para saber
-                  que a manhã vai até 11:59. Esta linha diz que horas são no
-                  vocabulário da campanha e quantas missões são para agora —
-                  e é o que explica por que a lista está nesta ordem.
+                  Com missão escolhida, só ela fica na tela.
+                  Cinco cartões abertos embaixo da que ela já escolheu são cinco
+                  telas de rolagem entre a decisão e a primeira pergunta do
+                  check-in — e nenhuma delas muda mais nada.
                 */}
-                {algumaComTurno && (
-                  <div
-                    className="rounded-2xl px-3 py-2 flex items-center gap-2 border"
-                    style={{
-                      backgroundColor: turnoAgora ? `${COR_DO_TURNO[turnoAgora]}12` : '#F8FAFC',
-                      borderColor: turnoAgora ? `${COR_DO_TURNO[turnoAgora]}33` : '#E2E8F0'
-                    }}
-                  >
-                    {turnoAgora ? (
-                      <>
-                        <span
-                          className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                          style={{
-                            backgroundColor: `${COR_DO_TURNO[turnoAgora]}1F`,
-                            color: COR_DO_TURNO[turnoAgora]
-                          }}
-                        >
-                          <IconeDoTurno turno={turnoAgora} className="w-3.5 h-3.5" />
-                        </span>
-                        <span className="min-w-0 flex-1 leading-tight">
-                          <span
-                            className="block text-[11.5px] font-black"
-                            style={{ color: COR_DO_TURNO[turnoAgora] }}
-                          >
-                            Agora é {NOME_DO_TURNO[turnoAgora].toLowerCase()} ·{' '}
-                            {janelaDoTurno(janelas, turnoAgora).inicio}–
-                            {janelaDoTurno(janelas, turnoAgora).fim}
-                          </span>
-                          <span className="block text-[10.5px] font-bold text-slate-500 mt-0.5">
-                            {quantasAgora === 0
-                              ? 'Nenhuma missão marcada para este turno — as de cima são as mais urgentes.'
-                              : quantasAgora === 1
-                                ? '1 missão é para este turno, e ela está no topo.'
-                                : `${quantasAgora} missões são para este turno, e estão no topo.`}
-                          </span>
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-[11px] font-bold text-slate-500 leading-snug">
-                        Fora dos turnos de trabalho da campanha. As missões
-                        continuam aqui, na ordem de urgência.
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {missoesEmOrdem.map(missaoDaLista => {
-                  const escolhida = missaoDaLista.id === missaoId;
-                  const eNova = novasDePe.includes(missaoDaLista.id);
-                  // A distância só existe depois do GPS: antes dele, some.
-                  const longe = coords
-                    ? distanciaEmMetros(coords, missaoDaLista)
-                    : null;
-                  const cor = missaoDaLista.color || AZUL;
-                  /**
-                   * Onde a pessoa está em relação à missão.
-                   *
-                   * Dentro da área, distância até o centro não diz nada de
-                   * útil — o que importa é que ela já chegou. Fora dela, o
-                   * número é o que decide se dá para ir a pé.
-                   */
-                  const ondeEstou =
-                    missaoDaLista.semLocal || longe === null
-                      ? null
-                      : missaoDaLista.raio && longe <= missaoDaLista.raio
-                        ? 'você já está dentro'
-                        : longe < 30
-                          ? 'você está no ponto'
-                          : `a ${distanciaCurta(longe)} de você`;
-                  const detalhes = [
-                    missaoDaLista.semLocal
-                      ? 'Sem local marcado · faça o check-in onde você estiver'
-                      : missaoDaLista.tipo === 'area'
-                        ? 'Área de trabalho'
-                        : 'Ponto no mapa',
-                    missaoDaLista.bairro,
-                    missaoDaLista.tipoLabel,
-                    missaoDaLista.raio
-                      ? `raio de ${distanciaCurta(missaoDaLista.raio)}`
-                      : null,
-                    ondeEstou
-                  ]
-                    .filter(Boolean)
-                    .join(' · ');
-
-                  return (
-                    /*
-                     * Cartão é div, não botão: o material traz link e tocador
-                     * de áudio, e botão dentro de botão não é HTML válido --
-                     * tocar no play escolheria a missão junto.
+                {(missao ? [missao] : verTodasMissoes ? missoesEmOrdem : missoesEmOrdem.slice(0, 3)).map(
+                  missaoDaLista => {
+                    const escolhida = missaoDaLista.id === missaoId;
+                    const eNova = novasDePe.includes(missaoDaLista.id);
+                    // A distância só existe depois do GPS: antes dele, some.
+                    const longe = coords ? distanciaEmMetros(coords, missaoDaLista) : null;
+                    const cor = missaoDaLista.color || AZUL;
+                    /**
+                     * Onde a pessoa está em relação à missão.
+                     *
+                     * Dentro da área, distância até o centro não diz nada de
+                     * útil — o que importa é que ela já chegou. Fora dela, o
+                     * número é o que decide se dá para ir a pé.
                      */
-                    <div
-                      key={missaoDaLista.id}
-                      className="w-full text-left rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition-all"
-                      style={{
-                        borderColor: escolhida || eNova ? VERDE : '#E2E8F0',
-                        boxShadow:
-                          escolhida || eNova ? `0 0 0 2px ${VERDE}33` : undefined
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMissaoId(escolhida ? null : missaoDaLista.id);
-                          // Tocou: já viu. A marca de novidade sai daqui.
-                          setMissoesNovas(prev =>
-                            prev.filter(id => id !== missaoDaLista.id)
-                          );
+                    const ondeEstou =
+                      missaoDaLista.semLocal || longe === null
+                        ? null
+                        : missaoDaLista.raio && longe <= missaoDaLista.raio
+                          ? 'você já está dentro'
+                          : longe < 30
+                            ? 'você está no ponto'
+                            : `a ${distanciaCurta(longe)} de você`;
+                    const detalhes = [
+                      missaoDaLista.semLocal
+                        ? 'Sem local marcado · faça o check-in onde você estiver'
+                        : missaoDaLista.tipo === 'area'
+                          ? 'Área de trabalho'
+                          : 'Ponto no mapa',
+                      missaoDaLista.bairro,
+                      missaoDaLista.tipoLabel,
+                      missaoDaLista.raio ? `raio de ${distanciaCurta(missaoDaLista.raio)}` : null,
+                      ondeEstou
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
+
+                    return (
+                      /*
+                       * Cartão é div, não botão: o material traz link e tocador
+                       * de áudio, e botão dentro de botão não é HTML válido --
+                       * tocar no play escolheria a missão junto.
+                       */
+                      <div
+                        key={missaoDaLista.id}
+                        className="w-full text-left rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition-all"
+                        style={{
+                          borderColor: escolhida || eNova ? VERDE : '#E2E8F0',
+                          boxShadow: escolhida || eNova ? `0 0 0 2px ${VERDE}33` : undefined
                         }}
-                        className="w-full text-left flex items-start gap-2.5 cursor-pointer active:scale-[0.99] transition-transform"
                       >
-                        <span
-                          className="w-8 h-8 rounded-xl shrink-0 flex items-center justify-center"
-                          style={{ backgroundColor: `${cor}1A`, color: cor }}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            vibrar();
+                            setMissaoId(escolhida ? null : missaoDaLista.id);
+                            // Tocou: já viu. A marca de novidade sai daqui.
+                            setMissoesNovas(prev => prev.filter(id => id !== missaoDaLista.id));
+                          }}
+                          className="w-full text-left flex items-start gap-2.5 cursor-pointer active:scale-[0.99] transition-transform"
                         >
-                          {missaoDaLista.semLocal ? (
-                            <ClipboardList className="w-4 h-4" />
-                          ) : missaoDaLista.tipo === 'area' ? (
-                            <Target className="w-4 h-4" />
-                          ) : (
-                            <MapPin className="w-4 h-4" />
-                          )}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-black leading-tight" style={{ color: AZUL }}>
-                            {missaoDaLista.title}
-                          </p>
-                          {eNova && (
+                          <span
+                            className="w-9 h-9 rounded-xl shrink-0 flex items-center justify-center"
+                            style={{ backgroundColor: `${cor}1A`, color: cor }}
+                          >
+                            {missaoDaLista.semLocal ? (
+                              <ClipboardList className="w-4 h-4" />
+                            ) : missaoDaLista.tipo === 'area' ? (
+                              <Target className="w-4 h-4" />
+                            ) : (
+                              <MapPin className="w-4 h-4" />
+                            )}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13.5px] font-black leading-tight" style={{ color: AZUL }}>
+                              {missaoDaLista.title}
+                            </p>
+                            {eNova && (
+                              <span
+                                className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider text-white"
+                                style={{ backgroundColor: VERDE }}
+                              >
+                                <BellRing className="w-2.5 h-2.5" />
+                                Chegou agora
+                              </span>
+                            )}
+                            {missaoDaLista.description && (
+                              <p className="text-[12px] text-slate-500 leading-snug mt-0.5 whitespace-pre-line">
+                                {missaoDaLista.description}
+                              </p>
+                            )}
+                            {(missaoDaLista.turno || nivelDaMissao(missaoDaLista.priority)) && (
+                              <span className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                {missaoDaLista.turno && (
+                                  <EtiquetaDeTurno
+                                    turno={missaoDaLista.turno}
+                                    janelas={janelas}
+                                    mostrarHoras={false}
+                                    aoVivo
+                                    tamanho="mini"
+                                  />
+                                )}
+                                {nivelDaMissao(missaoDaLista.priority) && (
+                                  <EtiquetaDePrioridade
+                                    nivel={nivelDaMissao(missaoDaLista.priority)!}
+                                    tamanho="mini"
+                                  />
+                                )}
+                              </span>
+                            )}
+                            {detalhes && (
+                              <p className="text-[10.5px] text-slate-400 font-bold mt-1.5">
+                                {detalhes}
+                              </p>
+                            )}
+                          </div>
+                          {escolhida && (
                             <span
-                              className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider text-white"
+                              className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center ck-selo"
                               style={{ backgroundColor: VERDE }}
                             >
-                              <BellRing className="w-2.5 h-2.5" />
-                              Chegou agora
+                              <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
                             </span>
                           )}
-                          {missaoDaLista.description && (
-                            <p className="text-[11.5px] text-slate-500 leading-snug mt-0.5 whitespace-pre-line">
-                              {missaoDaLista.description}
-                            </p>
-                          )}
-                          {(missaoDaLista.turno || nivelDaMissao(missaoDaLista.priority)) && (
-                            <span className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                              {missaoDaLista.turno && (
-                                <EtiquetaDeTurno
-                                  turno={missaoDaLista.turno}
-                                  janelas={janelas}
-                                  mostrarHoras={false}
-                                  aoVivo
-                                  tamanho="mini"
-                                />
-                              )}
-                              {nivelDaMissao(missaoDaLista.priority) && (
-                                <EtiquetaDePrioridade
-                                  nivel={nivelDaMissao(missaoDaLista.priority)!}
-                                  tamanho="mini"
-                                />
-                              )}
-                            </span>
-                          )}
-                          {detalhes && (
-                            <p className="text-[10.5px] text-slate-400 font-bold mt-1.5">
-                              {detalhes}
-                            </p>
-                          )}
-                        </div>
-                        {escolhida && (
-                          <span
-                            className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center"
-                            style={{ backgroundColor: VERDE }}
-                          >
-                            <Check className="w-3 h-3 text-white stroke-[3]" />
-                          </span>
+                        </button>
+
+                        {missaoDaLista.material && missaoDaLista.material.length > 0 && (
+                          <MaterialDaMissao itens={missaoDaLista.material} />
                         )}
-                      </button>
+                      </div>
+                    );
+                  }
+                )}
 
-                      {missaoDaLista.material && missaoDaLista.material.length > 0 && (
-                        <MaterialDaMissao itens={missaoDaLista.material} />
-                      )}
-                    </div>
-                  );
-                })}
+                {/* A lista longa fica cortada: as três do topo são as que importam */}
+                {!missao && !verTodasMissoes && missoesEmOrdem.length > 3 && (
+                  <button
+                    type="button"
+                    onClick={() => setVerTodasMissoes(true)}
+                    className="w-full py-2.5 rounded-2xl border border-dashed border-slate-300 bg-white/60 text-[12px] font-black uppercase tracking-wider text-slate-500 flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                    Ver as outras {missoesEmOrdem.length - 3}
+                  </button>
+                )}
 
-                {missaoId ? (
+                {missao ? (
                   <button
                     type="button"
                     onClick={() => setMissaoId(null)}
-                    className="self-end px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400 cursor-pointer"
+                    className="self-end px-2 py-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400 cursor-pointer"
                   >
-                    Tirar a missão deste check-in
+                    Trocar de missão
                   </button>
                 ) : (
-                  <p className="text-[10.5px] text-slate-400 font-semibold text-right leading-snug">
+                  <p className="text-[11px] text-slate-400 font-semibold text-right leading-snug">
                     Toque na missão que você está fazendo. Se for outra coisa,
                     siga sem escolher — entra como registro livre.
                   </p>
@@ -1552,193 +1537,165 @@ export default function CheckInChat({
         )}
 
         {/* ETAPA 1: tipo de ação do cliente */}
-        <Fala
-          texto="Qual ação você vai fazer e qual a prioridade dela?"
-          hora={horas.abertura}
-        />
+        <Fala hora={horas.abertura} atraso={missoes.length > 0 ? 700 : 450}>
+          O que você vai fazer aqui, e qual a prioridade disso?
+        </Fala>
+
         {etapa === 1 && (
-          <div className="flex items-end gap-2 flex-row-reverse">
-            <span className="w-7 shrink-0" />
-            <div className="max-w-[80%] w-full flex flex-col items-end gap-2">
-              {tiposDisponiveis.length === 0 ? (
-                <p className="text-[12px] text-slate-400 font-semibold text-right">
-                  Nenhuma operação cadastrada para {clientName}. Crie a sua
-                  abaixo.
-                </p>
-              ) : (
-                <div className="w-full grid grid-cols-2 gap-2">
-                  {tiposDisponiveis.map(tipo => {
-                    const marcado = operacoes.some(o => o.id === tipo.id);
-                    return (
-                      <button
-                        key={tipo.id}
-                        onClick={() => alternarOperacao(tipo)}
-                        className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
-                          marcado
-                            ? 'text-white border-transparent'
-                            : 'bg-white text-slate-700 border-slate-200'
-                        }`}
-                        style={marcado ? { backgroundColor: AZUL } : undefined}
-                      >
-                        <span
-                          className="w-4 h-4 rounded-full flex items-center justify-center text-white shrink-0"
-                          style={{ backgroundColor: tipo.color }}
-                        >
-                          <OperationIcon icon={tipo.icon} size={10} />
-                        </span>
-                        {tipo.label}
-                        {marcado && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Categoria que falta: cadastro rápido, só o nome */}
-              {passoCategoria === 'fechado' && (
-                <button
-                  type="button"
-                  onClick={abrirNovaCategoria}
-                  className="px-3.5 py-2 text-[12.5px] font-bold rounded-full border border-dashed border-slate-300 bg-white text-slate-500 flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 hover:border-slate-400 hover:text-slate-700"
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                  Não achei minha categoria
-                </button>
-              )}
-
-              {passoCategoria === 'digitando' && (
-                <div className="w-full bg-white border border-slate-200 rounded-2xl p-3 shadow-sm space-y-2">
-                  <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                    Nova categoria
-                  </p>
-                  <input
-                    autoFocus
-                    value={nomeCategoria}
-                    onChange={e => setNomeCategoria(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        conferirCategoria();
-                      }
-                    }}
-                    maxLength={40}
-                    placeholder="Nome da categoria"
-                    className="w-full px-3 py-2.5 text-[13px] font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl outline-hidden focus:border-slate-400"
-                  />
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPassoCategoria('fechado')}
-                      className="flex-1 py-2.5 text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 cursor-pointer transition-all active:scale-[0.99]"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={conferirCategoria}
-                      disabled={nomeCategoria.trim().length < 2}
-                      className="flex-1 py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
-                      style={{ backgroundColor: AZUL }}
-                    >
-                      Continuar
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Conferência: o nome é lido de volta antes de virar categoria */}
-              {passoCategoria === 'conferindo' && (
-                <div className="w-full bg-white border border-slate-200 rounded-2xl p-3 shadow-sm space-y-2.5">
-                  <p className="text-[12.5px] font-semibold text-slate-600">
-                    O nome está certo?
-                  </p>
-                  <p
-                    className="text-[15px] font-black break-words"
-                    style={{ color: AZUL }}
-                  >
-                    {nomeCategoria}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPassoCategoria('digitando')}
-                      disabled={salvandoCategoria}
-                      className="flex-1 py-2.5 text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      Editar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={criarCategoria}
-                      disabled={salvandoCategoria}
-                      className="flex-1 py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
-                      style={{ backgroundColor: VERDE }}
-                    >
-                      {salvandoCategoria ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
-                      )}
-                      Está certo
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Nível de prioridade, da lista do administrador */}
-              <p className="w-full text-[11px] font-extrabold uppercase tracking-wider text-slate-400 text-right mt-1">
-                Prioridade
+          <BlocoDoIntegrante>
+            {tiposDisponiveis.length === 0 ? (
+              <p className="text-[12px] text-slate-400 font-semibold text-right">
+                Nenhuma operação cadastrada para {clientName}. Crie a sua abaixo.
               </p>
+            ) : (
               <div className="w-full grid grid-cols-2 gap-2">
-                {opcoesPrioridade.map(nivel => {
-                  const marcado = prioridade === nivel.id;
+                {tiposDisponiveis.map(tipo => {
+                  const marcado = operacoes.some(o => o.id === tipo.id);
                   return (
                     <button
-                      key={nivel.id}
-                      type="button"
-                      onClick={() => setPrioridade(nivel.id)}
-                      className={`px-3.5 py-2 text-[13px] font-semibold rounded-full shadow-sm flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 border ${
-                        marcado
-                          ? 'text-white border-transparent'
-                          : 'bg-white text-slate-700 border-slate-200'
+                      key={tipo.id}
+                      onClick={() => alternarOperacao(tipo)}
+                      className={`min-h-[46px] px-3 py-2 text-[13px] font-bold rounded-2xl shadow-sm flex items-center gap-2 cursor-pointer transition-all active:scale-95 border text-left ${
+                        marcado ? 'text-white border-transparent' : 'bg-white text-slate-700 border-slate-200'
                       }`}
-                      style={marcado ? { backgroundColor: nivel.color } : undefined}
+                      style={marcado ? { backgroundColor: AZUL } : undefined}
                     >
                       <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: marcado ? '#ffffff' : nivel.color }}
-                      />
-                      <span className="truncate">{nivel.label}</span>
-                      {marcado && <Check className="w-3.5 h-3.5 stroke-[3] ml-auto shrink-0" />}
+                        className="w-6 h-6 rounded-lg flex items-center justify-center text-white shrink-0"
+                        style={{ backgroundColor: tipo.color }}
+                      >
+                        <OperationIcon icon={tipo.icon} size={12} />
+                      </span>
+                      <span className="flex-1 min-w-0 leading-tight">{tipo.label}</span>
+                      {marcado && <Check className="w-4 h-4 stroke-[3] shrink-0" />}
                     </button>
                   );
                 })}
               </div>
+            )}
 
+            {/* Categoria que falta: cadastro rápido, só o nome */}
+            {passoCategoria === 'fechado' && (
               <button
                 type="button"
-                onClick={confirmarOperacoes}
-                disabled={operacoes.length === 0 || !prioridade}
-                className="w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
-                style={{ backgroundColor: AZUL }}
+                onClick={abrirNovaCategoria}
+                className="self-end min-h-[42px] px-3.5 py-2 text-[12.5px] font-bold rounded-2xl border border-dashed border-slate-300 bg-white text-slate-500 flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 hover:border-slate-400 hover:text-slate-700"
               >
-                Confirmar operações
+                <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                Não achei minha categoria
               </button>
-              <p className="text-[11px] text-slate-400 font-semibold text-right">
-                {operacoes.length === 0
-                  ? 'Marque pelo menos um tipo de operação.'
-                  : !prioridade
-                    ? 'Escolha o nível de prioridade.'
-                    : `${contar(operacoes.length, 'tipo marcado', 'tipos marcados')} • ${
-                        nivelEscolhido?.label
-                      }.`}
-              </p>
+            )}
+
+            {passoCategoria === 'digitando' && (
+              <div className="w-full bg-white border border-slate-200 rounded-2xl p-3 shadow-sm space-y-2">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                  Nova categoria
+                </p>
+                <input
+                  autoFocus
+                  value={nomeCategoria}
+                  onChange={e => setNomeCategoria(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      conferirCategoria();
+                    }
+                  }}
+                  maxLength={40}
+                  placeholder="Nome da categoria"
+                  className="w-full px-3 py-3 text-[14px] font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl outline-hidden focus:border-slate-400"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPassoCategoria('fechado')}
+                    className="flex-1 h-[46px] text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 cursor-pointer transition-all active:scale-[0.99]"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={conferirCategoria}
+                    disabled={nomeCategoria.trim().length < 2}
+                    className="flex-1 h-[46px] text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                    style={{ backgroundColor: AZUL }}
+                  >
+                    Continuar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Conferência: o nome é lido de volta antes de virar categoria */}
+            {passoCategoria === 'conferindo' && (
+              <div className="w-full bg-white border border-slate-200 rounded-2xl p-3 shadow-sm space-y-2.5">
+                <p className="text-[12.5px] font-semibold text-slate-600">O nome está certo?</p>
+                <p className="text-[16px] font-black break-words" style={{ color: AZUL }}>
+                  {nomeCategoria}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPassoCategoria('digitando')}
+                    disabled={salvandoCategoria}
+                    className="flex-1 h-[46px] text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={criarCategoria}
+                    disabled={salvandoCategoria}
+                    className="flex-1 h-[46px] text-white text-[12px] font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                    style={{ backgroundColor: VERDE }}
+                  >
+                    {salvandoCategoria ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    )}
+                    Está certo
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Nível de prioridade, da lista do administrador */}
+            <p className="w-full text-[10.5px] font-black uppercase tracking-widest text-slate-400 text-right mt-1">
+              Prioridade
+            </p>
+            <div className="w-full grid grid-cols-2 gap-2">
+              {opcoesPrioridade.map(nivel => {
+                const marcado = prioridade === nivel.id;
+                return (
+                  <button
+                    key={nivel.id}
+                    type="button"
+                    onClick={() => {
+                      vibrar();
+                      setPrioridade(nivel.id);
+                    }}
+                    className={`min-h-[46px] px-3 py-2 text-[13px] font-bold rounded-2xl shadow-sm flex items-center gap-2 cursor-pointer transition-all active:scale-95 border ${
+                      marcado ? 'text-white border-transparent' : 'bg-white text-slate-700 border-slate-200'
+                    }`}
+                    style={marcado ? { backgroundColor: nivel.color } : undefined}
+                  >
+                    <span
+                      className="w-3 h-3 rounded-full shrink-0"
+                      style={{ backgroundColor: marcado ? '#ffffff' : nivel.color }}
+                    />
+                    <span className="truncate flex-1 text-left">{nivel.label}</span>
+                    {marcado && <Check className="w-4 h-4 stroke-[3] shrink-0" />}
+                  </button>
+                );
+              })}
             </div>
-          </div>
+          </BlocoDoIntegrante>
         )}
+
         {operacoesConfirmadas && etapa > 1 && (
-          <Resposta hora={horas.operacoes}>
+          <Resposta hora={horas.operacoes} avatar={AvatarMembro}>
             <span className="flex flex-wrap gap-1.5">
               {nivelEscolhido && (
                 <span className="inline-flex items-center gap-1.5 bg-white/15 rounded-full pl-1 pr-2 py-0.5">
@@ -1767,36 +1724,39 @@ export default function CheckInChat({
           </Resposta>
         )}
 
-
-        {etapa >= 2 && (
-          <Fala texto="Agora confirme sua localização." hora={horas.operacoes} />
-        )}
         {/* ETAPA 2: mapa arrastável + confirmação do ponto ajustado */}
+        {etapa >= 2 && (
+          <Fala hora={horas.operacoes} atraso={400}>
+            Agora o lugar. Confira o pino e arraste se ele não estiver na porta
+            certa.
+          </Fala>
+        )}
+
         {etapa === 2 && (
-          <div className="flex items-end gap-2">
-            <span className="shrink-0">{AvatarSistema}</span>
-            <div className="max-w-[80%] w-full">
+          <div className="ck-entra flex items-end gap-2">
+            <span className="w-7 shrink-0" />
+            <div className="max-w-[88%] w-full">
               {buscandoGps && !coords ? (
-                <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm px-3.5 py-3 flex items-center gap-2 text-[12px] font-semibold text-slate-500">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-3.5 py-4 flex items-center gap-2.5 text-[12.5px] font-bold text-slate-500">
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   Capturando sua localização...
                 </div>
               ) : erroGps && !coords ? (
-                <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm px-3.5 py-3">
-                  <p className="text-[12px] font-bold text-rose-600">{erroGps}</p>
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-3.5 py-3">
+                  <p className="text-[12.5px] font-bold text-rose-600">{erroGps}</p>
                   <button
                     onClick={capturarLocal}
-                    className="mt-2 px-3 py-2 text-[11px] font-black uppercase tracking-wider text-white rounded-xl cursor-pointer"
+                    className="mt-2.5 h-[44px] px-4 text-[12px] font-black uppercase tracking-wider text-white rounded-xl cursor-pointer"
                     style={{ backgroundColor: AZUL }}
                   >
                     Tentar de novo
                   </button>
                 </div>
               ) : coords ? (
-                <div className="bg-white rounded-2xl rounded-bl-md border border-slate-100 shadow-sm overflow-hidden">
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                   {/* Um mapa de cada vez: em tela cheia este sai de cena. */}
                   {mapaCheio ? (
-                    <div className="h-[260px] bg-slate-200 flex items-center justify-center text-[12px] font-bold text-slate-500">
+                    <div className="h-[280px] bg-slate-200 flex items-center justify-center text-[12px] font-bold text-slate-500">
                       Ajustando em tela cheia...
                     </div>
                   ) : (
@@ -1805,7 +1765,7 @@ export default function CheckInChat({
                         gps={gps}
                         centroInicial={coords}
                         seguirGps={seguirGps}
-                        height={260}
+                        height={280}
                         onReady={() => setMapaPronto(true)}
                         onMoverInicio={() => setAjustando(true)}
                         onArrastarInicio={() => definirSeguirGps(false)}
@@ -1817,7 +1777,7 @@ export default function CheckInChat({
                         onClick={() => setMapaCheio(true)}
                         title="Abrir o mapa em tela cheia"
                         aria-label="Abrir o mapa em tela cheia"
-                        className="absolute z-[600] top-2.5 right-2.5 h-9 px-3 rounded-full bg-white shadow-md border border-slate-200 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-slate-600 cursor-pointer active:scale-95 transition-transform"
+                        className="absolute z-[600] top-2.5 right-2.5 h-10 px-3.5 rounded-full bg-white shadow-md border border-slate-200 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-slate-600 cursor-pointer active:scale-95 transition-transform"
                       >
                         <Maximize2 className="w-3.5 h-3.5" />
                         Tela cheia
@@ -1825,23 +1785,18 @@ export default function CheckInChat({
                     </div>
                   )}
 
-                  <div className="p-3">
-                    <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: AZUL }} />
-                      Arraste o mapa para ajustar o ponto.
-                    </p>
-
+                  <div className="px-3.5 py-3">
                     {ajustando ? (
-                      <p className="mt-2 text-[13px] font-bold text-slate-400 flex items-center gap-1.5">
+                      <p className="text-[13px] font-bold text-slate-400 flex items-center gap-1.5">
                         <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                         Atualizando endereço...
                       </p>
                     ) : (
                       <>
-                        <p className="mt-2 text-[13px] font-bold text-slate-800 leading-tight">
+                        <p className="text-[14px] font-black leading-tight" style={{ color: AZUL }}>
                           {endereco?.rua || 'Localizando endereço...'}
                         </p>
-                        <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+                        <p className="text-[11.5px] text-slate-400 font-bold mt-0.5">
                           {endereco?.resto}
                           {precisao !== null && (
                             <span className="whitespace-nowrap">
@@ -1851,36 +1806,24 @@ export default function CheckInChat({
                         </p>
                       </>
                     )}
-
-                    <p className="text-[13px] font-bold text-slate-800 mt-3">
-                      Este é o seu local atual?
-                    </p>
-
-                    <button
-                      onClick={confirmarLocal}
-                      disabled={!mapaPronto || ajustando}
-                      className="mt-2 w-full py-2.5 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
-                      style={{ backgroundColor: AZUL }}
-                    >
-                      {mapaPronto ? 'Confirmar local' : 'Carregando mapa...'}
-                    </button>
                   </div>
                 </div>
               ) : null}
             </div>
           </div>
         )}
+
         {/* Localização confirmada: cartão do ponto escolhido */}
-        {localConfirmado && coords && (
-          <div className="flex items-end gap-2 flex-row-reverse">
+        {localConfirmado && coords && etapa !== 2 && (
+          <div className="ck-entra flex items-end gap-2 flex-row-reverse">
             {AvatarMembro}
             <div
-              className="max-w-[80%] rounded-2xl rounded-br-md overflow-hidden shadow-sm"
+              className="max-w-[86%] rounded-2xl rounded-br-md overflow-hidden shadow-sm"
               style={{ backgroundColor: AZUL }}
             >
               <MiniMapa lat={coords.lat} lng={coords.lng} height={124} />
               <div className="p-3">
-                <p className="text-[13px] font-bold text-white leading-tight">{endereco?.rua}</p>
+                <p className="text-[13.5px] font-bold text-white leading-tight">{endereco?.rua}</p>
                 <p className="text-[11px] text-white/70 font-semibold mt-0.5">
                   {endereco?.resto}
                   {precisao !== null && (
@@ -1899,118 +1842,117 @@ export default function CheckInChat({
 
         {/* ETAPA 3: fotos e vídeos */}
         {etapa >= 3 && (
-          <Fala texto="Agora envie as fotos e os vídeos do local." hora={horas.local} />
+          <Fala hora={horas.local} atraso={400}>
+            Agora a prova: fotografe o que você está vendo. Vídeo também vale.
+          </Fala>
         )}
-        {etapa >= 3 && (midias.length > 0 || etapa === 3) && (
-          <CheckInMidias
+        {etapa >= 3 && (
+          <BolhaDeMidias
             itens={midias}
-            permitirGaleria={permitirGaleria}
             editavel={etapa === 3}
             avatar={AvatarMembro}
             hora={horas.midias || horas.local}
-            onAdicionar={adicionarMidias}
+            permitirGaleria={permitirGaleria}
             onRemover={removerMidia}
             onSubstituir={substituirMidia}
-            onConfirmar={confirmarMidias}
           />
         )}
 
         {/* ETAPA 4: observações */}
         {etapa >= 4 && (
-          <Fala
-            texto="Quer registrar alguma observação? Pode escrever ou gravar um áudio — esta etapa é opcional."
-            hora={horas.midias}
-          />
+          <Fala hora={horas.midias} atraso={400}>
+            Quer deixar alguma observação? Escreva ou grave um áudio aqui
+            embaixo — esta parte é opcional.
+          </Fala>
         )}
         {etapa >= 4 && (
-          <CheckInObservacoes
+          <BolhaDeObservacoes
             itens={observacoes}
             editavel={etapa === 4}
             avatar={AvatarMembro}
             hora={horas.observacoes || horas.midias}
-            onAdicionarTexto={adicionarTexto}
             onEditarTexto={editarTexto}
             onRemover={removerObservacao}
-            onGravou={enviarAudio}
             onRegravar={regravarAudio}
-            onConfirmar={confirmarObservacoes}
           />
         )}
         {etapa > 4 && obsProntas.length === 0 && (
-          <Resposta hora={horas.observacoes}>Sem observações.</Resposta>
+          <Resposta hora={horas.observacoes} avatar={AvatarMembro}>
+            Sem observações.
+          </Resposta>
         )}
 
         {/* ETAPA 5: revisão */}
         {etapa >= 5 && (
           <>
-            <Fala texto="Confira tudo antes de confirmar o check-in." hora={horas.observacoes} />
+            <Fala hora={horas.observacoes} atraso={400}>
+              É isso? Confira e confirme — depois de gravado, o comitê já vê.
+            </Fala>
+
             <div
-              className="rounded-2xl p-4 mt-1 border"
+              className="ck-entra rounded-3xl border overflow-hidden"
               style={{ backgroundColor: '#E9F8F3', borderColor: '#B6E6D7' }}
             >
-              <div className="flex items-start gap-3">
-                <div
-                  className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-                  style={{ backgroundColor: VERDE }}
-                >
-                  <Check className="w-5 h-5 text-white stroke-[3]" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-black leading-tight" style={{ color: '#05603F' }}>
-                    Revisão do check-in
-                  </p>
-                  <ul className="mt-2 space-y-2">
-                    {missao && (
-                      <li
-                        className="flex items-center gap-2 text-[12px] font-semibold"
-                        style={{ color: '#05603F' }}
-                      >
-                        <Target className="w-3.5 h-3.5 shrink-0" style={{ color: VERDE }} />
-                        <span className="flex-1 min-w-0 truncate">
-                          Missão: {missao.title}
-                        </span>
-                      </li>
-                    )}
-                    <LinhaResumo
-                      icone={<MapPin className="w-3.5 h-3.5" style={{ color: VERDE }} />}
-                      texto={endereco?.rua || 'Local confirmado'}
-                      etapaDestino={2}
-                    />
-                    <LinhaResumo
-                      icone={<Camera className="w-3.5 h-3.5" style={{ color: VERDE }} />}
-                      texto={`${contar(fotos, 'foto', 'fotos')} • ${contar(
-                        videos,
-                        'vídeo',
-                        'vídeos'
-                      )}`}
-                      etapaDestino={3}
-                    />
-                    <LinhaResumo
-                      icone={<MessageSquare className="w-3.5 h-3.5" style={{ color: VERDE }} />}
-                      texto={`${contar(textos, 'observação', 'observações')} • ${contar(
-                        audios,
-                        'áudio',
-                        'áudios'
-                      )}`}
-                      etapaDestino={4}
-                    />
-                    <LinhaResumo
-                      icone={<Flag className="w-3.5 h-3.5" style={{ color: VERDE }} />}
-                      texto={`${operacoes.map(o => o.label).join(', ') || 'Nenhuma operação'}${
-                        nivelEscolhido ? ` • ${nivelEscolhido.label}` : ''
-                      }`}
-                      etapaDestino={1}
-                    />
-                    <li
-                      className="flex items-center gap-2 text-[12px] font-semibold"
-                      style={{ color: '#05603F' }}
-                    >
-                      <Clock className="w-3.5 h-3.5 shrink-0" style={{ color: VERDE }} />
-                      Horário: {horas.local || horaAgora()}
-                    </li>
-                  </ul>
-                </div>
+              <div className="px-4 pt-3.5 pb-1 flex items-center gap-2">
+                <span className="text-[10.5px] font-black uppercase tracking-widest" style={{ color: '#05603F' }}>
+                  Ficha do check-in
+                </span>
+                <span className="flex-1 h-px" style={{ backgroundColor: '#B6E6D7' }} />
+                <span className="text-[10.5px] font-black tabular-nums" style={{ color: '#05603F' }}>
+                  {horas.local || horaAgora()}
+                </span>
               </div>
+
+              <ul className="px-4 pb-2 divide-y" style={{ borderColor: '#CDEDE1' }}>
+                {missao && (
+                  <li className="flex items-center gap-2.5 py-2.5">
+                    <span
+                      className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 text-white"
+                      style={{ backgroundColor: VERDE }}
+                    >
+                      <Target className="w-3.5 h-3.5" />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[9.5px] font-black uppercase tracking-widest text-emerald-700/60">
+                        Missão do comitê
+                      </span>
+                      <span className="block text-[12.5px] font-bold leading-snug" style={{ color: '#05603F' }}>
+                        {missao.title}
+                      </span>
+                    </span>
+                  </li>
+                )}
+                <LinhaResumo
+                  icone={<Flag className="w-3.5 h-3.5" />}
+                  rotulo="O que"
+                  texto={`${operacoes.map(o => o.label).join(', ') || 'Nenhuma operação'}${
+                    nivelEscolhido ? ` · ${nivelEscolhido.label}` : ''
+                  }`}
+                  etapaDestino={1}
+                />
+                <LinhaResumo
+                  icone={<MapPin className="w-3.5 h-3.5" />}
+                  rotulo="Onde"
+                  texto={endereco?.rua || 'Local confirmado'}
+                  etapaDestino={2}
+                />
+                <LinhaResumo
+                  icone={<Camera className="w-3.5 h-3.5" />}
+                  rotulo="Provas"
+                  texto={`${contar(fotos, 'foto', 'fotos')} · ${contar(videos, 'vídeo', 'vídeos')}`}
+                  etapaDestino={3}
+                />
+                <LinhaResumo
+                  icone={<MessageSquare className="w-3.5 h-3.5" />}
+                  rotulo="Observações"
+                  texto={
+                    textos + audios === 0
+                      ? 'Nenhuma'
+                      : `${contar(textos, 'texto', 'textos')} · ${contar(audios, 'áudio', 'áudios')}`
+                  }
+                  etapaDestino={4}
+                />
+              </ul>
             </div>
           </>
         )}
@@ -2018,45 +1960,136 @@ export default function CheckInChat({
         <div ref={fimRef} />
       </div>
 
-      {/* CONFIRMAÇÃO FINAL */}
-      {etapa >= 5 && (
-        <div className="p-3 bg-white border-t border-slate-100 shrink-0">
-          <button
-            onClick={confirmar}
-            disabled={salvando || !pronto}
-            className="w-full py-3.5 text-white text-[13px] font-black uppercase tracking-wider rounded-2xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-60"
-            style={{ backgroundColor: AZUL }}
+      {/* A DOCA: a ação da etapa, sempre no mesmo lugar */}
+      <Doca chave={etapa}>
+        {etapa === 1 && (
+          <BotaoPrincipal
+            onClick={confirmarOperacoes}
+            disabled={operacoes.length === 0 || !prioridade}
+            motivo={
+              operacoes.length === 0
+                ? 'Marque pelo menos um tipo de operação.'
+                : !prioridade
+                  ? 'Falta escolher o nível de prioridade.'
+                  : `${contar(operacoes.length, 'tipo marcado', 'tipos marcados')} · ${nivelEscolhido?.label}`
+            }
           >
-            {salvando ? (
-              <>
+            Confirmar ação
+          </BotaoPrincipal>
+        )}
+
+        {/* A tela cheia mora no canto do mapa, onde o dedo já está arrastando:
+            repetir o atalho aqui embaixo só roubava altura do botão que fecha
+            a etapa. */}
+        {etapa === 2 && (
+          <>
+            <BotaoPrincipal
+              onClick={confirmarLocal}
+              disabled={!coords || !mapaPronto || ajustando}
+              motivo={
+                !coords
+                  ? 'Esperando o GPS achar você.'
+                  : ajustando
+                    ? 'Atualizando o endereço do ponto...'
+                    : !mapaPronto
+                      ? 'Carregando o mapa...'
+                      : endereco?.rua || 'Ponto capturado por GPS'
+              }
+              icone={<MapPin className="w-4 h-4" />}
+            >
+              Confirmar local
+            </BotaoPrincipal>
+          </>
+        )}
+
+        {etapa === 3 && (
+          <>
+            <ControlesDeMidia
+              permitirGaleria={permitirGaleria}
+              online={online}
+              onArquivos={adicionarMidias}
+            />
+            <BotaoPrincipal
+              onClick={confirmarMidias}
+              disabled={midiasProntas.length === 0 || enviandoMidia}
+              motivo={
+                enviandoMidia
+                  ? 'Enviando os arquivos...'
+                  : midiasProntas.length === 0
+                    ? 'Envie pelo menos uma foto ou vídeo.'
+                    : `${contar(fotos, 'foto', 'fotos')} · ${contar(videos, 'vídeo', 'vídeos')} — dá para mandar mais.`
+              }
+            >
+              {enviandoMidia ? 'Enviando...' : 'Confirmar fotos'}
+            </BotaoPrincipal>
+          </>
+        )}
+
+        {etapa === 4 && (
+          <>
+            <CompositorDeObservacao
+              online={online}
+              onTexto={adicionarTexto}
+              onAudio={enviarAudio}
+            />
+            <BotaoPrincipal
+              onClick={confirmarObservacoes}
+              disabled={enviandoAudio}
+              motivo={
+                enviandoAudio
+                  ? 'Enviando o áudio...'
+                  : obsProntas.length === 0
+                    ? 'Esta parte é opcional.'
+                    : `${contar(textos, 'texto', 'textos')} · ${contar(audios, 'áudio', 'áudios')}`
+              }
+            >
+              {obsProntas.length === 0 ? 'Seguir sem observação' : 'Confirmar observações'}
+            </BotaoPrincipal>
+          </>
+        )}
+
+        {etapa >= 5 && (
+          <BotaoPrincipal
+            onClick={confirmar}
+            disabled={!pronto}
+            carregando={salvando}
+            cor={VERDE}
+            icone={
+              salvando ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Salvando...
-              </>
-            ) : (
-              'Confirmar check-in'
-            )}
-          </button>
-        </div>
-      )}
+              ) : (
+                <Check className="w-4 h-4 stroke-[3]" />
+              )
+            }
+            motivo={
+              salvando
+                ? 'Gravando o check-in...'
+                : missao
+                  ? `Vai como missão: ${missao.title}`
+                  : 'Vai como registro livre.'
+            }
+          >
+            {salvando ? 'Gravando...' : 'Confirmar check-in'}
+          </BotaoPrincipal>
+        )}
+      </Doca>
 
       {/* MAPA EM TELA CHEIA: o mesmo ajuste, com a tela inteira para mirar */}
       {mapaCheio && coords && (
         <div className="fixed inset-0 z-[4000] bg-white flex flex-col">
           <header
             className="shrink-0 px-3 py-2.5 flex items-center gap-2 text-white"
-            style={{ backgroundColor: AZUL }}
+            style={{ backgroundColor: AZUL, paddingTop: 'max(0.625rem, env(safe-area-inset-top))' }}
           >
             <button
               type="button"
               onClick={() => setMapaCheio(false)}
               aria-label="Sair da tela cheia"
-              className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 cursor-pointer active:scale-95 transition-all"
+              className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 cursor-pointer active:scale-95 transition-all"
             >
               <X className="w-5 h-5" />
             </button>
-            <h2 className="text-[14px] font-bold tracking-tight">
-              Posicione o seu ponto
-            </h2>
+            <h2 className="text-[14.5px] font-bold tracking-tight">Posicione o seu ponto</h2>
           </header>
 
           <div className="flex-1 min-h-0 relative">
@@ -2073,7 +2106,10 @@ export default function CheckInChat({
             />
           </div>
 
-          <div className="shrink-0 p-3 bg-white border-t border-slate-100">
+          <div
+            className="shrink-0 p-3 bg-white border-t border-slate-100"
+            style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+          >
             <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: AZUL }} />
               Arraste o mapa para ajustar o ponto.
@@ -2086,7 +2122,7 @@ export default function CheckInChat({
               </p>
             ) : (
               <>
-                <p className="mt-1.5 text-[13px] font-bold text-slate-800 leading-tight">
+                <p className="mt-1.5 text-[13.5px] font-bold text-slate-800 leading-tight">
                   {endereco?.rua || 'Localizando endereço...'}
                 </p>
                 <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
@@ -2104,7 +2140,7 @@ export default function CheckInChat({
               <button
                 type="button"
                 onClick={() => setMapaCheio(false)}
-                className="flex-1 py-3 text-[12px] font-black uppercase tracking-wider rounded-xl border border-slate-200 text-slate-500 cursor-pointer transition-all active:scale-[0.99]"
+                className="flex-1 h-[52px] text-[12px] font-black uppercase tracking-wider rounded-2xl border border-slate-200 text-slate-500 cursor-pointer transition-all active:scale-[0.99]"
               >
                 Voltar
               </button>
@@ -2112,11 +2148,12 @@ export default function CheckInChat({
                 type="button"
                 onClick={() => {
                   // Confirmar daqui fecha a tela cheia e segue o fio normalmente.
+                  vibrar();
                   confirmarLocal();
                   setMapaCheio(false);
                 }}
                 disabled={!mapaPronto || ajustando}
-                className="flex-[2] py-3 text-white text-[12px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
+                className="flex-[2] h-[52px] text-white text-[12px] font-black uppercase tracking-wider rounded-2xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
                 style={{ backgroundColor: AZUL }}
               >
                 {mapaPronto ? 'Confirmar local' : 'Carregando mapa...'}
@@ -2125,6 +2162,23 @@ export default function CheckInChat({
           </div>
         </div>
       )}
+
+      <PainelDoDia
+        aberto={diaAberto}
+        onFechar={() => setDiaAberto(false)}
+        metas={metas}
+        pessoaId={member?.id || ''}
+        meusCheckIns={meusCheckIns}
+        janelas={janelas}
+        turnoAgora={turnoAgora}
+      />
+
+      <FolhaDeSaida
+        aberto={perguntandoSaida}
+        perdas={perdasAoSair}
+        onFicar={() => setPerguntandoSaida(false)}
+        onSair={descartarESair}
+      />
     </div>
   );
 }
