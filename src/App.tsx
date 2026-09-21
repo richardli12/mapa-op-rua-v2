@@ -14401,6 +14401,7 @@ export default function App() {
           }
           escolas={escolas}
           escolasVisiveis={escolasLigadas}
+          escolaEmFoco={escolaAberta?.codigoInep || null}
           onEscolaSelecionada={(escola) => setEscolaAberta(escola)}
           tempPlacementRadius={Number(areaRadius) || 0}
           onTempRadiusChange={(metros) => setAreaRadius(metros)}

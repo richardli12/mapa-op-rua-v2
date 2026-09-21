@@ -267,6 +267,14 @@ interface MapContainerProps {
   escolasVisiveis?: boolean;
   /** Clique numa escola: quem mostra a ficha e a tela de cima. */
   onEscolaSelecionada?: (escola: Escola) => void;
+  /**
+   * A escola com a ficha aberta, pelo código INEP.
+   *
+   * O mapa precisa saber qual é para responder ao clique onde o clique
+   * aconteceu: a ficha abre a quatrocentos pixels dali, e sem destaque no
+   * pino quem clicou perde de vista qual dos oitenta e dois era.
+   */
+  escolaEmFoco?: string | null;
   selectedId: string | null;
   onSelectItem: (id: string, type: 'area' | 'pin') => void;
   clickToPickCoords: boolean;
@@ -549,6 +557,7 @@ export default function MapContainer({
   checkIns,
   escolas,
   escolasVisiveis = false,
+  escolaEmFoco,
   onEscolaSelecionada,
   selectedId,
   onSelectItem,
@@ -2053,6 +2062,35 @@ export default function MapContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [circuloDeBusca]);
 
+  /**
+   * O pino escolhido nao pode ficar atras da ficha.
+   *
+   * A ficha da escola abre numa faixa de 420px colada na direita. Clicar numa
+   * escola que estava naquela faixa destacava um pino que a propria ficha
+   * acabara de cobrir -- o destaque existia e ninguem via. Aqui o mapa anda o
+   * minimo para tirar o pino de baixo dela, e so quando precisa: `panInside`
+   * nao mexe em nada se o ponto ja estiver na area livre.
+   *
+   * Em tela estreita a ficha ocupa tudo, entao nao ha para onde andar: mover
+   * o mapa por baixo de uma ficha que cobre a tela inteira e gasto de
+   * movimento que ninguem ve.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !escolaEmFoco || !escolasVisiveis) return;
+    const escola = (escolas || []).find(e => e.codigoInep === escolaEmFoco);
+    if (!escola || escola.latitude === null || escola.longitude === null) return;
+    if (window.innerWidth < 640) return;
+
+    map.panInside(L.latLng(escola.latitude, escola.longitude), {
+      paddingTopLeft: [80, 80],
+      paddingBottomRight: [460, 60],
+      animate: true,
+      duration: 0.4
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [escolaEmFoco]);
+
   // Camada de escolas do municipio: so desenha quando ligada no dock.
   useEffect(() => {
     const grupo = escolasGroupRef.current;
@@ -2075,33 +2113,56 @@ export default function MapContainer({
       if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const cor = corDaDependencia(escola.dependencia);
       const parada = escola.situacao ? escola.situacao !== 'EM ATIVIDADE' : false;
+      const emFoco = escolaEmFoco === escola.codigoInep;
 
       /*
        * O tamanho conta o porte da escola sem precisar de rotulo -- e conta
        * em GENTE, nao em vinculo: aluno que faz Fundamental e AEE e uma
        * pessoa so na porta da escola.
+       *
+       * A escolhida cresce oito pixels. Nao e enfeite: entre dezenas de
+       * discos parecidos, diferenca de tamanho e o que o olho acha primeiro,
+       * antes de ler cor ou anel.
        */
       const alunos = escola.alunosUnicos ?? escola.matriculas ?? 0;
-      const tamanho = alunos >= 1000 ? 38 : alunos >= 400 ? 32 : 26;
+      const base = alunos >= 1000 ? 38 : alunos >= 400 ? 32 : 26;
+      const tamanho = emFoco ? base + 8 : base;
 
+      const capelo =
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#fff" ` +
+        `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" ` +
+        `width="${Math.round(tamanho * 0.5)}" height="${Math.round(tamanho * 0.5)}">` +
+        '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>' +
+        '<path d="M6 12v5c3 3 9 3 12 0v-5"/>' +
+        '</svg>';
+
+      /*
+       * As ondas so existem no pino escolhido, e so no HTML dele.
+       *
+       * Deixa-las sempre no desenho, apagadas por CSS, poria oitenta e duas
+       * animacoes paradas na tela -- cada uma custando composicao ao navegador
+       * de quem esta no celular, em campo, para nao mostrar nada.
+       */
       const icone = L.divIcon({
-        className: '',
+        className: `pino-escola${emFoco ? ' pino-escola--foco' : ''}`,
         html:
-          `<span style="display:flex;align-items:center;justify-content:center;` +
-          `width:${tamanho}px;height:${tamanho}px;border-radius:50%;background:${cor};` +
-          `border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);` +
-          `${parada ? 'opacity:.45;' : ''}">` +
-          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#fff" ` +
-          `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" ` +
-          `width="${Math.round(tamanho * 0.5)}" height="${Math.round(tamanho * 0.5)}">` +
-          '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>' +
-          '<path d="M6 12v5c3 3 9 3 12 0v-5"/>' +
-          '</svg></span>',
+          `<span style="--tamanho:${tamanho}px;--cor:${cor};display:block;` +
+          `width:${tamanho}px;height:${tamanho}px;${parada ? 'opacity:.45;' : ''}">` +
+          (emFoco
+            ? '<span class="pino-escola__onda"></span>' +
+              '<span class="pino-escola__onda pino-escola__onda--2"></span>'
+            : '') +
+          `<span class="pino-escola__corpo"><span class="pino-escola__icone">${capelo}</span></span>` +
+          '</span>',
         iconSize: [tamanho, tamanho],
         iconAnchor: [tamanho / 2, tamanho / 2]
       });
 
-      const marcador = L.marker([lat, lng], { icon: icone });
+      // Por cima de todas: pino destacado atras de outro nao destaca nada.
+      const marcador = L.marker([lat, lng], {
+        icon: icone,
+        zIndexOffset: emFoco ? 1200 : 0
+      });
       marcador.bindTooltip(
         `<b>${escola.nome}</b><br>` +
           [escola.dependencia || '', escola.zona || ''].filter(Boolean).join(' &middot; ') +
@@ -2128,7 +2189,7 @@ export default function MapContainer({
       }
     }
     camadaEscolasLigadaRef.current = escolasVisiveis;
-  }, [escolas, escolasVisiveis]);
+  }, [escolas, escolasVisiveis, escolaEmFoco]);
 
   /**
    * Colocar uma área é um gesto só: aperta no centro, arrasta, solta.
