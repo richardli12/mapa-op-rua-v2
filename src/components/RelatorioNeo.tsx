@@ -245,8 +245,16 @@ export default function RelatorioNeo({
     setGerandoPdf(true);
     setErroDoPdf(null);
     try {
+      /*
+       * html2canvas-pro, e não o html2canvas.
+       *
+       * O original parou em 2022 e não conhece as funções de cor modernas. O
+       * Tailwind 4, que este sistema usa, escreve as 91 cores da folha em
+       * oklch() -- e a montagem do PDF morria na primeira delas, com
+       * "unsupported color function". O fork mantido lê oklch, lab e color().
+       */
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import('html2canvas'),
+        import('html2canvas-pro'),
         import('jspdf')
       ]);
 
@@ -255,6 +263,7 @@ export default function RelatorioNeo({
         // As imagens vêm de outro domínio; sem isto o canvas fica marcado como
         // contaminado e o navegador recusa transformá-lo em arquivo.
         useCORS: true,
+        imageTimeout: 20000,
         backgroundColor: '#ffffff',
         logging: false
       });
@@ -339,8 +348,19 @@ export default function RelatorioNeo({
       pdf.save(`${nome}.pdf`);
     } catch (err: any) {
       console.error('Erro ao gerar o PDF:', err);
+      /*
+       * O erro de verdade vai para a tela.
+       *
+       * Aqui se mostrava sempre a mesma frase, chutando que a culpa era de
+       * alguma imagem -- e a causa real era outra, dita pelo navegador e
+       * jogada fora aqui. Quem for consertar precisa do que quebrou, não do
+       * nosso palpite sobre o que pode ter quebrado.
+       */
+      const motivo = String(err?.message || err || '');
       setErroDoPdf(
-        'Não deu para montar o PDF. Se alguma imagem do relatório não abrir, é ela que impede.'
+        /SecurityError|tainted/i.test(motivo)
+          ? 'Não deu para montar o PDF: o navegador bloqueou a leitura de uma das imagens do relatório.'
+          : `Não deu para montar o PDF. ${motivo}`
       );
     } finally {
       setGerandoPdf(false);
