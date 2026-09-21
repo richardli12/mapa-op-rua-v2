@@ -66,6 +66,15 @@ export interface PanfletagemArea {
      * e o resultado.
      */
     narrativas?: MaterialDeApoio[];
+    /**
+     * O segundo tópico das ações táticas.
+     *
+     * `narrativas` é o feedback da missão — o que saiu da ordem que foi dada.
+     * Este é o orgânico: o que apareceu sem ordem nenhuma e serve à mesma
+     * campanha. Duas listas, porque na hora de montar a peça a pergunta é
+     * sempre "isto veio da missão ou veio sozinho?".
+     */
+    narrativasOrganicas?: MaterialDeApoio[];
     /** Links das postagens que saíram desta missão. */
     acoesLinks?: LinkDeAcao[];
   } & QuandoDaMissao;
@@ -99,6 +108,8 @@ export interface CampaignPin {
     material?: MaterialDeApoio[];
     /** Ver `narrativas` na área: o que a missão produziu, não o que ela manda. */
     narrativas?: MaterialDeApoio[];
+    /** Ver `narrativasOrganicas` na área: o que apareceu sem ordem. */
+    narrativasOrganicas?: MaterialDeApoio[];
     /** Links das postagens que saíram desta missão. */
     acoesLinks?: LinkDeAcao[];
   } & QuandoDaMissao;

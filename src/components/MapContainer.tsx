@@ -415,7 +415,9 @@ interface MapContainerProps {
    */
   onNarrativasDaMissao?: (
     missao: { id: string; tipo: 'pin' | 'area' },
-    narrativas: MaterialDeApoio[]
+    narrativas: MaterialDeApoio[],
+    /** Em qual tópico das ações táticas a lista entra. */
+    topico: 'missao' | 'organico'
   ) => void;
   /** Guarda os links das postagens que saíram da missão. */
   onLinksDaMissao?: (
@@ -710,6 +712,8 @@ export default function MapContainer({
    * o que terminou é entregue a quem grava.
    */
   const [narrativasNaTela, setNarrativasNaTela] = useState<ItemMaterial[]>([]);
+  /** O mesmo, para o tópico orgânico. */
+  const [organicasNaTela, setOrganicasNaTela] = useState<ItemMaterial[]>([]);
   /** O link sendo digitado, e o apelido opcional dele. */
   const [linkNovo, setLinkNovo] = useState('');
   const [tituloDoLinkNovo, setTituloDoLinkNovo] = useState('');
@@ -1424,6 +1428,7 @@ export default function MapContainer({
         prioridade: pin.position?.priority,
         material: (pin.position?.material || []) as MaterialDeApoio[],
         narrativas: (pin.position?.narrativas || []) as MaterialDeApoio[],
+        organicas: (pin.position?.narrativasOrganicas || []) as MaterialDeApoio[],
         links: (pin.position?.acoesLinks || []) as LinkDeAcao[],
         pessoas: equipeDaMissao(ids),
         totalDesignados: ids.length,
@@ -1452,6 +1457,7 @@ export default function MapContainer({
       prioridade: area.center?.priority,
       material: (area.center?.material || []) as MaterialDeApoio[],
       narrativas: (area.center?.narrativas || []) as MaterialDeApoio[],
+      organicas: (area.center?.narrativasOrganicas || []) as MaterialDeApoio[],
       links: (area.center?.acoesLinks || []) as LinkDeAcao[],
       pessoas: equipeDaMissao(ids),
       totalDesignados: ids.length,
@@ -1473,16 +1479,18 @@ export default function MapContainer({
       missaoAbertaRef?.tipo === 'pin'
         ? pins.find((p) => p.id === missaoAbertaRef.id)?.position
         : areas.find((a) => a.id === missaoAbertaRef?.id)?.center;
-    const guardadas = ((missao as any)?.narrativas || []) as MaterialDeApoio[];
-    setLinkNovo('');
-    setTituloDoLinkNovo('');
-    setNarrativasNaTela(
-      guardadas.map((item) => ({
+    const paraTela = (lista: MaterialDeApoio[]) =>
+      lista.map((item) => ({
         ...item,
         estado: 'pronto' as const,
         progresso: 100,
         jaSalvo: true
-      }))
+      }));
+    setLinkNovo('');
+    setTituloDoLinkNovo('');
+    setNarrativasNaTela(paraTela(((missao as any)?.narrativas || []) as MaterialDeApoio[]));
+    setOrganicasNaTela(
+      paraTela(((missao as any)?.narrativasOrganicas || []) as MaterialDeApoio[])
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missaoAbertaRef?.id, missaoAbertaRef?.tipo]);
@@ -3644,10 +3652,14 @@ export default function MapContainer({
                         os links do que foi publicado.
                       </p>
                     </div>
-                    {(missaoAberta.narrativas.length > 0 ||
-                      missaoAberta.links.length > 0) && (
+                    {missaoAberta.narrativas.length +
+                      missaoAberta.organicas.length +
+                      missaoAberta.links.length >
+                      0 && (
                       <span className="ml-auto shrink-0 text-[10px] font-black text-slate-400 tabular-nums">
-                        {missaoAberta.narrativas.length + missaoAberta.links.length}
+                        {missaoAberta.narrativas.length +
+                          missaoAberta.organicas.length +
+                          missaoAberta.links.length}
                       </span>
                     )}
                   </div>
@@ -3770,27 +3782,72 @@ export default function MapContainer({
                     </div>
                   )}
 
-                  <div className="border-t border-slate-200/70 pt-3">
-                    <EditorDeMaterial
-                      itens={narrativasNaTela}
-                      onMudar={(itens) => {
-                        setNarrativasNaTela(itens);
-                        // Só o que terminou de subir vira dado da missão: item a
-                        // meio caminho gravado agora viraria link quebrado.
-                        onNarrativasDaMissao(
-                          { id: missaoAberta.id, tipo: missaoAberta.tipo },
-                          itens
-                            .filter((i) => i.estado === 'pronto')
-                            .map(({ estado, progresso, erro, previa, jaSalvo, ...limpo }) => limpo)
-                        );
-                      }}
-                      notificar={notificar || (() => {})}
-                      ligado
-                      galeria
-                      rotulo="Arquivos da ação"
-                      vazio="Foto, vídeo ou áudio do que foi feito. É o que prova a ação quando alguém perguntar."
-                    />
-                  </div>
+                  {/*
+                    DOIS TÓPICOS, PORQUE SÃO DUAS ORIGENS.
+
+                    O que saiu da ordem dada e o que apareceu sozinho servem à
+                    mesma campanha, mas não valem a mesma coisa: na hora de
+                    montar a peça a pergunta é sempre "isto veio da missão ou
+                    veio orgânico?". Num monte só, respondê-la exigiria lembrar
+                    de cada arquivo.
+                  */}
+                  {[
+                    {
+                      topico: 'missao' as const,
+                      titulo: 'Feedback Missão',
+                      ajuda: 'O que saiu da ordem que foi dada.',
+                      itens: narrativasNaTela,
+                      aoMudar: setNarrativasNaTela,
+                      vazio:
+                        'Foto, vídeo ou áudio do que foi feito na missão. É o que prova a ação quando alguém perguntar.'
+                    },
+                    {
+                      topico: 'organico' as const,
+                      titulo: 'Feedback Orgânico',
+                      ajuda: 'O que apareceu sem ordem nenhuma.',
+                      itens: organicasNaTela,
+                      aoMudar: setOrganicasNaTela,
+                      vazio:
+                        'O que chegou por fora: print de grupo, vídeo de morador, áudio que alguém mandou.'
+                    }
+                  ].map((bloco) => (
+                    <div
+                      key={bloco.topico}
+                      className="border-t border-slate-200/70 pt-3"
+                    >
+                      <div className="flex items-baseline gap-2 mb-2">
+                        <p className="text-[11.5px] font-black text-[#0D233A]">
+                          {bloco.titulo}
+                        </p>
+                        <p className="text-[10.5px] font-semibold text-slate-400 truncate">
+                          {bloco.ajuda}
+                        </p>
+                      </div>
+                      <EditorDeMaterial
+                        itens={bloco.itens}
+                        onMudar={(itens) => {
+                          bloco.aoMudar(itens);
+                          // Só o que terminou de subir vira dado da missão: item
+                          // a meio caminho gravado agora viraria link quebrado.
+                          onNarrativasDaMissao(
+                            { id: missaoAberta.id, tipo: missaoAberta.tipo },
+                            itens
+                              .filter((i) => i.estado === 'pronto')
+                              .map(
+                                ({ estado, progresso, erro, previa, jaSalvo, ...limpo }) =>
+                                  limpo
+                              ),
+                            bloco.topico
+                          );
+                        }}
+                        notificar={notificar || (() => {})}
+                        ligado
+                        galeria
+                        rotulo="Arquivos"
+                        vazio={bloco.vazio}
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
