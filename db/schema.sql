@@ -338,6 +338,10 @@ create unique index if not exists idx_member_devices_unico
 -- Chaves em uso:
 --   redirect_sem_link  - para onde vai quem abre o dominio sem link
 --   midia_galeria      - 'sim' libera a galeria do celular no check-in
+--   metas_<clienteId>  - metas da equipe daquele cliente, em JSON:
+--                        { cadencia, de, ate, padrao: {manha,tarde,noite},
+--                          porPessoa: { <memberId>: {manha,tarde,noite} } }
+--                        A meta padrao vale para quem nao tem meta propria.
 --   turnos_missao      - JSON com as faixas de manha, tarde e noite:
 --                        [{"id":"manha","inicio":"08:30","fim":"11:59"}, ...]
 --                        O fim entra no turno, e fim menor que inicio quer
