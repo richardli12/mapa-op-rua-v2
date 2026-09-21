@@ -3927,13 +3927,34 @@ export default function MapContainer({
                 <Pencil className="w-3.5 h-3.5 stroke-[2.5]" />
                 Editar missão
               </button>
-              <button
-                type="button"
-                onClick={() => setMissaoAbertaRef(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-extrabold cursor-pointer transition-colors"
-              >
-                Fechar
-              </button>
+              <div className="flex items-center gap-2">
+                {/*
+                  O relatório ainda não existe, e o botão diz isso.
+
+                  Ele fica porque o lugar dele é aqui — depois de ler a missão
+                  inteira é que se quer o documento dela. Some no lugar de
+                  prometer: tocar avisa que está em manutenção, em vez de abrir
+                  uma tela vazia ou não fazer nada, que é o que ensina a
+                  desconfiar do botão seguinte.
+                */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    notificar?.('Gerar Relatório: em manutenção.', 'info')
+                  }
+                  className="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer transition-all flex items-center gap-2 active:scale-95"
+                >
+                  <FileText className="w-3.5 h-3.5 stroke-[2.5] text-slate-400" />
+                  Gerar Relatório
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMissaoAbertaRef(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-extrabold cursor-pointer transition-colors"
+                >
+                  Fechar
+                </button>
+              </div>
             </div>
           </div>
         </div>
