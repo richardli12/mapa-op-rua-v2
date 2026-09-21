@@ -3939,6 +3939,46 @@ export default function App() {
   };
 
   /**
+   * Guarda os links das postagens de uma missão.
+   *
+   * Mesmo caminho das narrativas, e de propósito: é o mesmo jsonb, a mesma
+   * volta atrás quando o banco recusa, e um lugar só para entender como a
+   * missão guarda o que produziu.
+   */
+  const salvarLinksDaMissao = (
+    missao: { id: string; tipo: "pin" | "area" },
+    acoesLinks: any[],
+  ) => {
+    if (missao.tipo === "pin") {
+      const antes = pins.find((p) => p.id === missao.id);
+      if (!antes) return;
+      const depois = { ...antes, position: { ...antes.position, acoesLinks } };
+      setPins((prev) => prev.map((p) => (p.id === missao.id ? depois : p)));
+      if (isDatabaseConfigured) {
+        DatabaseService.upsertPin(depois).then((res) => {
+          if (!res.success) {
+            setPins((prev) => prev.map((p) => (p.id === missao.id ? antes : p)));
+            triggerNotification(`Banco de dados: ${res.error}`, "error");
+          }
+        });
+      }
+      return;
+    }
+    const antes = areas.find((a) => a.id === missao.id);
+    if (!antes) return;
+    const depois = { ...antes, center: { ...antes.center, acoesLinks } };
+    setAreas((prev) => prev.map((a) => (a.id === missao.id ? depois : a)));
+    if (isDatabaseConfigured) {
+      DatabaseService.upsertArea(depois).then((res) => {
+        if (!res.success) {
+          setAreas((prev) => prev.map((a) => (a.id === missao.id ? antes : a)));
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+        }
+      });
+    }
+  };
+
+  /**
    * Estrela do check-in: destaca o registro na lista e no mapa.
    *
    * O painel muda na hora e o banco recebe a mesma marca em seguida; se o
@@ -14822,6 +14862,7 @@ export default function App() {
           onDeleteCheckIn={excluirCheckIn}
           onVincularCheckInAMissao={vincularCheckInAMissao}
           onNarrativasDaMissao={salvarNarrativasDaMissao}
+          onLinksDaMissao={salvarLinksDaMissao}
           notificar={triggerNotification}
           onSelectItem={(id, type) => {
             setSelectedId(id);

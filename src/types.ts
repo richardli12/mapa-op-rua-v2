@@ -19,6 +19,21 @@ export interface MaterialDeApoio {
 }
 
 /**
+ * A postagem que saiu da missão.
+ *
+ * O arquivo prova que a ação aconteceu; o link prova que ela foi publicada —
+ * e é o link que se manda para o grupo, que se abre para ver o alcance e que
+ * some do histórico se ninguém o guardar. Mora no mesmo jsonb do resto.
+ */
+export interface LinkDeAcao {
+  id: string;
+  url: string;
+  /** O que a pessoa escreveu para lembrar o que é aquilo. Pode faltar. */
+  titulo?: string;
+  criadoEm: string;
+}
+
+/**
  * Quando, dentro do dia, e o quanto importa.
  *
  * Mora no mesmo jsonb do material, pelo mesmo motivo: a missão nasce com
@@ -51,6 +66,8 @@ export interface PanfletagemArea {
      * e o resultado.
      */
     narrativas?: MaterialDeApoio[];
+    /** Links das postagens que saíram desta missão. */
+    acoesLinks?: LinkDeAcao[];
   } & QuandoDaMissao;
   radius: number; // in meters (default 500)
   color: string; // Hex color for circle
@@ -82,6 +99,8 @@ export interface CampaignPin {
     material?: MaterialDeApoio[];
     /** Ver `narrativas` na área: o que a missão produziu, não o que ela manda. */
     narrativas?: MaterialDeApoio[];
+    /** Links das postagens que saíram desta missão. */
+    acoesLinks?: LinkDeAcao[];
   } & QuandoDaMissao;
   color: string;
   /** Id do Tipo de Operação (ver OperationType). Fica solto de propósito: os tipos são cadastrados pelo próprio usuário. */
