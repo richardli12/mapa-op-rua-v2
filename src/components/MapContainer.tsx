@@ -7,6 +7,7 @@ import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, corDaDependencia, getCheckInPriority } from '../types';
+import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
 import {
   VisorDoMaterial,
   formatoDoMaterial,
@@ -406,6 +407,18 @@ interface MapContainerProps {
     checkIn: any,
     missao: { id: string; titulo: string } | null
   ) => void;
+  /**
+   * Guarda o controle de narrativas de uma missão já criada.
+   *
+   * Quem grava é o painel, dono da lista e do banco; a ficha só escolhe os
+   * arquivos — como no vínculo do check-in.
+   */
+  onNarrativasDaMissao?: (
+    missao: { id: string; tipo: 'pin' | 'area' },
+    narrativas: MaterialDeApoio[]
+  ) => void;
+  /** Avisos na tela, para o editor de arquivos poder reclamar de um envio. */
+  notificar?: (texto: string, tipo?: 'success' | 'error' | 'info') => void;
   /** Tipos de Operação cadastrados, usados para achar o ícone de cada ponto. */
   operationTypes?: OperationType[];
   /** Níveis de prioridade criados pelo administrador. */
@@ -618,6 +631,8 @@ export default function MapContainer({
   onToggleCheckInFavorite,
   onDeleteCheckIn,
   onVincularCheckInAMissao,
+  onNarrativasDaMissao,
+  notificar,
   operationTypes = [],
   priorityLevels = [],
   janelasDeTurno = TURNOS_PADRAO,
@@ -681,6 +696,14 @@ export default function MapContainer({
   const recortesGroupRef = useRef<L.LayerGroup | null>(null);
   /** O seletor de missão está aberto dentro da ficha do check-in? */
   const [escolhendoMissaoNaFicha, setEscolhendoMissaoNaFicha] = useState(false);
+  /**
+   * As narrativas da missão aberta, do jeito que o editor precisa vê-las.
+   *
+   * O editor trabalha com o estado do envio (subindo, pronto, falhou), que não
+   * é dado da missão e não vai para o banco. Por isso a lista vive aqui, e só
+   * o que terminou é entregue a quem grava.
+   */
+  const [narrativasNaTela, setNarrativasNaTela] = useState<ItemMaterial[]>([]);
   /** Camadas por id, para acender a do item que a lista apontar. */
   const recortesPorIdRef = useRef<{ [id: string]: any }>({});
   /** Assinatura do último enquadramento, para não reenquadrar à toa. */
@@ -707,6 +730,7 @@ export default function MapContainer({
   useEffect(() => {
     setEscolhendoMissaoNaFicha(false);
   }, [(selectedCheckInForModal as any)?.id]);
+
   /**
    * Missão aberta na ficha, guardada só pelo id.
    *
@@ -1390,6 +1414,7 @@ export default function MapContainer({
         turno: pin.position?.turno as TurnoId | undefined,
         prioridade: pin.position?.priority,
         material: (pin.position?.material || []) as MaterialDeApoio[],
+        narrativas: (pin.position?.narrativas || []) as MaterialDeApoio[],
         pessoas: equipeDaMissao(ids),
         totalDesignados: ids.length,
         raio: null as number | null,
@@ -1416,6 +1441,7 @@ export default function MapContainer({
       turno: area.center?.turno as TurnoId | undefined,
       prioridade: area.center?.priority,
       material: (area.center?.material || []) as MaterialDeApoio[],
+      narrativas: (area.center?.narrativas || []) as MaterialDeApoio[],
       pessoas: equipeDaMissao(ids),
       totalDesignados: ids.length,
       raio: area.radius,
@@ -1424,6 +1450,29 @@ export default function MapContainer({
       voluntarios: area.teamSize || 0
     };
   }, [missaoAbertaRef, pins, areas, operationTypes, equipe]);
+
+  /*
+   * Abriu outra missão: a lista de narrativas é a dela.
+   *
+   * Sem isto, fechar uma missão e abrir a vizinha mostraria os arquivos da
+   * primeira — e o próximo envio os gravaria na segunda.
+   */
+  useEffect(() => {
+    const missao =
+      missaoAbertaRef?.tipo === 'pin'
+        ? pins.find((p) => p.id === missaoAbertaRef.id)?.position
+        : areas.find((a) => a.id === missaoAbertaRef?.id)?.center;
+    const guardadas = ((missao as any)?.narrativas || []) as MaterialDeApoio[];
+    setNarrativasNaTela(
+      guardadas.map((item) => ({
+        ...item,
+        estado: 'pronto' as const,
+        progresso: 100,
+        jaSalvo: true
+      }))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missaoAbertaRef?.id, missaoAbertaRef?.tipo]);
 
   /** Endereço da missão aberta, descoberto pela coordenada. */
   const [enderecoDaMissao, setEnderecoDaMissao] = useState<string | null>(null);
@@ -3385,6 +3434,42 @@ export default function MapContainer({
                   </a>
                 </div>
               </div>
+
+              {/*
+                CONTROLE DE NARRATIVAS.
+
+                Material de apoio é o que o comitê manda antes; narrativa é o
+                que volta — a foto do buraco, o vídeo da fila, o áudio do
+                morador. São coisas diferentes e por isso não se misturam: uma
+                é a ordem, a outra é a prova, e quem monta a peça depois
+                precisa achar a segunda sem garimpar a primeira.
+              */}
+              {onNarrativasDaMissao && (
+                <div className="space-y-2">
+                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                    Controle de narrativas
+                    {missaoAberta.narrativas.length > 0
+                      ? ` (${missaoAberta.narrativas.length})`
+                      : ''}
+                  </p>
+                  <EditorDeMaterial
+                    itens={narrativasNaTela}
+                    onMudar={(itens) => {
+                      setNarrativasNaTela(itens);
+                      // Só o que terminou de subir vira dado da missão: item a
+                      // meio caminho gravado agora viraria link quebrado.
+                      onNarrativasDaMissao(
+                        { id: missaoAberta.id, tipo: missaoAberta.tipo },
+                        itens
+                          .filter((i) => i.estado === 'pronto')
+                          .map(({ estado, progresso, erro, previa, jaSalvo, ...limpo }) => limpo)
+                      );
+                    }}
+                    notificar={notificar || (() => {})}
+                    ligado
+                  />
+                </div>
+              )}
 
               {/*
                 O FEEDBACK DA MISSÃO.

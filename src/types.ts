@@ -41,6 +41,16 @@ export interface PanfletagemArea {
     lng: number;
     assignedDeltas?: string[];
     material?: MaterialDeApoio[];
+    /**
+     * Controle de narrativas: o que a missão produziu ou encontrou.
+     *
+     * Mora no mesmo jsonb do material, e pelo mesmo motivo — funciona no banco
+     * que já está no ar. Não se confunde com ele: material é o que o comitê
+     * manda ANTES; narrativa é o que volta e serve para contar a história
+     * depois. Misturar os dois faria a missão perder a diferença entre a ordem
+     * e o resultado.
+     */
+    narrativas?: MaterialDeApoio[];
   } & QuandoDaMissao;
   radius: number; // in meters (default 500)
   color: string; // Hex color for circle
@@ -70,6 +80,8 @@ export interface CampaignPin {
     assignedDeltas?: string[];
     semLocal?: boolean;
     material?: MaterialDeApoio[];
+    /** Ver `narrativas` na área: o que a missão produziu, não o que ela manda. */
+    narrativas?: MaterialDeApoio[];
   } & QuandoDaMissao;
   color: string;
   /** Id do Tipo de Operação (ver OperationType). Fica solto de propósito: os tipos são cadastrados pelo próprio usuário. */
