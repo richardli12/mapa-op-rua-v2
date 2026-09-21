@@ -70,6 +70,10 @@ function Titulo({ texto }: { texto: string }) {
 /**
  * A ficha do setor sob o cursor.
  *
+ * Abaixo da barra de cima, não ao lado dela: a busca e as gavetas de filtro
+ * moram no topo, e uma ficha que aparece por cima delas tapa o controle que a
+ * pessoa está prestes a usar.
+ *
  * O balão que segue o mouse cabia num nome e em dois números; o Censo do setor
  * são quinze. Por isso a ficha tem lugar fixo — canto superior esquerdo do
  * mapa — e o cursor só escolhe de quem ela fala: passar por cima de um setor
@@ -138,7 +142,7 @@ export default function FichaDoRecorteNoMapa({
   const d = recorte.dados;
 
   return (
-    <div className="absolute top-4 left-4 z-[1150] w-[340px] max-h-[calc(100%-2rem)] overflow-y-auto bg-[#0D233A]/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 px-4 py-3 font-sans pointer-events-none">
+    <div className="absolute top-[4.75rem] left-4 z-[1150] w-[340px] max-h-[calc(100%-6.5rem)] overflow-y-auto bg-[#0D233A]/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 px-4 py-3 font-sans pointer-events-none">
       <p className="text-[13px] font-black text-white leading-tight">
         {recorte.nome}
       </p>
