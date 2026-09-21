@@ -786,6 +786,16 @@ export default function MapContainer({
   const [relatorio, setRelatorio] = useState<RelatorioDoNeo | null>(null);
   const [relatorioGuardado, setRelatorioGuardado] = useState(false);
   const [salvandoRelatorio, setSalvandoRelatorio] = useState(false);
+
+  /**
+   * A missão aberta já tem relatório guardado?
+   *
+   * É o que decide se o botão do rodapé diz "Gerar Relatório" ou "Ver
+   * Relatório". Um botão que diz "gerar" para algo que já existe promete
+   * espera e custo que não vão acontecer, e quem clica hesita -- ou pior,
+   * deixa de clicar achando que vai pagar por outra leitura.
+   */
+  const [missaoTemRelatorio, setMissaoTemRelatorio] = useState(false);
   const [pecasDoRelatorio, setPecasDoRelatorio] = useState<PecaDoDossie[]>([]);
   const [missaoDoRelatorio, setMissaoDoRelatorio] = useState<{
     dados: any;
@@ -1651,6 +1661,29 @@ export default function MapContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missaoAbertaRef?.id, missaoAbertaRef?.tipo]);
 
+  /*
+   * Ao abrir uma missão, pergunta ao banco se ela já tem relatório.
+   *
+   * Pelo id da missão, e não pelo objeto: a ficha é remontada a cada edição,
+   * e perguntar de novo a cada remontagem seria uma ida ao banco por tecla
+   * digitada no formulário ao lado.
+   */
+  useEffect(() => {
+    const id = missaoAbertaRef?.id;
+    if (!id) {
+      setMissaoTemRelatorio(false);
+      return;
+    }
+    let vivo = true;
+    (async () => {
+      const guardado = await DatabaseService.lerRelatorioNeo(id);
+      if (vivo) setMissaoTemRelatorio(!!guardado.relatorio);
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [missaoAbertaRef?.id]);
+
   /** Guarda o relatório que está na tela, para a missão dele. */
   const guardarRelatorioDoNeo = async () => {
     if (!relatorio || !missaoDoRelatorio?.dados?.id || salvandoRelatorio) return;
@@ -1664,6 +1697,11 @@ export default function MapContainer({
     setSalvandoRelatorio(false);
     if (res.success) {
       setRelatorioGuardado(true);
+      // O rodapé da missão aberta passa a dizer "Ver Relatório" na hora, sem
+      // esperar que alguém feche e abra a ficha de novo.
+      if (missaoAbertaRef?.id === missaoDoRelatorio.dados.id) {
+        setMissaoTemRelatorio(true);
+      }
       notificar?.('Relatório guardado.', 'success');
       return;
     }
@@ -4196,11 +4234,22 @@ export default function MapContainer({
                   O lugar do relatório é aqui: depois de ler a missão inteira é
                   que se quer o documento dela. Quem escreve é o NEO, com o
                   dossiê que este card já tem em mãos.
+
+                  O botão diz o que vai acontecer. Com relatório guardado, ele
+                  abre um documento que já existe, na hora e sem custo -- e
+                  chamar isso de "gerar" faria quem clica esperar por um minuto
+                  de análise que não vem, ou hesitar em clicar achando que vai
+                  pagar por outra leitura.
                 */}
                 <button
                   type="button"
                   disabled={relatorioCarregando}
                   onClick={() => pedirRelatorioDoNeo(missaoAberta)}
+                  title={
+                    missaoTemRelatorio
+                      ? 'Abrir o relatório guardado desta missão'
+                      : 'O NEO lê a missão inteira e escreve o relatório'
+                  }
                   className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer transition-all flex items-center gap-2 active:scale-95"
                 >
                   {relatorioCarregando ? (
@@ -4208,9 +4257,14 @@ export default function MapContainer({
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       NEO lendo...
                     </>
-                  ) : (
+                  ) : missaoTemRelatorio ? (
                     <>
                       <FileText className="w-3.5 h-3.5 stroke-[2.5] text-emerald-400" />
+                      Ver Relatório
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 stroke-[2.5] text-emerald-400" />
                       Gerar Relatório
                     </>
                   )}
