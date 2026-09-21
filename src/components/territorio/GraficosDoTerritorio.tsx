@@ -514,26 +514,24 @@ export function CertezaDoRaio({
   const parteEstimada = Math.max(0, 1 - parteExata);
   const naBorda = Math.max(0, estimado - exato);
 
-  const leitura =
-    parteEstimada < 0.02 ? (
-      <>Quase tudo aqui é contagem: a borda quase não pesa.</>
-    ) : (
-      <>
-        <strong className="font-black" style={{ color: TINTA.destaque }}>
-          {porcento(parteExata)}
-        </strong>{' '}
-        deste número é contagem; o resto vem da borda do círculo.
-      </>
-    );
-
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3">
-      <CabecalhoDoGrafico
-        titulo="Quanto disto é contagem"
-        leitura={leitura}
-        tabelaAberta={tabela}
-        onTrocar={() => setTabela((v) => !v)}
-      />
+      {/*
+        Sem título nem frase de leitura: a barra e a legenda abaixo dela já
+        dizem o que é contado e o que é estimado, com os números do lado. Um
+        rótulo em cima repetindo isso só empurraria o desenho para baixo.
+      */}
+      <div className="flex justify-end -mt-1 -mr-1 mb-1">
+        <button
+          type="button"
+          onClick={() => setTabela((v) => !v)}
+          title={tabela ? 'Ver como gráfico' : 'Ver como tabela'}
+          aria-label={tabela ? 'Ver como gráfico' : 'Ver como tabela'}
+          className="shrink-0 w-7 h-7 rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-emerald-700 hover:border-emerald-300 flex items-center justify-center cursor-pointer transition-colors"
+        >
+          {tabela ? <BarChart3 className="w-3.5 h-3.5" /> : <Table2 className="w-3.5 h-3.5" />}
+        </button>
+      </div>
 
       {tabela ? (
         <table className="w-full text-[11px] tabular-nums">
