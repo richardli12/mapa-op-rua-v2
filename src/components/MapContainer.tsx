@@ -2,6 +2,8 @@ import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { candidateLocationText } from '../services/candidateLocation';
 import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
+import FichaEstabelecimento from './FichaEstabelecimento';
+import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2 } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, corDaDependencia, getCheckInPriority } from '../types';
@@ -784,6 +786,21 @@ export default function MapContainer({
   // Search Results Marker State
   const searchMarkerRef = useRef<L.Marker | null>(null);
   const [searchMarkerCoords, setSearchMarkerCoords] = useState<{ lat: number; lng: number; name: string } | null>(null);
+  /**
+   * O lugar inteiro por trás do pino da pesquisa.
+   *
+   * O pino guardava só nome e coordenada — o suficiente para desenhar, e
+   * nada além disso. Mas a pesquisa já devolve telefone, site, categoria,
+   * avaliação e se está aberto agora; tudo isso morria no caminho, e quem
+   * achava o lugar no mapa tinha que procurar o telefone dele noutro
+   * aplicativo. Agora o resultado viaja inteiro até o pino.
+   */
+  const [lugarDoPino, setLugarDoPino] = useState<LugarEncontrado | null>(null);
+  /** Lido de dentro do clique do marcador, que nasce uma vez só. */
+  const lugarDoPinoRef = useRef<LugarEncontrado | null>(null);
+  lugarDoPinoRef.current = lugarDoPino;
+  /** A ficha aberta pelo pino da pesquisa. */
+  const [fichaDaBusca, setFichaDaBusca] = useState<LugarEncontrado | null>(null);
 
   /**
    * O pino do resultado da pesquisa, em cima do lugar encontrado.
@@ -838,6 +855,20 @@ export default function MapContainer({
         offset: [0, -42],
         className: 'rotulo-busca',
       });
+
+    /*
+     * Tocar no pino abre o que a pesquisa sabe do lugar.
+     *
+     * O pino dizia o nome e parava aí. Quem procurou "Escola Cecilia
+     * Meireles" achava o lugar e continuava sem o telefone que a própria
+     * consulta já tinha trazido. O clique é a porta natural para isso -- e
+     * tem de parar de subir, senão vira marcação de ponto no mapa.
+     */
+    marcador.on('click', evento => {
+      L.DomEvent.stopPropagation(evento);
+      const lugar = lugarDoPinoRef.current;
+      if (lugar) setFichaDaBusca(lugar);
+    });
 
     searchMarkerRef.current = marcador;
 
@@ -909,6 +940,7 @@ export default function MapContainer({
       lng: lugar.longitude,
       name: lugar.titulo,
     });
+    setLugarDoPino(lugar);
   };
 
   const limparBusca = () => {
@@ -921,6 +953,8 @@ export default function MapContainer({
     setLugarEscolhido(null);
     setBuscando(false);
     setSearchMarkerCoords(null);
+    setLugarDoPino(null);
+    setFichaDaBusca(null);
     delimitationGroupRef.current?.clearLayers();
   };
 
@@ -2879,13 +2913,67 @@ export default function MapContainer({
         {acoesDaBarra}
       </div>
 
+      {/*
+        A FICHA DO RESULTADO DA PESQUISA.
+
+        É a mesma ficha do estabelecimento, de propósito: as duas respondem a
+        mesma pergunta — "o que é este lugar?" — e aprender duas telas para
+        isso seria trabalho da pessoa, não do sistema. O que a pesquisa do
+        mapa não traz (foto, horário de cada dia, faixa de preço) simplesmente
+        não aparece; a ficha já sabe esconder o que está vazio.
+
+        Sem "virar ponto" aqui: a barra de baixo já tem o "Marcar Aqui", e a
+        mesma ação em dois lugares na mesma tela é convite para clicar duas
+        vezes e criar dois pontos.
+      */}
+      <FichaEstabelecimento
+        lugar={
+          fichaDaBusca
+            ? ({
+                id: fichaDaBusca.id,
+                nome: fichaDaBusca.titulo,
+                latitude: fichaDaBusca.latitude,
+                longitude: fichaDaBusca.longitude,
+                endereco: fichaDaBusca.endereco,
+                telefone: fichaDaBusca.telefone,
+                site: fichaDaBusca.site,
+                categoria: fichaDaBusca.categoria,
+                categorias: fichaDaBusca.categoria ? [fichaDaBusca.categoria] : [],
+                avaliacao: fichaDaBusca.avaliacao,
+                totalAvaliacoes: fichaDaBusca.totalAvaliacoes,
+                faixaDePreco: null,
+                situacao: fichaDaBusca.situacao,
+                horarios: null,
+                imagem: null,
+                placeId: fichaDaBusca.placeId,
+                dataId: null
+              } as Estabelecimento)
+            : null
+        }
+        onFechar={() => setFichaDaBusca(null)}
+      />
+
       {/* MATCH CONFIRMATION CARD AT BOTTOM LEFT */}
       {searchMarkerCoords && (
         <div className="absolute bottom-4 left-4 z-[1000] bg-white/95 backdrop-blur-md rounded-xl shadow-md border border-slate-200/60 p-2.5 flex items-center gap-3 animate-in slide-in-from-bottom duration-350">
-          <div className="text-left font-sans min-w-0 max-w-[180px] sm:max-w-[220px]">
+          {/* O cartão é a segunda porta para a ficha: quem não adivinha que o
+              pino é clicável encontra aqui, escrito. */}
+          <button
+            type="button"
+            onClick={() => lugarDoPino && setFichaDaBusca(lugarDoPino)}
+            disabled={!lugarDoPino}
+            className="text-left font-sans min-w-0 max-w-[180px] sm:max-w-[220px] cursor-pointer disabled:cursor-default group"
+          >
             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none">Resultado Encontrado</p>
-            <p className="text-xs font-semibold text-slate-800 mt-1 truncate">{searchMarkerCoords.name}</p>
-          </div>
+            <p className="text-xs font-semibold text-slate-800 mt-1 truncate group-hover:text-indigo-700 transition-colors">
+              {searchMarkerCoords.name}
+            </p>
+            {lugarDoPino && (
+              <p className="text-[9.5px] font-bold text-indigo-600 mt-0.5 leading-none">
+                ver informações
+              </p>
+            )}
+          </button>
           <button
             type="button"
             onClick={() => {
