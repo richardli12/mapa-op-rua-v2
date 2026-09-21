@@ -14848,10 +14848,6 @@ export default function App() {
                   onMudar={setCamadas}
                   estado={estadoDaCamada}
                   inteligenciaAberta={territorioAberto}
-                  onInteligencia={(v) => {
-                    setTerritorioAberto(v);
-                    if (v) setPesquisaLojasAberta(false);
-                  }}
                 />
               </>
             ) : null
