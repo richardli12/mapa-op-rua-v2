@@ -15,6 +15,7 @@ import {
   rotuloDoMaterial
 } from './MaterialDaMissao';
 import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
+import TempoDaMissao from './TempoDaMissao';
 import { JanelaDeTurno, TURNOS_PADRAO, TurnoId } from '../turnos';
 import { buildOperationIconSvg } from '../operationIcons';
 
@@ -3566,7 +3567,25 @@ export default function MapContainer({
                 const retorno = (checkIns || []).filter(
                   (c: any) => c.missionId && c.missionId === missaoAberta.id
                 );
+                /*
+                 * Concluído é o check-in que saiu do rascunho.
+                 *
+                 * Aqui se lia `c.concluido`, um campo que CheckIn não tem: a
+                 * conta existe em App.tsx, sobre `status`, e nunca chegou até
+                 * este card. O selo dizia "Em andamento" em toda missão, até
+                 * nas encerradas, e a regra passa a ser a mesma dos dois lados.
+                 */
+                const concluido = (c: any) => c.status !== 'rascunho';
                 return (
+                  <>
+                  <TempoDaMissao
+                    criadaEm={missaoAberta.criadaEm}
+                    retornos={retorno.map((c: any) => ({
+                      createdAt: c.createdAt,
+                      concluido: concluido(c)
+                    }))}
+                  />
+
                   <div className="space-y-2">
                     <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
                       Feedback da missão
@@ -3628,12 +3647,12 @@ export default function MapContainer({
                                 </div>
                                 <span
                                   className={`px-2 py-0.5 rounded-lg text-[9.5px] font-black uppercase tracking-wider shrink-0 ${
-                                    c.concluido
+                                    concluido(c)
                                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                                       : 'bg-amber-50 text-amber-700 border border-amber-100'
                                   }`}
                                 >
-                                  {c.concluido ? 'Concluído' : 'Em andamento'}
+                                  {concluido(c) ? 'Concluído' : 'Em andamento'}
                                 </span>
                               </div>
 
@@ -3698,6 +3717,7 @@ export default function MapContainer({
                       </div>
                     )}
                   </div>
+                  </>
                 );
               })()}
                 </div>
