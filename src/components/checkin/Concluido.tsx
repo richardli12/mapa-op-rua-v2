@@ -229,7 +229,7 @@ export default function Concluido({
                 rotulo="Modalidade"
                 valor={
                   registro.mode === 'missao'
-                    ? `Missão: ${registro.missionTitle || 'do comitê'}`
+                    ? `Missão: ${registro.missionTitle || 'sem título'}`
                     : 'Registro livre'
                 }
               />

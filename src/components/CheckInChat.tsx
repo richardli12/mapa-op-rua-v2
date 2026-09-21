@@ -1571,11 +1571,11 @@ function FioDoCheckIn({
               <span className="block text-[12.5px] font-black text-white leading-tight">
                 {algumaNovaUrgente
                   ? novasDePe.length === 1
-                    ? 'O comitê acabou de mandar uma ORDEM URGENTE'
-                    : 'O comitê acabou de mandar uma ORDEM URGENTE e mais missões'
+                    ? 'Chegou uma ORDEM URGENTE para você'
+                    : 'Chegou uma ORDEM URGENTE e mais missões para você'
                   : novasDePe.length === 1
-                    ? 'O comitê acabou de enviar uma missão para você'
-                    : `O comitê acabou de enviar ${novasDePe.length} missões para você`}
+                    ? 'Chegou uma missão nova para você'
+                    : `Chegaram ${novasDePe.length} missões novas para você`}
               </span>
               <span className="block text-[11px] font-semibold text-white/90 truncate mt-0.5">
                 {titulosNovos} · toque para ver
@@ -1596,7 +1596,7 @@ function FioDoCheckIn({
             <TriangleAlert className="w-4 h-4 shrink-0 mt-px" style={{ color: '#B45309' }} />
             <div className="min-w-0 flex-1">
               <p className="text-[12.5px] font-black leading-tight" style={{ color: '#7C2D12' }}>
-                O comitê retirou a missão "{missaoRetirada}"
+                A missão "{missaoRetirada}" foi retirada
               </p>
               <p className="text-[11.5px] font-semibold leading-snug mt-0.5" style={{ color: '#92400E' }}>
                 Ela saiu da sua lista e não está mais ligada a este check-in. Escolha
@@ -1646,10 +1646,10 @@ function FioDoCheckIn({
               ) : missao ? (
                 <>Você está na missão abaixo. Se mudar de ideia, dá para trocar.</>
               ) : missoes.length === 1 ? (
-                <>O comitê enviou uma missão para você. É essa que você está fazendo?</>
+                <>Você recebeu uma missão. É essa que você está fazendo?</>
               ) : (
                 <>
-                  O comitê enviou {missoes.length} missões para você
+                  Você recebeu {missoes.length} missões
                   {quantasAgora > 0 && turnoAgora && (
                     <>
                       {' '}
@@ -2093,7 +2093,8 @@ function FioDoCheckIn({
         {etapa >= 5 && (
           <>
             <Fala hora={horas.observacoes} atraso={400}>
-              É isso? Confira e confirme — depois de gravado, o comitê já vê.
+              É isso? Confira e confirme — depois de gravado, ele já aparece
+              no painel.
             </Fala>
 
             <div
@@ -2121,7 +2122,7 @@ function FioDoCheckIn({
                     </span>
                     <span className="flex-1 min-w-0">
                       <span className="block text-[9.5px] font-black uppercase tracking-widest text-emerald-700/60">
-                        {travado ? 'Ordem urgente do comitê' : 'Missão do comitê'}
+                        {travado ? 'Ordem urgente' : 'Missão'}
                       </span>
                       <span className="block text-[12.5px] font-bold leading-snug" style={{ color: '#05603F' }}>
                         {missao.title}
@@ -2144,7 +2145,7 @@ function FioDoCheckIn({
                     </span>
                     <span className="flex-1 min-w-0">
                       <span className="block text-[9.5px] font-black uppercase tracking-widest text-emerald-700/60">
-                        O que · definido pelo comitê
+                        O que · definido na missão
                       </span>
                       <span
                         className="block text-[12.5px] font-bold leading-snug"

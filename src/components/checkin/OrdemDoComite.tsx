@@ -518,10 +518,6 @@ export default function OrdemDoComite({
             <span className="text-[11px] font-black uppercase tracking-[0.18em] text-white">
               {varias ? `${urgentes.length} ordens urgentes` : 'Ordem urgente'}
             </span>
-            <span className="flex-1" />
-            <span className="text-[9.5px] font-black uppercase tracking-wider text-white/70">
-              do comitê
-            </span>
           </div>
 
           {varias && (
@@ -596,7 +592,7 @@ export default function OrdemDoComite({
     <div className="space-y-2">
       <div className="flex items-center gap-2 px-1">
         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-          Ordem do comitê
+          Ordem
         </span>
         <span className="flex-1 h-px bg-slate-200" />
         <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">

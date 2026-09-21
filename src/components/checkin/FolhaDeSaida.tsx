@@ -56,8 +56,8 @@ export default function FolhaDeSaida({
         <p className="mt-2 text-[12.5px] font-semibold text-slate-500 leading-snug">
           {perdas.length > 0 ? (
             <>
-              Você perde {emLista(perdas)}. Nada disso fica salvo: o comitê não
-              vai ver este check-in.
+              Você perde {emLista(perdas)}. Nada disso fica salvo: este
+              check-in não vai aparecer no painel.
             </>
           ) : (
             <>O que você preencheu até aqui não será gravado.</>

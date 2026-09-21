@@ -6261,7 +6261,7 @@ export default function App() {
                           As credenciais do <strong className="text-amber-900 font-black">banco de dados</strong> não foram configuradas na hospedagem deste site.
                         </p>
                         <p className="text-[10px] text-amber-700 font-bold mt-1 leading-relaxed">
-                          O check-in ficará registrado <strong className="text-amber-900 font-black">apenas localmente</strong> na memória deste navegador e não será enviado para o painel consolidado do comitê de campanha.
+                          O check-in ficará registrado <strong className="text-amber-900 font-black">apenas localmente</strong> na memória deste navegador e não será enviado para o painel consolidado.
                         </p>
                       </div>
                     </div>
@@ -6411,7 +6411,7 @@ export default function App() {
                         )}
                       </div>
                       <p className="text-[10px] text-slate-500 leading-snug mt-1.5">
-                        Marque presença numa área ou ponto enviado pelo comitê.
+                        Marque presença numa área ou ponto de uma missão.
                       </p>
                     </button>
 
@@ -6562,7 +6562,7 @@ export default function App() {
 
                               <p className="text-[10.5px] text-slate-500 leading-snug">
                                 {area.description ||
-                                  "Ação de panfletagem de rua agendada pelo comitê."}
+                                  "Ação de panfletagem de rua agendada."}
                               </p>
 
                               <div className="flex items-center justify-between text-[9.5px] text-slate-400 font-medium pt-1.5 border-t border-slate-100/75">
@@ -15713,7 +15713,7 @@ export default function App() {
                 Os voluntários e coordenadores de panfletagem de rua carregam
                 este link no celular para confirmar a sua localização (bairro,
                 rua) e enviar a foto da ação em tempo real. Os check-ins
-                aparecem instantaneamente no mapa consolidado do comitê.
+                aparecem instantaneamente no mapa consolidado.
               </p>
 
               {/* Display do Link */}
