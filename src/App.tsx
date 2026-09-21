@@ -13131,6 +13131,11 @@ export default function App() {
                 <span className="text-[10px] font-black uppercase tracking-widest opacity-90">
                   {escolaAberta.dependencia || "Escola"}
                 </span>
+                {escolaAberta.zona && (
+                  <span className="px-2 py-0.5 rounded-full bg-white/20 text-[9.5px] font-black uppercase tracking-wide">
+                    {escolaAberta.zona}
+                  </span>
+                )}
                 {escolaAberta.situacao &&
                   escolaAberta.situacao !== "EM ATIVIDADE" && (
                     <span className="px-2 py-0.5 rounded-full bg-white/20 text-[9.5px] font-black uppercase tracking-wide">
@@ -13174,16 +13179,28 @@ export default function App() {
                 </a>
               )}
               {/* As coordenadas não interessam a quem usa: o que interessa é
-                  chegar lá. O número vira o caminho. */}
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${escolaAberta.latitude},${escolaAberta.longitude}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1 h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
-              >
-                <Map className="w-4 h-4 text-[#015FC9]" />
-                Abrir no Google Maps
-              </a>
+                  chegar lá. O número vira o caminho — quando existe. A base
+                  municipal traz escolas sem localização cadastrada, e um botão
+                  de rota que abre o meio do oceano é pior que botão nenhum. */}
+              {escolaAberta.latitude !== null && escolaAberta.longitude !== null ? (
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${escolaAberta.latitude},${escolaAberta.longitude}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 h-11 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+                >
+                  <Map className="w-4 h-4 text-[#015FC9]" />
+                  Abrir no Google Maps
+                </a>
+              ) : (
+                <div className="mt-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-start gap-2">
+                  <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                  <p className="text-[11.5px] font-semibold text-slate-500 leading-snug">
+                    Sem localização cadastrada. Os números desta escola contam
+                    nos totais, mas ela ainda não tem pino no mapa.
+                  </p>
+                </div>
+              )}
               {escolaAberta.restricao && (
                 <p className="text-[11px] font-semibold text-slate-400 leading-snug">
                   {escolaAberta.restricao}
@@ -13209,122 +13226,197 @@ export default function App() {
               </div>
             )}
 
-            {escolaAberta.matriculas == null ? (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-                <p className="text-[12px] font-bold text-amber-800">
-                  Sem matrículas no Censo 2025
-                </p>
-                <p className="text-[11px] text-amber-700 mt-0.5 leading-snug">
-                  {escolaAberta.situacao ||
-                    "A escola não teve censo neste ano."}
-                </p>
-              </div>
-            ) : (
-              <>
-                {/* TOTAL E SEXO */}
-                <div>
-                  <div className="flex items-baseline gap-2 mb-3">
-                    <span className="text-3xl font-black text-[#0D233A] leading-none">
-                      {escolaAberta.matriculas.toLocaleString("pt-BR")}
-                    </span>
-                    <span className="text-[12px] font-semibold text-slate-400">
-                      matrículas em 2025
-                    </span>
+            {(() => {
+              /*
+               * AS DUAS CONTAGENS DA BASE NOVA.
+               *
+               * `alunosUnicos` é a pessoa, contada uma vez. `matriculas` são
+               * os vínculos: quem faz Ensino Fundamental e AEE conta nos
+               * dois. Gênero, idade e cor/raça fecham em pessoas; tipo de
+               * ensino fecha em matrículas. Usar um total no lugar do outro
+               * faz as barras somarem mais de 100% sem ninguém perceber — por
+               * isso cada bloco recebe o seu, e a diferença entre os dois é
+               * escrita na tela em vez de ficar escondida.
+               */
+              const pessoas =
+                escolaAberta.alunosUnicos ?? escolaAberta.matriculas ?? null;
+              const vinculos =
+                escolaAberta.matriculas ?? escolaAberta.alunosUnicos ?? null;
+              const aMais =
+                pessoas !== null && vinculos !== null ? vinculos - pessoas : 0;
+
+              if (pessoas === null) {
+                return (
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                    <p className="text-[12px] font-bold text-amber-800">
+                      Sem dados de alunos
+                    </p>
+                    <p className="text-[11px] text-amber-700 mt-0.5 leading-snug">
+                      {escolaAberta.situacao ||
+                        "Esta escola não entrou na última carga da rede."}
+                    </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {[
-                      {
-                        rotulo: "Feminino",
-                        valor: escolaAberta.matFeminino,
-                        cor: "#ec4899",
-                      },
-                      {
-                        rotulo: "Masculino",
-                        valor: escolaAberta.matMasculino,
-                        cor: "#0ea5e9",
-                      },
-                    ].map((campo) => (
-                      <div
-                        key={campo.rotulo}
-                        className="bg-slate-50 border border-slate-100 rounded-2xl px-3.5 py-2.5"
-                      >
-                        <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">
-                          {campo.rotulo}
-                        </p>
-                        <p
-                          className="text-[17px] font-black leading-tight"
-                          style={{ color: campo.cor }}
+                );
+              }
+
+              return (
+                <>
+                  {/* TOTAL E GÊNERO */}
+                  <div>
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <span className="text-3xl font-black text-[#0D233A] leading-none">
+                        {pessoas.toLocaleString("pt-BR")}
+                      </span>
+                      <span className="text-[12px] font-semibold text-slate-400">
+                        {pessoas === 1 ? "aluno" : "alunos"}
+                      </span>
+                    </div>
+                    {aMais > 0 && (
+                      <p className="text-[11px] font-semibold text-slate-400 leading-snug mb-3">
+                        {vinculos?.toLocaleString("pt-BR")} matrículas —{" "}
+                        {aMais.toLocaleString("pt-BR")}{" "}
+                        {aMais === 1
+                          ? "aluno faz mais de um tipo de ensino"
+                          : "alunos fazem mais de um tipo de ensino"}
+                        .
+                      </p>
+                    )}
+                    <div
+                      className={`grid gap-2.5 ${
+                        (escolaAberta.matGeneroNaoInformado || 0) > 0
+                          ? "grid-cols-3"
+                          : "grid-cols-2"
+                      } ${aMais > 0 ? "" : "mt-3"}`}
+                    >
+                      {[
+                        {
+                          rotulo: "Feminino",
+                          valor: escolaAberta.matFeminino,
+                          cor: "#ec4899",
+                        },
+                        {
+                          rotulo: "Masculino",
+                          valor: escolaAberta.matMasculino,
+                          cor: "#0ea5e9",
+                        },
+                        // Só aparece quando existe: coluna zerada em toda
+                        // escola vira ruído numa ficha que se lê de relance.
+                        ...((escolaAberta.matGeneroNaoInformado || 0) > 0
+                          ? [
+                              {
+                                rotulo: "Não informado",
+                                valor: escolaAberta.matGeneroNaoInformado,
+                                cor: "#64748b",
+                              },
+                            ]
+                          : []),
+                      ].map((campo) => (
+                        <div
+                          key={campo.rotulo}
+                          className="bg-slate-50 border border-slate-100 rounded-2xl px-3.5 py-2.5"
                         >
-                          {(campo.valor || 0).toLocaleString("pt-BR")}
-                        </p>
-                      </div>
-                    ))}
+                          <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">
+                            {campo.rotulo}
+                          </p>
+                          <p
+                            className="text-[17px] font-black leading-tight"
+                            style={{ color: campo.cor }}
+                          >
+                            {(campo.valor || 0).toLocaleString("pt-BR")}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                <BarrasDaEscola
-                  titulo="Por etapa"
-                  nota="As etapas se sobrepõem: no médio integrado o mesmo aluno conta em duas."
-                  total={escolaAberta.matriculas}
-                  itens={[
-                    {
-                      rotulo: "Educação Infantil",
-                      valor: escolaAberta.matInfantil,
-                      detalhe: `creche ${escolaAberta.matCreche || 0} · pré ${escolaAberta.matPreEscola || 0}`,
-                    },
-                    {
-                      rotulo: "Ensino Fundamental",
-                      valor: escolaAberta.matFundamental,
-                      detalhe: `iniciais ${escolaAberta.matFundIniciais || 0} · finais ${escolaAberta.matFundFinais || 0}`,
-                    },
-                    { rotulo: "Ensino Médio", valor: escolaAberta.matMedio },
-                    {
-                      rotulo: "Educação Profissional",
-                      valor: escolaAberta.matProfissional,
-                    },
-                    {
-                      rotulo: "EJA",
-                      valor: escolaAberta.matEja,
-                      detalhe: `fund. ${escolaAberta.matEjaFundamental || 0} · médio ${escolaAberta.matEjaMedio || 0}`,
-                    },
-                    {
-                      rotulo: "Educação Especial",
-                      valor: escolaAberta.matEspecial,
-                      detalhe: "alunos de inclusão, já contados na etapa regular",
-                    },
-                  ]}
-                />
+                  <BarrasDaEscola
+                    titulo="Por tipo de ensino"
+                    nota={
+                      aMais > 0
+                        ? `Soma as ${vinculos?.toLocaleString("pt-BR")} matrículas, e não os alunos: quem faz dois tipos conta em cada um.`
+                        : undefined
+                    }
+                    total={vinculos || pessoas}
+                    itens={[
+                      {
+                        rotulo: "Educação Infantil",
+                        valor: escolaAberta.matInfantil,
+                      },
+                      {
+                        rotulo: "Ensino Fundamental",
+                        valor: escolaAberta.matFundamental,
+                      },
+                      {
+                        rotulo: "Educação de Jovens e Adultos",
+                        valor: escolaAberta.matEja,
+                      },
+                      {
+                        rotulo: "Atendimento Educacional Especializado",
+                        valor: escolaAberta.matAee,
+                        detalhe:
+                          "apoio ao aluno de inclusão, somado à etapa regular",
+                      },
+                      // Etapas do Censo 2025: continuam aparecendo para quem
+                      // ainda tiver o dado antigo, e somem na base nova.
+                      { rotulo: "Ensino Médio", valor: escolaAberta.matMedio },
+                      {
+                        rotulo: "Educação Profissional",
+                        valor: escolaAberta.matProfissional,
+                      },
+                    ]}
+                  />
 
-                <BarrasDaEscola
-                  titulo="Por faixa etária"
-                  total={escolaAberta.matriculas}
-                  itens={[
-                    { rotulo: "0 a 3 anos", valor: escolaAberta.mat0a3 },
-                    { rotulo: "4 a 5 anos", valor: escolaAberta.mat4a5 },
-                    { rotulo: "6 a 10 anos", valor: escolaAberta.mat6a10 },
-                    { rotulo: "11 a 14 anos", valor: escolaAberta.mat11a14 },
-                    { rotulo: "15 a 17 anos", valor: escolaAberta.mat15a17 },
-                    { rotulo: "18 anos ou mais", valor: escolaAberta.mat18Mais },
-                  ]}
-                />
+                  <BarrasDaEscola
+                    titulo="Por faixa etária"
+                    total={pessoas}
+                    itens={[
+                      { rotulo: "0 a 3 anos", valor: escolaAberta.mat0a3 },
+                      { rotulo: "4 a 5 anos", valor: escolaAberta.mat4a5 },
+                      { rotulo: "6 a 10 anos", valor: escolaAberta.mat6a10 },
+                      { rotulo: "11 a 14 anos", valor: escolaAberta.mat11a14 },
+                      { rotulo: "15 a 17 anos", valor: escolaAberta.mat15a17 },
+                      { rotulo: "18 a 24 anos", valor: escolaAberta.mat18a24 },
+                      { rotulo: "25 anos ou mais", valor: escolaAberta.mat25Mais },
+                      {
+                        rotulo: "18 anos ou mais",
+                        valor: escolaAberta.mat18Mais,
+                      },
+                      {
+                        rotulo: "Não informado",
+                        valor: escolaAberta.matIdadeNaoInformada,
+                      },
+                    ]}
+                  />
 
-                <BarrasDaEscola
-                  titulo="Por cor ou raça"
-                  total={escolaAberta.matriculas}
-                  itens={[
-                    { rotulo: "Parda", valor: escolaAberta.matParda },
-                    { rotulo: "Branca", valor: escolaAberta.matBranca },
-                    { rotulo: "Preta", valor: escolaAberta.matPreta },
-                    { rotulo: "Indígena", valor: escolaAberta.matIndigena },
-                    { rotulo: "Amarela", valor: escolaAberta.matAmarela },
-                    {
-                      rotulo: "Não declarada",
-                      valor: escolaAberta.matRacaNaoDeclarada,
-                    },
-                  ]}
-                />
-              </>
-            )}
+                  <BarrasDaEscola
+                    titulo="Por cor ou raça"
+                    total={pessoas}
+                    itens={[
+                      { rotulo: "Parda", valor: escolaAberta.matParda },
+                      { rotulo: "Branca", valor: escolaAberta.matBranca },
+                      { rotulo: "Preta", valor: escolaAberta.matPreta },
+                      { rotulo: "Indígena", valor: escolaAberta.matIndigena },
+                      {
+                        rotulo: "Indígena Xikrin",
+                        valor: escolaAberta.matIndigenaXikrin,
+                      },
+                      { rotulo: "Amarela", valor: escolaAberta.matAmarela },
+                      { rotulo: "Albina", valor: escolaAberta.matAlbina },
+                      {
+                        rotulo: "Não declarada",
+                        valor: escolaAberta.matRacaNaoDeclarada,
+                        detalhe: "recusou responder",
+                      },
+                      {
+                        rotulo: "Não informado",
+                        valor: escolaAberta.matRacaNaoInformada,
+                        detalhe: "o campo não foi preenchido",
+                      },
+                    ]}
+                  />
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
