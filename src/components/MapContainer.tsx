@@ -3796,7 +3796,16 @@ export default function MapContainer({
                       topico: 'missao' as const,
                       titulo: 'Feedback Missão',
                       ajuda: '',
-                      cor: missaoAberta.cor,
+                      /*
+                       * Verde fixo, não a cor da missão.
+                       *
+                       * Herdar a cor deixava o bloco refém do tipo de
+                       * operação: numa missão laranja a faixa brigava com o
+                       * roxo do orgânico logo abaixo. Retorno cumprido é verde
+                       * em todo o sistema — é a mesma cor do check-in
+                       * concluído, e aqui ela quer dizer a mesma coisa.
+                       */
+                      cor: '#059669',
                       Icone: Target,
                       itens: narrativasNaTela,
                       aoMudar: setNarrativasNaTela,
