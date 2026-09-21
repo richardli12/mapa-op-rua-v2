@@ -3436,7 +3436,7 @@ export default function MapContainer({
               </div>
 
               {/*
-                CONTROLE DE NARRATIVAS.
+                AÇÕES TÁTICAS (TIME DELTA).
 
                 Material de apoio é o que o comitê manda antes; narrativa é o
                 que volta — a foto do buraco, o vídeo da fila, o áudio do
@@ -3447,7 +3447,7 @@ export default function MapContainer({
               {onNarrativasDaMissao && (
                 <div className="space-y-2">
                   <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                    Controle de narrativas
+                    Ações Táticas (Time Delta)
                     {missaoAberta.narrativas.length > 0
                       ? ` (${missaoAberta.narrativas.length})`
                       : ''}
