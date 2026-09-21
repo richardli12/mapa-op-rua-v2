@@ -1741,8 +1741,8 @@ export const DatabaseService = {
         // Banco que ainda não recebeu a migração não tem a função: cai na
         // comparação antiga, para ninguém ficar sem entrar no painel.
         if (/login_admin|function|schema cache|PGRST202/i.test(error.message || '')) {
-          console.warn('Senhas ainda em texto puro: rode a migração 2026-09-19-senhas-em-hash.');
-          return this.loginAdminTextoPuro(conta, password);
+          console.warn('Senhas ainda em texto puro: rode db/schema.sql (cria login_admin).');
+          return this.loginAdminTextoPuro(conta, password, true);
         }
         throw error;
       }
@@ -1757,8 +1757,17 @@ export const DatabaseService = {
     }
   },
 
-  /** Caminho antigo, só enquanto a migração das senhas não roda. */
-  async loginAdminTextoPuro(email: string, password: string) {
+  /**
+   * Caminho antigo, só enquanto a migração das senhas não roda.
+   *
+   * `semFuncaoDeLogin` diz que viemos para cá porque o banco não tem a função
+   * login_admin — e aí uma senha recusada aqui quase nunca é senha errada: a
+   * coluna `password` nasce vazia desde que as senhas viraram hash, então
+   * nenhuma senha do mundo casa com ela. Dizer "usuário ou senha inválidos"
+   * nesse caso manda o administrador caçar a senha certa por horas, quando o
+   * que falta é rodar o schema no banco.
+   */
+  async loginAdminTextoPuro(email: string, password: string, semFuncaoDeLogin = false) {
     if (!db) return { success: false, error: 'banco de dados não configurado.' };
     try {
       const { data, error } = await db
@@ -1769,6 +1778,12 @@ export const DatabaseService = {
         .maybeSingle();
       if (error) throw error;
       if (data) return { success: true, user: data };
+      if (semFuncaoDeLogin) {
+        return {
+          success: false,
+          error: 'O banco de dados precisa ser atualizado para conferir a senha (rode db/schema.sql).'
+        };
+      }
       return { success: false, error: 'Usuário ou senha inválidos.' };
     } catch (err: any) {
       console.error('Erro ao autenticar administrador:', err);
