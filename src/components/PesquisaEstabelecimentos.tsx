@@ -254,6 +254,19 @@ export default function PesquisaEstabelecimentos({
   }, [noRaio, circulo?.raio, medidos, lugares]);
 
   /*
+   * CÍRCULO QUE CHEGA DE FORA JÁ ABRE NO MODO DELE.
+   *
+   * O painel abre em "nesta área". Quando o círculo vem de fora — de quem
+   * acabou de marcar um raio no mapa e pediu os estabelecimentos dali —, abrir
+   * noutro recorte seria ignorar o que a pessoa acabou de desenhar, e ela
+   * teria de descobrir sozinha que existe uma aba onde aquilo vale.
+   */
+  useEffect(() => {
+    if (circulo && modo !== 'raio') setModo('raio');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circulo]);
+
+  /*
    * CENTRO NOVO, MESMA PERGUNTA.
    *
    * Depois da primeira varredura, remarcar o círculo noutra esquina é
