@@ -1102,17 +1102,48 @@ export const DatabaseService = {
     missao: { id: string; titulo: string } | null
   ) {
     if (!db) return { success: false };
+
+    /*
+     * A GRAFIA DA COLUNA NÃO É PALPITE NOSSO.
+     *
+     * Há bancos com `missionId` e bancos com `missionid`, e é por isso que
+     * existe o `prepareUpsertPayload`: ele escreve na grafia que aquele banco
+     * usa. Aqui estava cravado em minúsculas, e no banco camelCase a gravação
+     * morria com "Could not find the 'missionid' column" — vínculo recusado
+     * numa tela que já tinha dito que estava feito.
+     */
+    const base: any = {
+      mode: missao ? 'missao' : 'livre',
+      missionId: missao?.id ?? null,
+      missionTitle: missao?.titulo ?? null
+    };
+    const naOutraGrafia = {
+      mode: base.mode,
+      ...(detectedCasing.check_ins === 'camel'
+        ? { missionid: base.missionId, missiontitle: base.missionTitle }
+        : { missionId: base.missionId, missionTitle: base.missionTitle })
+    };
+    const gravar = (payload: any) =>
+      db!.from('check_ins').update(payload).eq('id', id);
+
     try {
-      const { error } = await db
-        .from('check_ins')
-        .update({
-          mode: missao ? 'missao' : 'livre',
-          missionid: missao?.id ?? null,
-          missiontitle: missao?.titulo ?? null
-        })
-        .eq('id', id);
-      if (error) throw error;
-      return { success: true };
+      const { error } = await gravar(prepareUpsertPayload(base, 'check_ins'));
+      if (!error) return { success: true };
+
+      // Detecção errada é possível — a tabela pode ter sido criada com uma
+      // grafia e migrada para outra. Uma segunda tentativa na outra grafia
+      // custa menos que um vínculo perdido.
+      if (colunaDesconhecida(error)) {
+        const { error: erroDaOutra } = await gravar(naOutraGrafia);
+        if (!erroDaOutra) {
+          // Aprendido: as próximas gravações já nascem certas.
+          detectedCasing.check_ins =
+            detectedCasing.check_ins === 'camel' ? 'lower' : 'camel';
+          return { success: true };
+        }
+        throw erroDaOutra;
+      }
+      throw error;
     } catch (err: any) {
       console.error('Erro ao vincular o check-in a uma missao:', err);
       return { success: false, error: err.message };

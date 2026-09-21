@@ -14776,6 +14776,7 @@ export default function App() {
           aoRegistrarVista={registrarVistaDoMapa}
           onToggleCheckInFavorite={alternarFavoritoCheckIn}
           onDeleteCheckIn={excluirCheckIn}
+          onVincularCheckInAMissao={vincularCheckInAMissao}
           onSelectItem={(id, type) => {
             setSelectedId(id);
             // Clicar na missão abre o editor completo no centro da tela. A
