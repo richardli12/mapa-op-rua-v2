@@ -1759,6 +1759,56 @@ export const DatabaseService = {
   },
 
   /**
+   * Todos os relatórios guardados, do mais novo para o mais velho.
+   *
+   * A lista traz o documento inteiro, e não um resumo: abrir um relatório da
+   * estante seria uma segunda ida ao banco por item, e o que se guarda aqui é
+   * texto -- cabe na mesma viagem. As peças vêm junto pelo mesmo motivo de
+   * sempre: sem o mapa de rótulo para endereço, o documento reaberto perde as
+   * provas.
+   */
+  async listarRelatoriosNeo() {
+    if (!db) return { success: false, data: [] as any[] };
+    try {
+      const { data, error } = await db
+        .from('mission_reports')
+        .select('*')
+        .order('criado_em', { ascending: false });
+      if (error) throw error;
+      return {
+        success: true,
+        data: (data || []).map((linha: any) => ({
+          missaoId: linha.mission_id,
+          titulo: linha.titulo,
+          relatorio: linha.relatorio,
+          pecas: Array.isArray(linha.pecas) ? linha.pecas : [],
+          criadoEm: linha.criado_em
+        }))
+      };
+    } catch (err: any) {
+      // Banco sem a tabela mostra a estante vazia, e a tela explica por quê.
+      console.warn('Não foi possível listar os relatórios:', err);
+      return { success: false, data: [] as any[], error: err.message };
+    }
+  },
+
+  /** Apaga o relatório guardado de uma missão. */
+  async apagarRelatorioNeo(missaoId: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('mission_reports')
+        .delete()
+        .eq('mission_id', missaoId);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao apagar o relatório:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
    * O relatório guardado de uma missão, se houver.
    *
    * Banco sem a tabela devolve "não há" em vez de erro: o sistema segue

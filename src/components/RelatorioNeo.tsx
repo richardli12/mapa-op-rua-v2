@@ -141,8 +141,14 @@ export default function RelatorioNeo({
   salvando: boolean;
   onSalvar: () => void;
   onFechar: () => void;
-  /** Gera de novo, descartando o que está na tela. */
-  onTentarDeNovo: () => void;
+  /**
+   * Gera de novo, descartando o que está na tela.
+   *
+   * Opcional: a estante de relatórios abre um documento guardado sem ter em
+   * mãos a missão que o originou, e um botão que não tem o que fazer é pior
+   * do que botão nenhum.
+   */
+  onTentarDeNovo?: () => void;
 }) {
   /*
    * A peça aberta em tela cheia.
@@ -366,6 +372,7 @@ export default function RelatorioNeo({
                   o que acontece sozinho ao reabrir a missão. Custa uma chamada
                   com imagens, e o texto sai diferente do que já foi lido.
                 */}
+                {onTentarDeNovo && (
                 <button
                   type="button"
                   onClick={onTentarDeNovo}
@@ -375,6 +382,7 @@ export default function RelatorioNeo({
                   <RefreshCw className="w-3.5 h-3.5" />
                   Gerar de novo
                 </button>
+                )}
                 <button
                   type="button"
                   onClick={onSalvar}
@@ -462,13 +470,15 @@ export default function RelatorioNeo({
                 {erro}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={onTentarDeNovo}
-              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer active:scale-95"
-            >
-              Tentar de novo
-            </button>
+            {onTentarDeNovo && (
+              <button
+                type="button"
+                onClick={onTentarDeNovo}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider cursor-pointer active:scale-95"
+              >
+                Tentar de novo
+              </button>
+            )}
           </div>
         )}
 
