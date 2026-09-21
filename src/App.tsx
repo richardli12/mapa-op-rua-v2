@@ -3895,6 +3895,50 @@ export default function App() {
   };
 
   /**
+   * Guarda o controle de narrativas de uma missão já criada.
+   *
+   * Vai no mesmo jsonb que já carrega o material de apoio, então funciona no
+   * banco que está no ar. A tela muda na hora e o banco recebe em seguida; se
+   * recusar, a lista volta — arquivo que aparece na ficha e não existe no
+   * banco é pior que arquivo nenhum, porque ninguém desconfia dele.
+   */
+  const salvarNarrativasDaMissao = (
+    missao: { id: string; tipo: "pin" | "area" },
+    narrativas: any[],
+  ) => {
+    if (missao.tipo === "pin") {
+      const antes = pins.find((p) => p.id === missao.id);
+      if (!antes) return;
+      const depois = {
+        ...antes,
+        position: { ...antes.position, narrativas },
+      };
+      setPins((prev) => prev.map((p) => (p.id === missao.id ? depois : p)));
+      if (isDatabaseConfigured) {
+        DatabaseService.upsertPin(depois).then((res) => {
+          if (!res.success) {
+            setPins((prev) => prev.map((p) => (p.id === missao.id ? antes : p)));
+            triggerNotification(`Banco de dados: ${res.error}`, "error");
+          }
+        });
+      }
+      return;
+    }
+    const antes = areas.find((a) => a.id === missao.id);
+    if (!antes) return;
+    const depois = { ...antes, center: { ...antes.center, narrativas } };
+    setAreas((prev) => prev.map((a) => (a.id === missao.id ? depois : a)));
+    if (isDatabaseConfigured) {
+      DatabaseService.upsertArea(depois).then((res) => {
+        if (!res.success) {
+          setAreas((prev) => prev.map((a) => (a.id === missao.id ? antes : a)));
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+        }
+      });
+    }
+  };
+
+  /**
    * Estrela do check-in: destaca o registro na lista e no mapa.
    *
    * O painel muda na hora e o banco recebe a mesma marca em seguida; se o
@@ -14777,6 +14821,8 @@ export default function App() {
           onToggleCheckInFavorite={alternarFavoritoCheckIn}
           onDeleteCheckIn={excluirCheckIn}
           onVincularCheckInAMissao={vincularCheckInAMissao}
+          onNarrativasDaMissao={salvarNarrativasDaMissao}
+          notificar={triggerNotification}
           onSelectItem={(id, type) => {
             setSelectedId(id);
             // Clicar na missão abre o editor completo no centro da tela. A
