@@ -3327,6 +3327,154 @@ export default function MapContainer({
                 </div>
               )}
 
+              {/*
+                O FEEDBACK DA MISSÃO.
+
+                A missão dizia o que precisava ser feito e quem recebeu, mas
+                não o que voltou — e era preciso sair daqui, achar o check-in
+                na lista e cruzar os dois na cabeça. O retorno é metade da
+                missão: ele fica aqui dentro, e cada registro abre a ficha
+                inteira, com áudio, foto e observação, a um clique.
+              */}
+              {(() => {
+                const retorno = (checkIns || []).filter(
+                  (c: any) => c.missionId && c.missionId === missaoAberta.id
+                );
+                return (
+                  <div className="space-y-2">
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                      Feedback da missão
+                      {retorno.length > 0 ? ` (${retorno.length})` : ''}
+                    </p>
+
+                    {retorno.length === 0 ? (
+                      <div className="border border-dashed border-slate-200 bg-slate-50 rounded-xl p-3.5 flex items-center gap-2.5">
+                        <MessageSquare className="w-4 h-4 text-slate-300 shrink-0" />
+                        <p className="text-[11px] text-slate-500 font-semibold leading-snug">
+                          Nenhum check-in vinculado a esta missão ainda. Se o
+                          trabalho foi feito como registro livre, o vínculo se
+                          conserta na ficha do check-in.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {retorno.map((c: any) => {
+                          const midias =
+                            c.media && c.media.length > 0
+                              ? c.media
+                              : c.photo
+                                ? [{ url: c.photo, type: 'image' }]
+                                : [];
+                          return (
+                            <div
+                              key={c.id}
+                              className="border border-slate-200 rounded-xl p-3 bg-white"
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <span className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 overflow-hidden">
+                                  {c.memberPhoto ? (
+                                    <img
+                                      src={c.memberPhoto}
+                                      alt={c.name}
+                                      referrerPolicy="no-referrer"
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <User className="w-4 h-4" />
+                                  )}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[12.5px] font-bold text-slate-800 truncate leading-tight">
+                                    {c.name}
+                                  </p>
+                                  <p className="text-[10.5px] font-semibold text-slate-400 leading-tight mt-0.5">
+                                    {new Date(c.createdAt).toLocaleDateString('pt-BR', {
+                                      day: '2-digit',
+                                      month: '2-digit',
+                                      year: 'numeric'
+                                    })}
+                                    {' às '}
+                                    {new Date(c.createdAt).toLocaleTimeString('pt-BR', {
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`px-2 py-0.5 rounded-lg text-[9.5px] font-black uppercase tracking-wider shrink-0 ${
+                                    c.concluido
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                      : 'bg-amber-50 text-amber-700 border border-amber-100'
+                                  }`}
+                                >
+                                  {c.concluido ? 'Concluído' : 'Em andamento'}
+                                </span>
+                              </div>
+
+                              {(c.rua || c.bairro) && (
+                                <p className="text-[10.5px] font-semibold text-slate-500 mt-2 flex items-start gap-1.5">
+                                  <MapPin className="w-3 h-3 shrink-0 mt-0.5 text-slate-300" />
+                                  <span className="min-w-0">
+                                    {[c.rua, c.bairro].filter(Boolean).join(', ')}
+                                  </span>
+                                </p>
+                              )}
+
+                              {midias.length > 0 && (
+                                <div className="grid grid-cols-4 gap-1.5 mt-2">
+                                  {midias.slice(0, 4).map((m: any, i: number) => (
+                                    <span
+                                      key={m.url || i}
+                                      className="relative aspect-square rounded-lg overflow-hidden bg-slate-100 block"
+                                    >
+                                      {m.type === 'video' || m.kind === 'video' ? (
+                                        <video
+                                          src={m.url}
+                                          className="w-full h-full object-cover"
+                                          muted
+                                        />
+                                      ) : (
+                                        <img
+                                          src={m.url}
+                                          alt=""
+                                          referrerPolicy="no-referrer"
+                                          className="w-full h-full object-cover"
+                                        />
+                                      )}
+                                      {/* A quarta miniatura conta o resto: sem
+                                          isso, oito evidências pareciam quatro. */}
+                                      {i === 3 && midias.length > 4 && (
+                                        <span className="absolute inset-0 bg-slate-900/60 text-white text-[11px] font-black flex items-center justify-center">
+                                          +{midias.length - 4}
+                                        </span>
+                                      )}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  // A ficha do check-in toma a tela: dois modais
+                                  // empilhados escondem qual deles o X fecha.
+                                  setMissaoAbertaRef(null);
+                                  setSelectedCheckInForModal(c);
+                                }}
+                                className="mt-2.5 w-full h-9 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[11px] font-black uppercase tracking-wider rounded-lg cursor-pointer active:scale-[0.99] flex items-center justify-center gap-1.5"
+                              >
+                                <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                                Ver feedback completo
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Onde é */}
               <div className="space-y-2">
                 <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
@@ -3358,13 +3506,18 @@ export default function MapContainer({
                     <span className="text-[9px] font-black text-slate-400 uppercase block mb-0.5">
                       Criada em
                     </span>
+                    {/* Data E hora: "criada em 20/09" não responde se a ordem
+                        saiu antes ou depois do check-in que se está olhando. */}
                     <span className="text-[11px] font-extrabold text-slate-700">
                       {missaoAberta.criadaEm
-                        ? new Date(missaoAberta.criadaEm).toLocaleDateString('pt-BR', {
+                        ? `${new Date(missaoAberta.criadaEm).toLocaleDateString('pt-BR', {
                             day: '2-digit',
                             month: '2-digit',
                             year: 'numeric'
-                          })
+                          })} às ${new Date(missaoAberta.criadaEm).toLocaleTimeString('pt-BR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}`
                         : '—'}
                     </span>
                   </div>
