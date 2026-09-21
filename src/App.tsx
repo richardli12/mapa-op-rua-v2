@@ -1011,6 +1011,20 @@ export default function App() {
     nivel: "bairros",
     opacidade: 1,
   });
+  /** O que a camada está fazendo, contado pelo painel e mostrado na gaveta. */
+  const [estadoDaCamada, setEstadoDaCamada] = useState<{
+    carregando: boolean;
+    progresso: { lidos: number; total: number } | null;
+    municipio: string | null;
+    desenhados: number;
+    erro: string | null;
+  }>({
+    carregando: false,
+    progresso: null,
+    municipio: null,
+    desenhados: 0,
+    erro: null,
+  });
   const receberRecortes = React.useCallback(
     (lista: any[], escala: { corte: number; cor: string }[]) => {
       setRecortesTerritoriais(lista);
@@ -13211,6 +13225,7 @@ export default function App() {
           setCamadas((atual) => ({ ...atual, metrica }))
         }
         onNivelDaCamada={(nivel) => setCamadas((atual) => ({ ...atual, nivel }))}
+        onEstadoDaCamada={setEstadoDaCamada}
       />
 
       {/* PESQUISA DE ESTABELECIMENTOS */}
@@ -14660,10 +14675,24 @@ export default function App() {
                   aberto={camadasAbertas}
                   onAbrir={(v) => {
                     setCamadasAbertas(v);
-                    if (v) setPeriodoAberto(false);
+                    if (v) {
+                      setPeriodoAberto(false);
+                      /*
+                        Abrir a gaveta abre o painel da direita junto.
+
+                        É a mesma sala: a gaveta liga a camada, o painel diz o
+                        que a camada significa — e é lá que se escolhe a UF e a
+                        cidade quando o cadastro não resolveu sozinho. Separar
+                        os dois deixava quem ligava a camada sem lugar nenhum
+                        para ir quando o mapa não pintava.
+                      */
+                      setTerritorioAberto(true);
+                      setPesquisaLojasAberta(false);
+                    }
                   }}
                   valor={camadas}
                   onMudar={setCamadas}
+                  estado={estadoDaCamada}
                   inteligenciaAberta={territorioAberto}
                   onInteligencia={(v) => {
                     setTerritorioAberto(v);

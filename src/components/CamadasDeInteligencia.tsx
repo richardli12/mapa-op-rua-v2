@@ -5,7 +5,9 @@ import {
   Users,
   Home,
   Gauge,
-  Vote
+  Vote,
+  Loader2,
+  AlertTriangle
 } from 'lucide-react';
 
 /** Qual número pinta as áreas. `null` é o mapa sem mancha nenhuma. */
@@ -27,6 +29,14 @@ interface Props {
   /** O painel de análise, que é a camada mais funda desta mesma gaveta. */
   inteligenciaAberta: boolean;
   onInteligencia: (aberta: boolean) => void;
+  /** O que a camada está fazendo agora, contado por quem carrega os dados. */
+  estado?: {
+    carregando: boolean;
+    progresso: { lidos: number; total: number } | null;
+    municipio: string | null;
+    desenhados: number;
+    erro: string | null;
+  };
 }
 
 const CAMADAS: {
@@ -75,7 +85,8 @@ export default function CamadasDeInteligencia({
   valor,
   onMudar,
   inteligenciaAberta,
-  onInteligencia
+  onInteligencia,
+  estado
 }: Props) {
   const caixa = useRef<HTMLDivElement | null>(null);
 
@@ -98,6 +109,7 @@ export default function CamadasDeInteligencia({
   }, [aberto, onAbrir]);
 
   const ligado = valor.metrica !== null || inteligenciaAberta;
+  const carregando = !!estado?.carregando && valor.metrica !== null;
 
   const alternar = (id: Exclude<MetricaDaCamada, null>) =>
     onMudar({ ...valor, metrica: valor.metrica === id ? null : id });
@@ -114,9 +126,15 @@ export default function CamadasDeInteligencia({
             : 'bg-white border-slate-200/80 text-slate-800 hover:bg-slate-50'
         }`}
       >
-        <Layers3
-          className={`w-4 h-4 shrink-0 ${ligado ? 'text-white' : 'text-[#0D9488]'}`}
-        />
+        {/* O botão conta que está trabalhando: gaveta fechada e mapa ainda
+            limpo é o momento em que a pessoa acha que o sistema quebrou. */}
+        {carregando ? (
+          <Loader2 className="w-4 h-4 shrink-0 animate-spin text-white" />
+        ) : (
+          <Layers3
+            className={`w-4 h-4 shrink-0 ${ligado ? 'text-white' : 'text-[#0D9488]'}`}
+          />
+        )}
         <span className="text-xs font-bold leading-none">Camadas de Inteligência</span>
         <ChevronDown
           className={`w-3.5 h-3.5 shrink-0 transition-transform ${
@@ -206,6 +224,46 @@ export default function CamadasDeInteligencia({
               </button>
             ))}
           </div>
+
+          {/*
+            O RECIBO DA CAMADA.
+
+            Liga-se a camada e o mapa continua limpo por meio minuto enquanto
+            a malha vem em páginas. Sem uma linha dizendo isso, o silêncio é
+            indistinguível de defeito — e foi exatamente assim que pareceu.
+          */}
+          {valor.metrica !== null && (
+            <div className="mt-2 px-1.5">
+              {estado?.erro ? (
+                <p className="text-[10.5px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5 leading-snug flex items-start gap-1.5">
+                  <AlertTriangle className="w-3 h-3 shrink-0 mt-px" />
+                  {estado.erro}
+                </p>
+              ) : !estado?.municipio ? (
+                <p className="text-[10.5px] font-semibold text-slate-500 leading-snug">
+                  Nenhuma cidade resolvida ainda. Abra a Inteligência Eleitoral
+                  para escolher a UF e o município.
+                </p>
+              ) : carregando ? (
+                <p className="text-[10.5px] font-bold text-slate-500 leading-snug flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                  {estado.progresso && estado.progresso.total > 0
+                    ? `${estado.municipio}: ${estado.progresso.lidos.toLocaleString(
+                        'pt-BR'
+                      )} de ${estado.progresso.total.toLocaleString('pt-BR')} setores`
+                    : `Carregando ${estado.municipio}...`}
+                </p>
+              ) : (
+                <p className="text-[10.5px] font-semibold text-slate-400 leading-snug">
+                  {estado.desenhados > 0
+                    ? `${estado.municipio} · ${estado.desenhados.toLocaleString(
+                        'pt-BR'
+                      )} ${valor.nivel === 'setores' ? 'setores' : 'bairros'} no mapa`
+                    : `${estado.municipio} não devolveu ${valor.nivel} com desenho.`}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="mt-3 px-1.5 pb-1">
             <div className="flex items-center justify-between mb-1.5">

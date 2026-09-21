@@ -89,6 +89,20 @@ interface InteligenciaTerritorialProps {
     metrica: 'populacao' | 'densidade' | 'domicilios'
   ) => void;
   onNivelDaCamada?: (nivel: 'bairros' | 'setores') => void;
+  /**
+   * O que a camada está fazendo, para a gaveta da barra poder contar.
+   *
+   * Sem isto, ligar a camada numa cidade grande é um botão que não faz nada
+   * por meio minuto: a malha está vindo em páginas, mas quem olha só vê mapa
+   * limpo e conclui que quebrou.
+   */
+  onEstadoDaCamada?: (estado: {
+    carregando: boolean;
+    progresso: { lidos: number; total: number } | null;
+    municipio: string | null;
+    desenhados: number;
+    erro: string | null;
+  }) => void;
 }
 
 type Aba = 'raio' | 'bairros' | 'setores' | 'censo';
@@ -141,7 +155,8 @@ export default function InteligenciaTerritorial({
   metricaDaCamada = null,
   nivelDaCamada = 'bairros',
   onMetricaDaCamada,
-  onNivelDaCamada
+  onNivelDaCamada,
+  onEstadoDaCamada
 }: InteligenciaTerritorialProps) {
   /**
    * O painel trabalha fechado quando a camada está ligada.
@@ -152,6 +167,14 @@ export default function InteligenciaTerritorial({
    * isto, não o `aberto`.
    */
   const camadaLigada = metricaDaCamada !== null;
+  /**
+   * Quantos polígonos foram parar no mapa da última vez.
+   *
+   * Estado, e não `ref`, porque quem lê isso é o recibo da gaveta: guardado
+   * numa `ref`, o recibo era escrito antes do desenho acontecer e dizia "não
+   * devolveu nada" com três bairros já pintados.
+   */
+  const [desenhados, setDesenhados] = useState(0);
   const [aba, setAba] = useState<Aba>('raio');
   /**
    * Meia tela ou tela cheia.
@@ -448,6 +471,37 @@ export default function InteligenciaTerritorial({
   };
 
   /**
+   * O relatório para a gaveta da barra.
+   *
+   * Ela é quem liga a camada, então é ela que precisa dizer se está vindo,
+   * se veio vazia, ou se nem começou por falta de cidade escolhida.
+   */
+  useEffect(() => {
+    onEstadoDaCamada?.({
+      carregando: carregandoDesenho || carregandoBairros || carregandoMunicipios,
+      progresso: progressoSetores,
+      municipio: municipio?.nome || null,
+      desenhados,
+      erro: erro?.mensagem || null
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    carregandoDesenho,
+    carregandoBairros,
+    carregandoMunicipios,
+    progressoSetores?.lidos,
+    progressoSetores?.total,
+    municipio?.nome,
+    desenhados,
+    bairros.length,
+    setores.length,
+    erro?.mensagem,
+    camadaLigada,
+    nivelDaCamada,
+    metricaDaCamada
+  ]);
+
+  /**
    * Camada ligada com a tela fechada: os bairros vêm sozinhos.
    *
    * A lista de bairros era carregada por um toque na aba — e com a gaveta da
@@ -574,6 +628,7 @@ export default function InteligenciaTerritorial({
      */
     const desenhar = camadaLigada || (aberto && desenharNoMapa);
     if (!desenhar) {
+      setDesenhados(0);
       onRecortes([], []);
       return;
     }
@@ -697,6 +752,7 @@ export default function InteligenciaTerritorial({
             cor
           }));
 
+    setDesenhados(comGeometria.length);
     onRecortes(comGeometria, escala);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
