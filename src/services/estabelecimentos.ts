@@ -133,3 +133,155 @@ export async function pesquisarEstabelecimentos({
     termo: dados?.consulta?.termo || termo,
   };
 }
+
+/* ------------------------------------------------------------------ raio ---
+ *
+ * BUSCA DENTRO DE UM CÍRCULO DESENHADO NO MAPA.
+ *
+ * A API do CCO não recebe raio: ela recebe um ponto e um zoom, que é uma
+ * dica de escala, não um limite. Pedir "farmácia" com o mapa em cima da
+ * praça devolve farmácias da praça, da avenida e do bairro vizinho, sem
+ * fronteira nenhuma — e a pessoa que marcou cem metros quer cem metros.
+ *
+ * Então o círculo é honrado aqui, em duas etapas:
+ *
+ * 1. O ZOOM SAI DO RAIO. Mandar o zoom do mapa faria a fonte procurar numa
+ *    escala que não é a do círculo — raio de 100 m com o mapa aberto na
+ *    cidade traz o centro inteiro, e o filtro depois jogaria quase tudo
+ *    fora. O zoom é calculado para o círculo caber na busca.
+ * 2. A DISTÂNCIA É MEDIDA UMA POR UMA. Cada resultado é medido em metros
+ *    contra o centro; o que passa do raio não entra. Nada de "quase dentro".
+ *
+ * O que ficou de fora não é jogado no lixo: volta contado, com o mais
+ * próximo, para a tela poder oferecer o raio que o alcançaria.
+ */
+
+/** Um estabelecimento com a distância até o centro do círculo, em metros. */
+export interface EstabelecimentoNoRaio extends Estabelecimento {
+  distancia: number;
+}
+
+export interface VarreduraDeRaio {
+  /** Dentro do círculo, do mais perto para o mais longe. */
+  dentro: EstabelecimentoNoRaio[];
+  /**
+   * Tudo que a fonte devolveu, medido e ordenado — inclusive o que ficou
+   * fora.
+   *
+   * É isto que deixa o raio virar um controle ao vivo: mudar de cem para
+   * duzentos metros refiltra o que já está na mão, na hora, sem esperar a
+   * rede. A busca é refeita depois, por baixo, porque um círculo maior pode
+   * alcançar lugares que a escala anterior nem chegou a pedir.
+   */
+  todos: EstabelecimentoNoRaio[];
+  /** Quantos a fonte devolveu e o círculo recusou. */
+  fora: number;
+  /** Distância do recusado mais próximo, para sugerir um raio que o pegue. */
+  maisPerto: number | null;
+  /** Quantas páginas foram lidas da fonte. */
+  paginas: number;
+  /** A fonte ainda tinha mais e paramos por limite nosso. */
+  truncado: boolean;
+}
+
+const RAIO_DA_TERRA = 6_371_000;
+
+/** Distância em metros entre dois pontos (haversine). */
+export function distanciaEmMetros(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const rad = (g: number) => (g * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * RAIO_DA_TERRA * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/**
+ * O zoom em que um círculo deste raio cabe na tela.
+ *
+ * É a conta do Mercator: a 156543,034 m/px no equador, cada nível divide por
+ * dois, e o cosseno da latitude corrige a distorção. O diâmetro é encaixado
+ * numa janela de 640 px — a medida que a fonte usa para uma busca de mapa.
+ */
+export function zoomParaRaio(lat: number, raio: number): number {
+  const metrosPorPixel = (2 * raio) / 640;
+  const zoom = Math.log2((156543.03392 * Math.cos((lat * Math.PI) / 180)) / metrosPorPixel);
+  return Math.round(Math.min(20, Math.max(3, zoom)));
+}
+
+/** Até onde vamos atrás de páginas: o círculo é pequeno, a cota não é nossa. */
+const MAXIMO_DE_PAGINAS = 4;
+
+/**
+ * Varre um círculo atrás de um termo.
+ *
+ * Páginas são pedidas enquanto a fonte disser que há mais e enquanto elas
+ * ainda estiverem trazendo gente de dentro do círculo: quando uma página
+ * inteira cai fora, a fonte já passou do bairro e continuar só gasta cota.
+ */
+export async function varrerRaio({
+  termo,
+  centro,
+  raio,
+}: {
+  termo: string;
+  centro: { lat: number; lng: number };
+  raio: number;
+}): Promise<VarreduraDeRaio> {
+  const zoom = zoomParaRaio(centro.lat, raio);
+  const dentro: EstabelecimentoNoRaio[] = [];
+  const todos: EstabelecimentoNoRaio[] = [];
+  const vistos = new Set<string>();
+  let fora = 0;
+  let maisPerto: number | null = null;
+  let inicio = 0;
+  let paginas = 0;
+  let temMais = false;
+
+  while (paginas < MAXIMO_DE_PAGINAS) {
+    const pagina = await pesquisarEstabelecimentos({
+      termo,
+      centro: { lat: centro.lat, lng: centro.lng, zoom },
+      inicio,
+    });
+    paginas += 1;
+
+    let entraramNestaPagina = 0;
+    for (const lugar of pagina.estabelecimentos) {
+      // A fonte repete lugares entre páginas quando o recorte é apertado.
+      const chave = lugar.id || `${lugar.latitude},${lugar.longitude},${lugar.nome}`;
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+
+      const distancia = distanciaEmMetros(centro, {
+        lat: lugar.latitude,
+        lng: lugar.longitude,
+      });
+      const medido: EstabelecimentoNoRaio = { ...lugar, distancia };
+      todos.push(medido);
+      if (distancia <= raio) {
+        dentro.push(medido);
+        entraramNestaPagina += 1;
+      } else {
+        fora += 1;
+        if (maisPerto === null || distancia < maisPerto) maisPerto = distancia;
+      }
+    }
+
+    temMais = pagina.temMais && pagina.proximoInicio !== null;
+    if (!temMais) break;
+    // Página inteira fora do círculo: a fonte já saiu da vizinhança.
+    if (entraramNestaPagina === 0 && paginas > 1) break;
+    inicio = pagina.proximoInicio as number;
+  }
+
+  const porDistancia = (a: EstabelecimentoNoRaio, b: EstabelecimentoNoRaio) =>
+    a.distancia - b.distancia;
+  dentro.sort(porDistancia);
+  todos.sort(porDistancia);
+  return { dentro, todos, fora, maisPerto, paginas, truncado: temMais };
+}

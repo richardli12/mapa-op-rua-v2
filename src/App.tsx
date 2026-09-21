@@ -963,6 +963,20 @@ export default function App() {
     lng: number;
     raio: number;
   } | null>(null);
+  /**
+   * O círculo da pesquisa de estabelecimentos.
+   *
+   * Mora aqui, e não dentro do painel, porque quem desenha é o mapa e quem
+   * lista é o painel: o círculo é a única coisa que os dois precisam saber ao
+   * mesmo tempo.
+   */
+  const [circuloDeBusca, setCirculoDeBusca] = useState<{
+    lat: number;
+    lng: number;
+    raio: number;
+  } | null>(null);
+  /** Ferramenta de desenhar o raio da busca, armada no mapa. */
+  const [desenhandoRaioDeBusca, setDesenhandoRaioDeBusca] = useState(false);
   /** Bairros ou setores desenhados no mapa, e a escala que os pinta. */
   const [recortesTerritoriais, setRecortesTerritoriais] = useState<any[]>([]);
   const [escalaTerritorial, setEscalaTerritorial] = useState<
@@ -13019,8 +13033,17 @@ export default function App() {
       {/* PESQUISA DE ESTABELECIMENTOS */}
       <PesquisaEstabelecimentos
         aberto={pesquisaLojasAberta}
-        onFechar={() => setPesquisaLojasAberta(false)}
+        onFechar={() => {
+          setPesquisaLojasAberta(false);
+          // Círculo sem a lista ao lado vira um desenho sem dono no mapa.
+          setCirculoDeBusca(null);
+          setDesenhandoRaioDeBusca(false);
+        }}
         centroDoMapa={() => lerVistaDoMapaRef.current?.() || null}
+        circulo={circuloDeBusca}
+        onCirculo={setCirculoDeBusca}
+        desenhando={desenhandoRaioDeBusca}
+        onDesenhar={setDesenhandoRaioDeBusca}
         onResultados={(lugares) => {
           setEstabelecimentos(lugares);
           setLojaEmFoco(null);
@@ -14210,6 +14233,14 @@ export default function App() {
           estabelecimentoEmFoco={lojaEmFoco}
           estabelecimentoDestacado={lojaDestacada}
           circuloAnalisado={circuloAnalisado}
+          circuloDeBusca={circuloDeBusca}
+          desenhandoRaioDeBusca={desenhandoRaioDeBusca}
+          onRaioDeBuscaDesenhado={(circulo) => {
+            setCirculoDeBusca(circulo);
+            // Desenhou: a ferramenta se desarma sozinha, como toda ferramenta
+            // de desenho que já entregou o que ia entregar.
+            setDesenhandoRaioDeBusca(false);
+          }}
           recortesTerritoriais={recortesTerritoriais}
           escalaTerritorial={escalaTerritorial}
           recorteEmFoco={recorteEmFoco}
