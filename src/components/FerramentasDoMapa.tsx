@@ -262,11 +262,14 @@ function Dica({ texto, atalho }: { texto: string; atalho?: string }) {
 }
 
 function Botao({ ferramenta, aberto }: { ferramenta: FerramentaDoMapa; aberto: boolean }) {
-  const { rotulo, icone, cor, ativa, contador, atalho, ajuda, aoClicar } = ferramenta;
+  const { id, rotulo, icone, cor, ativa, contador, atalho, ajuda, aoClicar } = ferramenta;
 
   return (
     <button
       type="button"
+      /* Quem está de fora precisa saber qual ferramenta é esta: o laser se
+         desliga ao clique em qualquer outra, e não no próprio botão dele. */
+      data-ferramenta={id}
       onClick={aoClicar}
       aria-pressed={ativa}
       aria-label={rotulo}

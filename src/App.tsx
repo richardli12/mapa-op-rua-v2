@@ -1339,6 +1339,41 @@ export default function App() {
     return () => window.removeEventListener("keydown", noTeclado);
   }, [adminUser, currentUrlView]);
 
+  /**
+   * Clicou em outra coisa, o laser se apaga.
+   *
+   * O laser é modo de apresentação: enquanto ele está ligado, o cursor some e
+   * a tela é do ponto vermelho. Quem larga a apresentação e vai clicar em
+   * "Check-ins" não está mais apontando — está operando o sistema —, e ficar
+   * sem cursor no meio disso é a pior hora de descobrir que o laser continuava
+   * ligado.
+   *
+   * O desligamento é no `pointerdown`, na fase de captura, e não engole o
+   * clique: a ferramenta clicada abre normalmente, e o laser só sai de cena.
+   * O próprio botão do laser fica de fora — ele é a chave de liga-desliga, e
+   * apagar aqui só faria o clique dele reacender.
+   *
+   * Clique no mapa não desliga: apontar para o mapa é exatamente o que o
+   * laser existe para fazer.
+   */
+  useEffect(() => {
+    if (!laserLigado) return;
+
+    const aoApontar = (e: PointerEvent) => {
+      const alvo = e.target as HTMLElement | null;
+      if (!alvo || typeof alvo.closest !== "function") return;
+      if (alvo.closest('[data-laser="true"], [data-ferramenta="laser"]')) return;
+      const controle = alvo.closest(
+        'button, a[href], input, select, textarea, label, [role="button"], [role="switch"], [role="tab"], [contenteditable="true"]',
+      );
+      if (!controle) return;
+      setLaserLigado(false);
+    };
+
+    window.addEventListener("pointerdown", aoApontar, true);
+    return () => window.removeEventListener("pointerdown", aoApontar, true);
+  }, [laserLigado]);
+
   // Sessão encerrada ou saída do painel: o laser não fica ligado sozinho.
   useEffect(() => {
     if (!adminUser || currentUrlView === "checkin") setLaserLigado(false);
@@ -8322,6 +8357,7 @@ export default function App() {
 
             {/* PONTEIRO LASER — para apresentar o painel numa tela grande */}
             <button
+              data-laser="true"
               onClick={() => setLaserLigado((ligado) => !ligado)}
               aria-pressed={laserLigado}
               title={
