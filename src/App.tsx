@@ -13040,6 +13040,21 @@ export default function App() {
           setDesenhandoRaioDeBusca(false);
         }}
         centroDoMapa={() => lerVistaDoMapaRef.current?.() || null}
+        /*
+         * A cidade do cliente em foco amarra a pesquisa ao lugar certo. É a
+         * mesma que decide as escolas do mapa — se ela serve para dizer de
+         * quem são as escolas, serve para dizer de quem é o comércio.
+         */
+        municipio={municipioDoMapa || null}
+        uf={
+          candidateLocation?.uf ||
+          parseCandidateLocation(
+            candidateLocationText(
+              candidates.find((c) => c.id === selectedCandidateFilter),
+            ),
+          )?.uf ||
+          null
+        }
         circulo={circuloDeBusca}
         onCirculo={setCirculoDeBusca}
         desenhando={desenhandoRaioDeBusca}
