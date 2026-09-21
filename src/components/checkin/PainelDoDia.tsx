@@ -159,7 +159,7 @@ export default function PainelDoDia({
               </p>
               <p className="text-[11.5px] font-bold text-slate-400 leading-snug mt-1">
                 {avanco.deMissao > 0
-                  ? `${contar(avanco.deMissao, 'veio', 'vieram')} de missão do comitê.`
+                  ? `${contar(avanco.deMissao, 'veio', 'vieram')} de missão.`
                   : 'Nenhum deles veio de missão ainda.'}
                 {avanco.foraDeTurno > 0 &&
                   ` ${contar(avanco.foraDeTurno, 'caiu', 'caíram')} fora dos turnos.`}

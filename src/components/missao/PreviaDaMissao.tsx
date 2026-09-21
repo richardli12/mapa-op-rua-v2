@@ -183,7 +183,7 @@ export default function PreviaDaMissao({
               {totalDeMaterial > 0 && (
                 <p className="text-[10.5px] font-bold text-slate-500 mt-1.5 flex items-center gap-1.5">
                   <Paperclip className="w-3 h-3 shrink-0" />
-                  {totalDeMaterial} {totalDeMaterial === 1 ? 'arquivo' : 'arquivos'} do comitê
+                  {totalDeMaterial} {totalDeMaterial === 1 ? 'arquivo' : 'arquivos'} da missão
                 </p>
               )}
             </div>

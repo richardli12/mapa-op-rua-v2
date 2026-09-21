@@ -680,7 +680,7 @@ export function MaterialDaMissao({ itens }: { itens: MaterialDeApoio[] }) {
   return (
     <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-2">
       <p className="text-[9.5px] font-black uppercase tracking-wider text-slate-400">
-        Material do comitê
+        Material da missão
       </p>
 
       {visuais.length > 0 && (
