@@ -4948,6 +4948,12 @@ export default function App() {
         color: p.color || "#0C3556",
         lat: p.position?.lat ?? 0,
         lng: p.position?.lng ?? 0,
+        /*
+          O id vai junto com o rótulo porque é ele que o check-in grava.
+          A missão já diz o que é para fazer: quem está na rua não repete essa
+          escolha, e sem o id o registro chegaria ao painel sem tipo nenhum.
+        */
+        tipoId: p.iconType,
         tipoLabel: rotuloDoTipo(p.iconType),
         semLocal: p.position?.semLocal === true,
         material: p.position?.material || [],

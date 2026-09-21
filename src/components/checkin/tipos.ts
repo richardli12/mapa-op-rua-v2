@@ -61,6 +61,8 @@ export interface MissaoDoCampo {
   lng: number;
   /** Só na área: o raio em metros que o comitê desenhou. */
   raio?: number;
+  /** Id do tipo de operação que o comitê escolheu para a missão. */
+  tipoId?: string;
   /** Rótulo do tipo de operação, quando o comitê escolheu um. */
   tipoLabel?: string;
   /** Missão sem lugar no mapa: a tarefa é a missão, e o local é onde ela estiver. */
