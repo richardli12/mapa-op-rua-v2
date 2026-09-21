@@ -172,6 +172,15 @@ export default function InteligenciaTerritorial({
     null
   );
   const [setores, setSetores] = useState<SetorDoTerritorio[]>([]);
+  /**
+   * A última carga da malha quebrou no caminho.
+   *
+   * Sem isso, a tela vazia só sabia dizer uma coisa — "este município não tem
+   * malha" — e dizia a mesma coisa quando a rede caiu, quando o serviço não
+   * respondeu e quando a carga foi interrompida. É diagnóstico errado, e o pior
+   * tipo: manda a pessoa desistir de um dado que está lá.
+   */
+  const [falhaDeSetores, setFalhaDeSetores] = useState(false);
   /** De qual município é a malha de setores que está na memória. */
   const [setoresDe, setSetoresDe] = useState<string | null>(null);
   /** Quantos setores já chegaram, e quantos são: a carga é longa e paginada. */
@@ -278,6 +287,7 @@ export default function InteligenciaTerritorial({
     setSetores([]);
     setSetoresDe(null);
     setBairroDosSetores(null);
+    setFalhaDeSetores(false);
     cargaDeSetores.current = null;
     setRecorte({ nivel: 'municipio', codigo: alvo.codigo, nome: alvo.nome });
     setCenso(null);
@@ -353,6 +363,7 @@ export default function InteligenciaTerritorial({
 
     setCarregandoDesenho(true);
     setErro(null);
+    setFalhaDeSetores(false);
     setProgressoSetores({ lidos: 0, total: municipio.totalSetores || 0 });
 
     const tudo: SetorDoTerritorio[] = [];
@@ -375,6 +386,7 @@ export default function InteligenciaTerritorial({
       setSetoresDe(municipio.codigo);
     } catch (falha: any) {
       cargaDeSetores.current = null;
+      setFalhaDeSetores(true);
       setErro(falha);
     } finally {
       setCarregandoDesenho(false);
@@ -760,12 +772,12 @@ export default function InteligenciaTerritorial({
         {carregandoCobertura && (
           <p className="mt-2 text-[10.5px] font-semibold text-slate-400 flex items-center gap-1.5">
             <Loader2 className="w-3 h-3 animate-spin" />
-            Verificando o que o CCO tem carregado...
+            Verificando a cobertura do território...
           </p>
         )}
         {semMalha && (
           <p className="mt-2 text-[10.5px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 leading-snug">
-            {uf} ainda não tem o território carregado no CCO. Com malha:{' '}
+            {uf} ainda não tem o território publicado. Com malha:{' '}
             {ufsComTerritorio.join(', ') || '—'}.
           </p>
         )}
@@ -1292,12 +1304,38 @@ export default function InteligenciaTerritorial({
                 </p>
               </div>
             ) : setoresNaTela.length === 0 ? (
+              /*
+                TELA VAZIA TEM TRÊS MOTIVOS, E CADA UM PEDE OUTRA COISA.
+
+                Carga que quebrou pede um botão. Filtro de bairro sem setor
+                pede que se tire o filtro. Só o terceiro caso é mesmo ausência
+                de dado — e confundir os três fazia a tela mandar desistir de
+                uma malha que estava lá o tempo todo.
+              */
               <div className="py-8 text-center">
-                <p className="text-[11.5px] font-semibold text-slate-500 leading-snug px-2">
-                  {municipio
-                    ? 'Este município ainda não tem malha de setores carregada no CCO.'
-                    : 'Escolha um município para ver a malha de setores.'}
-                </p>
+                {falhaDeSetores ? (
+                  <>
+                    <p className="text-[11.5px] font-semibold text-slate-500 leading-snug px-2">
+                      A malha de setores não chegou inteira — a consulta falhou
+                      no caminho. O dado existe; foi o carregamento que parou.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={carregarSetoresDaCidade}
+                      className="mt-3 h-8 px-3.5 bg-[#015FC9] hover:bg-[#0150ab] text-white text-[10.5px] font-black uppercase tracking-wider rounded-lg cursor-pointer"
+                    >
+                      Tentar de novo
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-[11.5px] font-semibold text-slate-500 leading-snug px-2">
+                    {!municipio
+                      ? 'Escolha um município para ver a malha de setores.'
+                      : bairroDosSetores
+                        ? `Nenhum setor deste bairro está na malha carregada. Tire o filtro para ver a cidade inteira.`
+                        : 'Este município ainda não tem a malha de setores publicada.'}
+                  </p>
+                )}
               </div>
             ) : (
               <>
@@ -1465,9 +1503,8 @@ export default function InteligenciaTerritorial({
 
                 {censo?.status === 'sem_indicadores' && (
                   <p className="mt-3 text-[11px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 leading-snug">
-                    Esta UF ainda não teve os indicadores do Censo carregados no
-                    CCO. Não é erro da consulta — é carga que ainda não foi
-                    feita.
+                    Esta UF ainda não teve os indicadores do Censo publicados.
+                    Não é erro da consulta — é carga que ainda não foi feita.
                   </p>
                 )}
 

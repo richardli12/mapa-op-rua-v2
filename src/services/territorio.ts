@@ -113,15 +113,15 @@ export interface ErroDoTerritorio {
 /** Mensagens nossas para os códigos que o manual define. */
 const RECADOS: { [codigo: string]: string } = {
   CHAVE_AUSENTE:
-    "A chave do CCO não está configurada neste ambiente. Fale com o administrador.",
+    "O acesso à base de dados não está configurado neste ambiente. Fale com o administrador.",
   CHAVE_INVALIDA:
-    "A chave do CCO não foi aceita. Confira o que foi copiado no cadastro dela.",
+    "O acesso à base de dados não foi aceito. Confira o que foi cadastrado.",
   CHAVE_REVOGADA:
-    "A chave do CCO foi revogada. Peça uma nova ao administrador do sistema.",
+    "O acesso à base de dados foi revogado. Fale com o administrador do sistema.",
   PARAMETRO_INVALIDO: "A consulta não foi aceita como está escrita.",
   UF_INVALIDA: "Esta sigla de UF não existe.",
   NAO_ENCONTRADO:
-    "Este recorte não existe, ou esta UF ainda não teve os dados carregados no CCO.",
+    "Este recorte não existe, ou esta UF ainda não teve os dados publicados.",
   METODO_NAO_PERMITIDO: "Esta consulta só responde a leitura.",
   SERVICO_INDISPONIVEL:
     "O serviço do território não respondeu agora. Tente de novo em instantes.",
