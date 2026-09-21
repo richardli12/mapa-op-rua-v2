@@ -4435,6 +4435,48 @@ export default function MapContainer({
                 </div>
 
                 <div className="lg:col-span-7 space-y-5">
+              {/* Observações digitadas e áudios gravados em campo */}
+              {detalhesCheckIn.notas.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
+                    Observações ({detalhesCheckIn.notas.length})
+                  </p>
+                  <div className="space-y-2.5">
+                    {detalhesCheckIn.notas.map((nota: any) => (
+                      <div
+                        key={nota.id}
+                        className="border border-slate-150 rounded-xl p-3 bg-slate-50/60"
+                      >
+                        {nota.kind === 'audio' ? (
+                          <div className="flex items-center gap-2.5">
+                            <Mic className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <audio
+                              src={nota.url}
+                              controls
+                              preload="metadata"
+                              className="w-full h-9"
+                            />
+                            {nota.duration_seconds ? (
+                              <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                                {Math.floor(nota.duration_seconds / 60)}:
+                                {String(Math.floor(nota.duration_seconds % 60)).padStart(2, '0')}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-2.5">
+                            <MessageSquare className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                            <p className="text-xs text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
+                              {nota.content}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Fotos e vídeos anexados */}
               {(() => {
                 // A lista vem da tabela própria; o jsonb e a foto única cobrem os
@@ -4528,48 +4570,6 @@ export default function MapContainer({
                   </div>
                 );
               })()}
-
-              {/* Observações digitadas e áudios gravados em campo */}
-              {detalhesCheckIn.notas.length > 0 && (
-                <div>
-                  <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-2">
-                    Observações ({detalhesCheckIn.notas.length})
-                  </p>
-                  <div className="space-y-2.5">
-                    {detalhesCheckIn.notas.map((nota: any) => (
-                      <div
-                        key={nota.id}
-                        className="border border-slate-150 rounded-xl p-3 bg-slate-50/60"
-                      >
-                        {nota.kind === 'audio' ? (
-                          <div className="flex items-center gap-2.5">
-                            <Mic className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <audio
-                              src={nota.url}
-                              controls
-                              preload="metadata"
-                              className="w-full h-9"
-                            />
-                            {nota.duration_seconds ? (
-                              <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                                {Math.floor(nota.duration_seconds / 60)}:
-                                {String(Math.floor(nota.duration_seconds % 60)).padStart(2, '0')}
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="flex items-start gap-2.5">
-                            <MessageSquare className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                            <p className="text-xs text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words">
-                              {nota.content}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
                 </div>
               </div>
 
