@@ -5,7 +5,7 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2 } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, corDaDependencia, getCheckInPriority } from '../types';
 import {
   VisorDoMaterial,
@@ -397,6 +397,15 @@ interface MapContainerProps {
   onToggleCheckInFavorite?: (checkIn: CheckIn) => void;
   /** Exclusão do check-in pelo administrador, direto do mapa. */
   onDeleteCheckIn?: (checkIn: CheckIn) => void;
+  /**
+   * Liga (ou desliga) este check-in de uma missão.
+   *
+   * Quem grava é o painel, que é dono da lista e do banco; aqui só se escolhe.
+   */
+  onVincularCheckInAMissao?: (
+    checkIn: any,
+    missao: { id: string; titulo: string } | null
+  ) => void;
   /** Tipos de Operação cadastrados, usados para achar o ícone de cada ponto. */
   operationTypes?: OperationType[];
   /** Níveis de prioridade criados pelo administrador. */
@@ -608,6 +617,7 @@ export default function MapContainer({
   onMapFilterChange,
   onToggleCheckInFavorite,
   onDeleteCheckIn,
+  onVincularCheckInAMissao,
   operationTypes = [],
   priorityLevels = [],
   janelasDeTurno = TURNOS_PADRAO,
@@ -669,6 +679,8 @@ export default function MapContainer({
   const aoDesenharRaioDeBuscaRef = useRef(onRaioDeBuscaDesenhado);
   aoDesenharRaioDeBuscaRef.current = onRaioDeBuscaDesenhado;
   const recortesGroupRef = useRef<L.LayerGroup | null>(null);
+  /** O seletor de missão está aberto dentro da ficha do check-in? */
+  const [escolhendoMissaoNaFicha, setEscolhendoMissaoNaFicha] = useState(false);
   /** Camadas por id, para acender a do item que a lista apontar. */
   const recortesPorIdRef = useRef<{ [id: string]: any }>({});
   /** Assinatura do último enquadramento, para não reenquadrar à toa. */
@@ -689,6 +701,12 @@ export default function MapContainer({
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
+
+  // Ficha nova, seletor fechado: abrir o próximo check-in já com a lista de
+  // missões aberta seria oferecer uma escolha que ninguém pediu.
+  useEffect(() => {
+    setEscolhendoMissaoNaFicha(false);
+  }, [(selectedCheckInForModal as any)?.id]);
   /**
    * Missão aberta na ficha, guardada só pelo id.
    *
@@ -3554,6 +3572,121 @@ export default function MapContainer({
                   </div>
                 );
               })()}
+
+              {/*
+                O VÍNCULO COM A MISSÃO, NA FICHA QUE ABRE PELO MAPA.
+
+                É aqui que se descobre que a pessoa registrou o trabalho sem
+                iniciar a missão: o pino foi clicado, a ficha está aberta, e o
+                "Registro Livre" está escrito no cabeçalho. Mandar procurar
+                outra tela para ligar as duas coisas é cobrar um caminho por um
+                dado que já está todo na frente de quem olha.
+              */}
+              {onVincularCheckInAMissao &&
+                (() => {
+                  const registro: any = selectedCheckInForModal;
+                  const doCliente = (id?: string | null) =>
+                    !registro.candidateId || id === registro.candidateId;
+                  const missoes = [
+                    ...areas
+                      .filter((a: any) => doCliente(a.candidateId))
+                      .map((a: any) => ({ id: a.id, titulo: a.title, tipo: 'Área' })),
+                    ...pins
+                      .filter((p: any) => doCliente(p.candidateId))
+                      .map((p: any) => ({ id: p.id, titulo: p.title, tipo: 'Ponto' }))
+                  ];
+                  const atual = registro.missionId || '';
+
+                  /** Grava e deixa a ficha aberta já contando a verdade nova. */
+                  const escolher = (
+                    missao: { id: string; titulo: string } | null
+                  ) => {
+                    onVincularCheckInAMissao(registro, missao);
+                    setSelectedCheckInForModal({
+                      ...registro,
+                      mode: missao ? 'missao' : 'livre',
+                      missionId: missao?.id,
+                      missionTitle: missao?.titulo
+                    } as any);
+                    setEscolhendoMissaoNaFicha(false);
+                  };
+
+                  if (atual) {
+                    return (
+                      <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3.5 py-2.5 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[9.5px] font-black uppercase tracking-widest text-emerald-700">
+                            Missão vinculada
+                          </p>
+                          <p className="text-[12.5px] font-bold text-slate-800 truncate leading-tight mt-0.5">
+                            {registro.missionTitle ||
+                              missoes.find((m) => m.id === atual)?.titulo ||
+                              'Missão'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => escolher(null)}
+                          className="text-[10px] font-black uppercase tracking-wider text-slate-400 hover:text-rose-600 cursor-pointer transition-colors shrink-0"
+                        >
+                          Desvincular
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  if (!escolhendoMissaoNaFicha) {
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setEscolhendoMissaoNaFicha(true)}
+                        className="h-10 w-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer active:scale-[0.99] flex items-center justify-center gap-2"
+                      >
+                        <Target className="w-3.5 h-3.5 text-emerald-600" />
+                        Vincular a missão
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <div className="rounded-xl border border-slate-200 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-black text-slate-500">
+                          Vincular a missão
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setEscolhendoMissaoNaFicha(false)}
+                          className="text-[10px] font-black uppercase tracking-wider text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                      <select
+                        autoFocus
+                        value=""
+                        onChange={(e) => {
+                          const alvo = missoes.find((m) => m.id === e.target.value);
+                          escolher(alvo ? { id: alvo.id, titulo: alvo.titulo } : null);
+                        }}
+                        className="mt-2 w-full h-10 px-2.5 bg-white border border-slate-200 rounded-xl text-[12px] font-bold text-slate-700 cursor-pointer focus:outline-hidden"
+                      >
+                        <option value="">Registro livre (sem missão)</option>
+                        {missoes.map((missao) => (
+                          <option key={missao.id} value={missao.id}>
+                            {missao.tipo} · {missao.titulo}
+                          </option>
+                        ))}
+                      </select>
+                      {missoes.length === 0 && (
+                        <p className="mt-1.5 text-[10.5px] font-semibold text-slate-400 leading-snug">
+                          Esta campanha ainda não tem missão cadastrada para
+                          vincular.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
               {/* Seção principal de identificação */}
               <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-xl flex items-center gap-4">
