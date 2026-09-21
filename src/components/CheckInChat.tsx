@@ -632,6 +632,8 @@ function FioDoCheckIn({
     midias.length,
     observacoes.length,
     operacoes.length,
+    missoes.length,
+    missaoId ? 1 : 0,
     coords ? 1 : 0,
     mapaPronto ? 1 : 0,
     travado ? 1 : 0,
@@ -640,13 +642,17 @@ function FioDoCheckIn({
 
   useEffect(() => {
     /*
-     * Com ordem urgente aberta e nada feito ainda, o fim do fio é o lugar
-     * errado. O fio desce sozinho até a etapa 1 e a ordem — que é o que a
-     * pessoa precisa ler antes de qualquer coisa — fica acima da dobra,
-     * escondida pela própria rolagem automática. Enquanto ela não confirma a
-     * primeira etapa, quem manda na tela é a ordem.
+     * Com ordem na tela e nada decidido ainda, o fim do fio é o lugar errado.
+     *
+     * A ordem abre a conversa, e o briefing dela é alto: descer sozinho até a
+     * última bolha empurraria para fora da dobra justamente o que a pessoa
+     * precisa ler antes de qualquer coisa. Então, enquanto houver missão
+     * esperando escolha — ou enquanto a urgente estiver trancando a rua —,
+     * quem manda na tela é a ordem. Escolhida a missão, a conversa volta a
+     * mandar: o próximo passo é o mapa, lá embaixo.
      */
-    const naOrdem = travado && etapa <= 2 && !localConfirmado;
+    const naOrdem =
+      missoes.length > 0 && etapa <= 2 && !localConfirmado && (travado || !missaoId);
     const ancora = naOrdem ? blocoMissoesRef.current : fimRef.current;
     const ir = () =>
       ancora?.scrollIntoView({ behavior: 'smooth', block: naOrdem ? 'start' : 'end' });
@@ -1644,55 +1650,21 @@ function FioDoCheckIn({
           </div>
         )}
 
-        {/* A abertura: uma conversa começa cumprimentando */}
-        <Fala hora={horas.abertura} destaque>
-          <strong className="font-black" style={{ color: AZUL }}>
-            {saudacao}, {primeiroNome}.
-          </strong>{' '}
-          Vamos registrar o que você está fazendo agora — são cinco passos curtos
-          e eu vou junto.
-        </Fala>
+        {/*
+          A ORDEM VEM PRIMEIRO — antes do "boa tarde", antes de qualquer bolha.
+          
+          A saudação abria a tela e a ordem vinha depois dela, como se fosse
+          mais um assunto da conversa. Só que quem abre o check-in com missão
+          na mão não está começando um papo: está recebendo uma instrução. O
+          que manda entra na frente do que cumprimenta, e a conversa começa
+          embaixo, já sabendo do que se trata.
 
-        {/* A ORDEM DO COMITÊ: o que ele mandou, antes de qualquer pergunta */}
+          A frase que explicava a ordem era uma bolha aqui em cima. Ela virou
+          o recado dentro do próprio painel: explicação de ordem pertence à
+          ordem, não à conversa.
+        */}
         {missoes.length > 0 && (
           <>
-            <Fala hora={horas.abertura} atraso={450}>
-              {travado ? (
-                urgentesPendentes.length === 1 ? (
-                  <>
-                    <strong className="font-black" style={{ color: '#E11D48' }}>
-                      Chegou uma ordem urgente para você.
-                    </strong>{' '}
-                    É ela agora — o resto espera.
-                  </>
-                ) : (
-                  <>
-                    <strong className="font-black" style={{ color: '#E11D48' }}>
-                      Você tem {urgentesPendentes.length} ordens urgentes abertas.
-                    </strong>{' '}
-                    Comece por uma delas.
-                  </>
-                )
-              ) : missao ? (
-                <>Você está na missão abaixo. Se mudar de ideia, dá para trocar.</>
-              ) : missoes.length === 1 ? (
-                <>Você recebeu uma missão. É essa que você está fazendo?</>
-              ) : (
-                <>
-                  Você recebeu {missoes.length} missões
-                  {quantasAgora > 0 && turnoAgora && (
-                    <>
-                      {' '}
-                      — {quantasAgora === 1 ? 'uma é' : `${quantasAgora} são`} para{' '}
-                      {NOME_DO_TURNO[turnoAgora].toLowerCase()}, e{' '}
-                      {quantasAgora === 1 ? 'ela está' : 'elas estão'} no topo
-                    </>
-                  )}
-                  . Qual delas você está fazendo agora?
-                </>
-              )}
-            </Fala>
-
             <div className="ck-entra flex items-end gap-2 flex-row-reverse" ref={blocoMissoesRef}>
               <span className="w-7 shrink-0" />
               <div className="max-w-[92%] w-full">
@@ -1715,6 +1687,43 @@ function FioDoCheckIn({
                     if (!id && !operacoesConfirmadas) setEtapa(1);
                   }}
                   novas={novasDePe}
+                  recado={
+                    travado ? (
+                      urgentesPendentes.length === 1 ? (
+                        <>
+                          <strong className="font-black" style={{ color: '#E11D48' }}>
+                            Chegou uma ordem urgente para você.
+                          </strong>{' '}
+                          É ela agora — o resto espera.
+                        </>
+                      ) : (
+                        <>
+                          <strong className="font-black" style={{ color: '#E11D48' }}>
+                            Você tem {urgentesPendentes.length} ordens urgentes abertas.
+                          </strong>{' '}
+                          Duas não dá para fazer ao mesmo tempo: escolha por qual
+                          você começa — a outra continua aqui, esperando.
+                        </>
+                      )
+                    ) : missao ? (
+                      <>Você está nesta missão. Se mudar de ideia, dá para trocar.</>
+                    ) : missoes.length === 1 ? (
+                      <>Você recebeu uma missão. É essa que você está fazendo?</>
+                    ) : (
+                      <>
+                        Você recebeu {missoes.length} missões
+                        {quantasAgora > 0 && turnoAgora && (
+                          <>
+                            {' '}
+                            — {quantasAgora === 1 ? 'uma é' : `${quantasAgora} são`} para{' '}
+                            {NOME_DO_TURNO[turnoAgora].toLowerCase()}, e{' '}
+                            {quantasAgora === 1 ? 'ela está' : 'elas estão'} no topo
+                          </>
+                        )}
+                        . Qual delas você está fazendo agora?
+                      </>
+                    )
+                  }
                   niveis={niveis}
                   janelas={janelas}
                   turnoAgora={turnoAgora}
@@ -1725,6 +1734,34 @@ function FioDoCheckIn({
             </div>
           </>
         )}
+
+        {/*
+          A abertura: uma conversa começa cumprimentando.
+
+          Com ordem na tela ela entra depois da ordem, e muda de assunto: não
+          adianta explicar os cinco passos a quem acabou de receber uma
+          instrução — o que essa pessoa precisa saber é o que fazer com ela.
+        */}
+        <Fala hora={horas.abertura} destaque atraso={missoes.length > 0 ? 350 : 0}>
+          <strong className="font-black" style={{ color: AZUL }}>
+            {saudacao}, {primeiroNome}.
+          </strong>{' '}
+          {missoes.length > 0 ? (
+            travado ? (
+              <>Cumpra a ordem acima e eu registro tudo aqui — são poucos passos.</>
+            ) : (
+              <>
+                Escolha a missão acima, ou siga sem escolher se você está fazendo
+                outra coisa. Eu registro do mesmo jeito.
+              </>
+            )
+          ) : (
+            <>
+              Vamos registrar o que você está fazendo agora — são cinco passos
+              curtos e eu vou junto.
+            </>
+          )}
+        </Fala>
 
         {/*
           ETAPA 1: a ação e a prioridade — só no registro livre.

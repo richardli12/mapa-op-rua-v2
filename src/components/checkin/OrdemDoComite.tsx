@@ -67,6 +67,14 @@ interface OrdemDoComiteProps {
   onEscolher: (id: string | null) => void;
   /** Ids que chegaram com a tela aberta e que a pessoa ainda não tocou. */
   novas: string[];
+  /**
+   * A frase que explica a ordem, dentro do painel.
+   *
+   * Ela já foi uma bolha de conversa acima do bloco. Ordem não é conversa: o
+   * que manda vem antes do que cumprimenta, e a explicação pertence ao painel
+   * que ela explica.
+   */
+  recado?: React.ReactNode;
   niveis: PriorityLevel[];
   janelas: JanelaDeTurno[];
   turnoAgora: TurnoId | null;
@@ -369,6 +377,75 @@ function CorpoDaMissao({
 }
 
 /**
+ * A MOLDURA DA ORDEM — a mesma para a urgente e para a de rotina.
+ *
+ * Antes eram duas apresentações. A urgente vinha num painel com borda,
+ * cabeçalho e rodapé; a comum era um rótulo cinza de dez pixels sobre cartões
+ * brancos soltos no meio da conversa. Só que uma missão de rotina também é
+ * uma ordem: alguém decidiu que aquela pessoa tem de estar naquele lugar. Ela
+ * não pode ter o peso visual de um recado.
+ *
+ * Então a forma passa a ser uma só — cabeçalho com ícone e contagem, o recado,
+ * os cartões, o rodapé — e quem carrega a gravidade é a COR: vermelho com
+ * sirene pulsando para a ordem urgente, azul para a missão do dia. Mesmo
+ * corpo, temperatura diferente: é o que deixa a urgente continuar urgente.
+ */
+function PainelDaOrdem({
+  cor,
+  icone,
+  pulsando,
+  titulo,
+  contador,
+  recado,
+  rodape,
+  children
+}: {
+  cor: string;
+  icone: React.ReactNode;
+  pulsando?: boolean;
+  titulo: string;
+  contador?: React.ReactNode;
+  recado?: React.ReactNode;
+  rodape?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="ck-entra rounded-3xl overflow-hidden bg-white border-2"
+      style={{ borderColor: cor, boxShadow: `0 20px 44px -24px ${cor}` }}
+    >
+      <div className="px-3.5 py-2.5 flex items-center gap-2" style={{ backgroundColor: cor }}>
+        <span className="relative flex items-center justify-center w-5 h-5 shrink-0">
+          {pulsando && <span className="ck-bate absolute inset-0 rounded-full bg-white/40" />}
+          <span className="relative text-white flex items-center justify-center">{icone}</span>
+        </span>
+        <span className="text-[11px] font-black uppercase tracking-[0.18em] text-white">
+          {titulo}
+        </span>
+        {contador && (
+          <>
+            <span className="flex-1" />
+            <span className="text-[10px] font-black uppercase tracking-wider text-white/70 text-right">
+              {contador}
+            </span>
+          </>
+        )}
+      </div>
+
+      {recado && (
+        <p className="px-3.5 pt-3 text-[12px] font-bold text-slate-500 leading-snug">
+          {recado}
+        </p>
+      )}
+
+      <div className="p-2.5 space-y-2">{children}</div>
+
+      {rodape}
+    </div>
+  );
+}
+
+/**
  * Um cartão de missão.
  *
  * `fixa` é a ordem urgente única: não há escolha a fazer, então o cartão não
@@ -381,6 +458,7 @@ function CartaoDeMissao({
   nova,
   urgente,
   fixa,
+  aberto,
   niveis,
   janelas,
   coords,
@@ -392,6 +470,8 @@ function CartaoDeMissao({
   nova: boolean;
   urgente: boolean;
   fixa: boolean;
+  /** Briefing aberto mesmo sem ser urgente nem escolhida. */
+  aberto?: boolean;
   niveis: PriorityLevel[];
   janelas: JanelaDeTurno[];
   coords: { lat: number; lng: number } | null;
@@ -406,7 +486,7 @@ function CartaoDeMissao({
    * rolagem entre a pergunta e a resposta. A lista mostra o que decide; a
    * escolhida mostra o que executa.
    */
-  const detalhado = urgente || escolhida || fixa;
+  const detalhado = urgente || escolhida || fixa || !!aberto;
 
   return (
     /*
@@ -482,6 +562,7 @@ export default function OrdemDoComite({
   missaoId,
   onEscolher,
   novas,
+  recado,
   niveis,
   janelas,
   turnoAgora,
@@ -500,68 +581,47 @@ export default function OrdemDoComite({
 
     return (
       <div className="space-y-2">
-        <div
-          className="ck-entra rounded-3xl overflow-hidden bg-white border-2"
-          style={{
-            borderColor: VERMELHO,
-            boxShadow: `0 20px 44px -24px ${VERMELHO}`
-          }}
+        <PainelDaOrdem
+          cor={VERMELHO}
+          icone={<Siren className="w-3.5 h-3.5" />}
+          pulsando
+          titulo={varias ? `${urgentes.length} ordens urgentes` : 'Ordem urgente'}
+          recado={recado}
+          rodape={
+            <div
+              className="px-3.5 py-3 flex items-start gap-2.5 border-t"
+              style={{ backgroundColor: '#FFF1F2', borderColor: '#FECDD3' }}
+            >
+              <Lock className="w-4 h-4 shrink-0 mt-px" style={{ color: VERMELHO }} />
+              <p className="text-[11.5px] font-bold leading-snug" style={{ color: '#9F1239' }}>
+                Enquanto esta ordem estiver aberta, você não pode fazer registro
+                livre nem começar outra missão. Cumpra, grave o check-in e tudo
+                destrava na hora.
+              </p>
+            </div>
+          }
         >
-          <div
-            className="px-3.5 py-2.5 flex items-center gap-2"
-            style={{ backgroundColor: VERMELHO }}
-          >
-            <span className="relative flex items-center justify-center w-5 h-5 shrink-0">
-              <span className="ck-bate absolute inset-0 rounded-full bg-white/40" />
-              <Siren className="relative w-3.5 h-3.5 text-white" />
-            </span>
-            <span className="text-[11px] font-black uppercase tracking-[0.18em] text-white">
-              {varias ? `${urgentes.length} ordens urgentes` : 'Ordem urgente'}
-            </span>
-          </div>
-
-          {varias && (
-            <p className="px-3.5 pt-3 text-[12px] font-bold text-slate-500 leading-snug">
-              Duas coisas não dá para fazer ao mesmo tempo. Escolha por qual
-              você começa — a outra continua aqui, esperando.
-            </p>
-          )}
-
-          <div className="p-2.5 space-y-2">
-            {urgentes.map(missao => (
-              <React.Fragment key={missao.id}>
-              <CartaoDeMissao
-                missao={missao}
-                escolhida={missao.id === missaoId}
-                nova={novas.includes(missao.id)}
-                urgente
-                fixa={!varias}
-                niveis={niveis}
-                janelas={janelas}
-                coords={coords}
-                semRota={rotaNaDoca}
-                onTocar={() => {
-                  vibrar();
-                  // Trancado, largar a ordem não é opção: só trocar entre elas.
-                  onEscolher(missao.id);
-                }}
-              />
-              </React.Fragment>
-            ))}
-          </div>
-
-          <div
-            className="px-3.5 py-3 flex items-start gap-2.5 border-t"
-            style={{ backgroundColor: '#FFF1F2', borderColor: '#FECDD3' }}
-          >
-            <Lock className="w-4 h-4 shrink-0 mt-px" style={{ color: VERMELHO }} />
-            <p className="text-[11.5px] font-bold leading-snug" style={{ color: '#9F1239' }}>
-              Enquanto esta ordem estiver aberta, você não pode fazer registro
-              livre nem começar outra missão. Cumpra, grave o check-in e tudo
-              destrava na hora.
-            </p>
-          </div>
-        </div>
+          {urgentes.map(missao => (
+            <React.Fragment key={missao.id}>
+            <CartaoDeMissao
+              missao={missao}
+              escolhida={missao.id === missaoId}
+              nova={novas.includes(missao.id)}
+              urgente
+              fixa={!varias}
+              niveis={niveis}
+              janelas={janelas}
+              coords={coords}
+              semRota={rotaNaDoca}
+              onTocar={() => {
+                vibrar();
+                // Trancado, largar a ordem não é opção: só trocar entre elas.
+                onEscolher(missao.id);
+              }}
+            />
+            </React.Fragment>
+          ))}
+        </PainelDaOrdem>
 
         {outras.length > 0 && (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-3.5 py-3 flex items-center gap-2.5">
@@ -588,68 +648,85 @@ export default function OrdemDoComite({
   /** Quantas missões são para a hora de agora. */
   const quantasAgora = missoes.filter(m => m.turno && m.turno === turnoAgora).length;
 
+  const so = missoes.length === 1;
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 px-1">
-        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-          Ordem
-        </span>
-        <span className="flex-1 h-px bg-slate-200" />
-        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-          {missaoEscolhida
-            ? 'escolhida'
-            : quantasAgora > 0 && turnoAgora
-              ? `${quantasAgora} para ${NOME_DO_TURNO[turnoAgora].toLowerCase()}`
-              : contar(missoes.length, 'missão', 'missões')}
-        </span>
-      </div>
+      <PainelDaOrdem
+        cor={AZUL}
+        icone={so ? <ClipboardList className="w-3.5 h-3.5" /> : <Target className="w-3.5 h-3.5" />}
+        titulo={
+          missaoEscolhida
+            ? 'Missão escolhida'
+            : so
+              ? 'Sua missão'
+              : contar(missoes.length, 'missão', 'missões')
+        }
+        contador={
+          !missaoEscolhida && quantasAgora > 0 && turnoAgora
+            ? `${quantasAgora} para ${NOME_DO_TURNO[turnoAgora].toLowerCase()}`
+            : undefined
+        }
+        recado={recado}
+        rodape={
+          <div className="px-3.5 pb-3 -mt-1 space-y-2">
+            {/* A lista longa fica cortada: as três do topo são as que importam */}
+            {!missaoEscolhida && !verTodas && missoes.length > 3 && (
+              <button
+                type="button"
+                onClick={() => setVerTodas(true)}
+                className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 bg-white text-[12px] font-black uppercase tracking-wider text-slate-500 flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+                Ver as outras {missoes.length - 3}
+              </button>
+            )}
 
-      {visiveis.map(missao => (
-        <React.Fragment key={missao.id}>
-        <CartaoDeMissao
-          missao={missao}
-          escolhida={missao.id === missaoId}
-          nova={novas.includes(missao.id)}
-          urgente={idsUrgentes.includes(missao.id)}
-          fixa={false}
-          niveis={niveis}
-          janelas={janelas}
-          coords={coords}
-          semRota={rotaNaDoca}
-          onTocar={() => {
-            vibrar();
-            onEscolher(missao.id === missaoId ? null : missao.id);
-          }}
-        />
-        </React.Fragment>
-      ))}
+            {missaoEscolhida ? (
+              <button
+                type="button"
+                onClick={() => onEscolher(null)}
+                className="ml-auto block px-2 py-1 text-[11px] font-black uppercase tracking-wider text-slate-400 cursor-pointer"
+              >
+                Trocar de missão
+              </button>
+            ) : (
+              <p className="text-[11px] text-slate-400 font-semibold leading-snug">
+                {so
+                  ? 'Toque na missão para assumi-la. Se você está fazendo outra coisa, siga sem escolher — entra como registro livre.'
+                  : 'Toque na missão que você está fazendo. Se for outra coisa, siga sem escolher — entra como registro livre.'}
+              </p>
+            )}
+          </div>
+        }
+      >
+        {visiveis.map(missao => (
+          <React.Fragment key={missao.id}>
+          <CartaoDeMissao
+            missao={missao}
+            escolhida={missao.id === missaoId}
+            nova={novas.includes(missao.id)}
+            urgente={idsUrgentes.includes(missao.id)}
+            fixa={false}
+            /*
+             * Missão de rotina também abre o briefing: distância, tempo a pé,
+             * janela, rota e material. Era esse o conteúdo que separava a
+             * ordem urgente das outras, e não havia razão para separar.
+             */
+            aberto
+            niveis={niveis}
+            janelas={janelas}
+            coords={coords}
+            semRota={rotaNaDoca}
+            onTocar={() => {
+              vibrar();
+              onEscolher(missao.id === missaoId ? null : missao.id);
+            }}
+          />
+          </React.Fragment>
+        ))}
+      </PainelDaOrdem>
 
-      {/* A lista longa fica cortada: as três do topo são as que importam */}
-      {!missaoEscolhida && !verTodas && missoes.length > 3 && (
-        <button
-          type="button"
-          onClick={() => setVerTodas(true)}
-          className="w-full py-2.5 rounded-2xl border border-dashed border-slate-300 bg-white/60 text-[12px] font-black uppercase tracking-wider text-slate-500 flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
-        >
-          <ChevronDown className="w-3.5 h-3.5" />
-          Ver as outras {missoes.length - 3}
-        </button>
-      )}
-
-      {missaoEscolhida ? (
-        <button
-          type="button"
-          onClick={() => onEscolher(null)}
-          className="ml-auto block px-2 py-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400 cursor-pointer"
-        >
-          Trocar de missão
-        </button>
-      ) : (
-        <p className="text-[11px] text-slate-400 font-semibold text-right leading-snug">
-          Toque na missão que você está fazendo. Se for outra coisa, siga sem
-          escolher — entra como registro livre.
-        </p>
-      )}
     </div>
   );
 }
