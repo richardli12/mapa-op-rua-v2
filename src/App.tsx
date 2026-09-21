@@ -4810,10 +4810,17 @@ export default function App() {
         const rotulos = operationTypes
           .filter((t) => filtroTiposAcao.includes(t.id))
           .map((t) => t.label);
-        // Registro antigo guarda só o rótulo do tipo; o id nem sempre existe.
+        /*
+          O filtro pode chegar por id OU por rótulo.
+
+          Registro antigo guarda só o rótulo, e o tipo pode ter sido apagado
+          do cadastro depois de usado — nesses casos não existe id nenhum para
+          casar, e só o texto identifica o que a pessoa escolheu.
+        */
         const bate =
           filtroTiposAcao.includes(c.operationTypeId || "") ||
-          rotulos.includes(c.operationTypeLabel || "");
+          rotulos.includes(c.operationTypeLabel || "") ||
+          filtroTiposAcao.includes(c.operationTypeLabel || "");
         if (!bate) return false;
       }
       return true;

@@ -1547,14 +1547,24 @@ export default function PainelDeCheckIns({
               <Secao titulo="O que mais aparece" Icone={Flag} aviso="clique para filtrar o mapa">
                 <div className="space-y-2">
                   {tipos.slice(0, 7).map(t => {
-                    const marcado = tiposSelecionados.includes(t.id);
+                    /*
+                       A CHAVE DO FILTRO É O ID, E O RÓTULO QUANDO NÃO HÁ ID.
+
+                       O tipo de operação de um check-in nem sempre existe no
+                       cadastro: o registro guarda o rótulo, e o tipo pode ter
+                       sido renomeado ou apagado depois. Nesses casos `id` vinha
+                       vazio, o botão nascia desativado e clicar não fazia nada
+                       — a seção prometia "clique para filtrar o mapa" e não
+                       filtrava, que é pior do que não oferecer.
+                    */
+                    const chave = t.id || t.rotulo;
+                    const marcado = tiposSelecionados.includes(chave);
                     return (
                       <button
                         key={t.rotulo}
                         type="button"
-                        onClick={() => t.id && onTipo(t.id)}
-                        disabled={!t.id}
-                        className={`w-full text-left group ${t.id ? 'cursor-pointer' : 'cursor-default'}`}
+                        onClick={() => chave && onTipo(chave)}
+                        className="w-full text-left group cursor-pointer"
                       >
                         <div className="flex items-baseline justify-between gap-2 mb-1">
                           <span
