@@ -158,7 +158,7 @@ export default function Cabecalho({
           </span>
         ) : (
           <span className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-[10.5px] font-black text-white/70">
-            Fora dos turnos da campanha
+            Check-in fora de turno
           </span>
         )}
 
