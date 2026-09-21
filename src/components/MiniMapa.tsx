@@ -49,6 +49,16 @@ export default function MiniMapa({
     .join('|');
   const boxRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  const LRef = useRef<any>(null);
+  /** Camada só dos marcadores: limpar ela não derruba os tiles. */
+  const camadaRef = useRef<any>(null);
+  /** O desenhador de pinos, criado junto com o mapa. */
+  const pinoRef = useRef<((cor: string, forma?: 'alerta' | 'pessoa') => any) | null>(null);
+  /** O que já está desenhado, para não redesenhar o mesmo. */
+  const desenhadoRef = useRef<string | null>(null);
+  /** Valores atuais lidos de dentro do efeito de criação, que roda uma vez só. */
+  const dadosRef = useRef({ lat, lng, pontos, chaveDosPontos, onReady });
+  dadosRef.current = { lat, lng, pontos, chaveDosPontos, onReady };
   const [erro, setErro] = useState(false);
 
   useEffect(() => {
@@ -59,6 +69,8 @@ export default function MiniMapa({
     (async () => {
       const L = (await import('leaflet')).default;
       if (!vivo || !boxRef.current || mapRef.current) return;
+      LRef.current = L;
+      const { lat, lng } = dadosRef.current;
 
       const mapa = L.map(boxRef.current, {
         zoomControl: false,
@@ -76,12 +88,12 @@ export default function MiniMapa({
         { maxZoom: 19, crossOrigin: true }
       );
       tiles.on('load', () => {
-        if (vivo) onReady?.();
+        if (vivo) dadosRef.current.onReady?.();
       });
       tiles.on('tileerror', () => {
         if (vivo) {
           setErro(true);
-          onReady?.();
+          dadosRef.current.onReady?.();
         }
       });
       tiles.addTo(mapa);
@@ -89,7 +101,7 @@ export default function MiniMapa({
       // Marcador desenhado no próprio HTML, com a mesma cara do mapa grande:
       // não depende do ícone padrão do Leaflet, que é um arquivo externo e
       // some quando falha.
-      const pino = (cor: string, forma?: 'alerta' | 'pessoa') => {
+      const pino = (cor: string, forma?: 'alerta' | 'pessoa'): any => {
         const desenho =
           forma === 'pessoa'
             ? '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
@@ -112,25 +124,9 @@ export default function MiniMapa({
         });
       };
 
-      const lista = pontos && pontos.length > 0 ? pontos : null;
-      if (lista) {
-        lista.forEach(ponto => {
-          const marcador = L.marker([ponto.lat, ponto.lng], {
-            icon: pino(ponto.cor || '#0C3556', ponto.forma)
-          }).addTo(mapa);
-          if (ponto.titulo) {
-            marcador.bindTooltip(ponto.titulo, { direction: 'top', offset: [0, -14] });
-          }
-        });
-        // Todos os check-ins precisam caber no cartão; o limite de zoom evita
-        // que um ponto sozinho encoste no chão da rua e perca a referência.
-        mapa.fitBounds(L.latLngBounds(lista.map(p => [p.lat, p.lng] as [number, number])), {
-          padding: [30, 30],
-          maxZoom: 16
-        });
-      } else {
-        L.marker([lat, lng], { icon: pino('#0C3556') }).addTo(mapa);
-      }
+      pinoRef.current = pino;
+      camadaRef.current = L.layerGroup().addTo(mapa);
+      desenharRef.current(true);
 
       const remedir = () => mapRef.current?.invalidateSize();
       remedir();
@@ -147,17 +143,78 @@ export default function MiniMapa({
         io.observe(boxRef.current);
       }
       // Rede lenta não pode travar o fio: passado o limite, segue assim mesmo.
-      setTimeout(() => vivo && onReady?.(), 6000);
+      setTimeout(() => vivo && dadosRef.current.onReady?.(), 6000);
     })();
 
     return () => {
       vivo = false;
       ro?.disconnect();
       io?.disconnect();
+      camadaRef.current = null;
+      pinoRef.current = null;
+      desenhadoRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Coordenada nova NÃO refaz o mapa — troca o que está desenhado nele.
+   *
+   * Antes este componente nascia de novo a cada mudança de `lat`/`lng`: o
+   * efeito inteiro tinha essas props na lista de dependências, então o mapa
+   * era destruído e recriado. Parado isso não aparece; andando até uma
+   * missão, com o GPS entregando uma leitura por segundo, o cartão piscava
+   * cinza e se reposicionava sem parar, porque a cada segundo havia um mapa
+   * novo baixando tiles e refazendo o enquadramento.
+   *
+   * Agora o mapa nasce uma vez. Os marcadores vivem numa camada própria, que
+   * é limpa e redesenhada, e o enquadramento só se mexe quando o desenho
+   * muda de verdade — a lista de pontos que Chegada arredonda para onze
+   * metros. Leitura de GPS que não muda o desenho não move mais nada.
+   */
+  const desenhar = (primeiraVez = false) => {
+    const L = LRef.current;
+    const mapa = mapRef.current;
+    const camada = camadaRef.current;
+    const pino = pinoRef.current;
+    if (!L || !mapa || !camada || !pino) return;
+
+    const { lat, lng, pontos, chaveDosPontos } = dadosRef.current;
+    const lista = pontos && pontos.length > 0 ? pontos : null;
+    const chave = lista ? chaveDosPontos : `${lat},${lng}`;
+    if (!primeiraVez && desenhadoRef.current === chave) return;
+    desenhadoRef.current = chave;
+
+    camada.clearLayers();
+
+    if (lista) {
+      lista.forEach(ponto => {
+        const marcador = L.marker([ponto.lat, ponto.lng], {
+          icon: pino(ponto.cor || '#0C3556', ponto.forma)
+        }).addTo(camada);
+        if (ponto.titulo) {
+          marcador.bindTooltip(ponto.titulo, { direction: 'top', offset: [0, -14] });
+        }
+      });
+      // Todos os check-ins precisam caber no cartão; o limite de zoom evita
+      // que um ponto sozinho encoste no chão da rua e perca a referência.
+      mapa.fitBounds(L.latLngBounds(lista.map(p => [p.lat, p.lng] as [number, number])), {
+        padding: [30, 30],
+        maxZoom: 16,
+        animate: false
+      });
+    } else {
+      L.marker([lat, lng], { icon: pino('#0C3556') }).addTo(camada);
+      if (!primeiraVez) mapa.setView([lat, lng], mapa.getZoom(), { animate: false });
+    }
+  };
+  const desenharRef = useRef(desenhar);
+  desenharRef.current = desenhar;
+
+  useEffect(() => {
+    desenharRef.current();
   }, [lat, lng, chaveDosPontos]);
 
   return (
