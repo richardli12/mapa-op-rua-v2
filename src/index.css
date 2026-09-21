@@ -875,3 +875,22 @@
     animation: none;
   }
 }
+
+/*
+ * O pino da Unidade Básica de Saúde.
+ *
+ * Sem `position` aqui: quem posiciona marcador é o mapa, e declarar `relative`
+ * nesta folha (carregada depois da dele) tira o `absolute` do ícone e derruba
+ * todos os pinos no fluxo do painel. Foi o que aconteceu com as escolas.
+ */
+.pino-ubs__corpo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--cor, #0e9f9f);
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}

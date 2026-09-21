@@ -31,6 +31,7 @@ import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
 import FichaEstabelecimento from "./components/FichaEstabelecimento";
 import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import FichaDoRecorteNoMapa from "./components/FichaDoRecorteNoMapa";
+import { UnidadeDeSaude } from "./dados/ubs";
 import CamadasDeInteligencia, {
   EstadoDasCamadas,
 } from "./components/CamadasDeInteligencia";
@@ -144,6 +145,7 @@ import {
   Clock,
   BarChart3,
   GraduationCap,
+  HeartPulse,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
@@ -1016,6 +1018,10 @@ export default function App() {
    * desligar: ligar uma camada é gesto de barra, ao lado do recorte de data.
    */
   const [camadasAbertas, setCamadasAbertas] = useState(false);
+  /** A camada das Unidades Básicas de Saúde, ligada pelo trilho. */
+  const [ubsLigadas, setUbsLigadas] = useState(false);
+  /** As unidades lidas da tabela `ubs`. */
+  const [unidadesDeSaude, setUnidadesDeSaude] = useState<UnidadeDeSaude[]>([]);
   const [camadas, setCamadas] = useState<EstadoDasCamadas>({
     metrica: null,
     nivel: "bairros",
@@ -3484,6 +3490,30 @@ export default function App() {
         setEscolasLigadas(false);
         setEscolaAberta(null);
       }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [municipioDoMapa, isDatabaseConfigured]);
+
+  /*
+    Unidades Básicas de Saúde do município do cliente.
+
+    Mesma regra das escolas: município sem unidade cadastrada não ganha camada
+    ligada, e o botão fica apagado em vez de acender sobre um mapa vazio.
+  */
+  useEffect(() => {
+    if (!isDatabaseConfigured) {
+      setUnidadesDeSaude([]);
+      setUbsLigadas(false);
+      return;
+    }
+    let vivo = true;
+    (async () => {
+      const res = await DatabaseService.fetchUnidadesDeSaude(municipioDoMapa);
+      if (!vivo) return;
+      setUnidadesDeSaude(res.data as UnidadeDeSaude[]);
+      if (res.data.length === 0) setUbsLigadas(false);
     })();
     return () => {
       vivo = false;
@@ -13047,6 +13077,25 @@ export default function App() {
                 },
               ]
             : []),
+          ...(unidadesDeSaude.length > 0
+            ? [
+                {
+                  id: "ubs",
+                  grupo: "camadas",
+                  rotulo: "UBS",
+                  ajuda: ubsLigadas
+                    ? "Esconder as unidades de saúde"
+                    : `Mostrar as ${unidadesDeSaude.length} unidades de saúde de ${municipioDoMapa || "cidade"}`,
+                  cor: "#0E9F9F",
+                  ativa: ubsLigadas,
+                  icone: <HeartPulse className="w-4 h-4" />,
+                  aoClicar: (e) => {
+                    e.stopPropagation();
+                    setUbsLigadas((ligado) => !ligado);
+                  },
+                },
+              ]
+            : []),
           {
             id: "estabelecimentos",
             grupo: "camadas",
@@ -14956,6 +15005,8 @@ export default function App() {
           }
           escolas={escolas}
           escolasVisiveis={escolasLigadas}
+          ubs={unidadesDeSaude}
+          ubsVisiveis={ubsLigadas}
           escolaEmFoco={escolaAberta?.codigoInep || null}
           onEscolaSelecionada={(escola) => setEscolaAberta(escola)}
           tempPlacementRadius={Number(areaRadius) || 0}
