@@ -8,10 +8,17 @@
 2. Cole o conteúdo de [`schema.sql`](./schema.sql) e clique em **Run**.
 3. Troque a senha do usuário inicial:
    ```sql
-   update public.auth_users
-      set password = 'a-sua-senha'
-    where email = 'admin@totalmapa.com';
+   select public.set_admin_password(
+     'admin@totalmapa.com',   -- conta
+     'a-sua-senha',           -- senha nova (mínimo 8 caracteres)
+     'troque-esta-senha'      -- senha atual, a que o schema criou
+   );
    ```
+   A resposta vem como `{"ok": true, ...}`. Não troque a senha com um
+   `update ... set password = '...'`: a senha fica em hash na coluna
+   `password_hash`, e o login não olha mais a coluna `password` — a conta
+   continuaria com a senha antiga, e a nova daria "usuário ou senha
+   inválidos".
 4. Preencha `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` (nomes mantidos por compatibilidade) no `.env` (ou nas
    Environment Variables da Vercel) com a URL e a chave pública do projeto.
 
@@ -40,9 +47,68 @@ cita o fornecedor de banco em cada comentário.
 Além das tabelas: o bucket `imagens` de arquivos (fotos e vídeos do check-in),
 o Realtime das tabelas do mapa e as políticas de acesso da chave `anon`.
 
+## Login do painel
+
+A senha do painel fica só em hash bcrypt, em `auth_users.password_hash`, e a
+tabela está fora da policy aberta da chave `anon`. Quem confere a senha é a
+função `login_admin`, dentro do banco: o hash nunca sai de lá. Para cadastrar
+ou trocar uma senha, use `set_admin_password` (exemplo no passo 3 acima).
+
+Num banco que já existia antes disso, rode também
+[`migrations/2026-09-19-senhas-em-hash.sql`](./migrations/2026-09-19-senhas-em-hash.sql):
+ela converte as senhas antigas e apaga o texto puro.
+
+### Ninguém entra: "usuário ou senha inválidos" com a senha certa
+
+Quase sempre é uma destas duas:
+
+- **A senha foi trocada por `update ... set password = '...'`.** Não vale mais:
+  o login lê `password_hash`. Refaça com `set_admin_password`.
+- **As funções não estão no banco** (schema antigo, aplicado antes delas). A
+  tela diz *"O banco de dados precisa ser atualizado para conferir a senha"*.
+  Rode
+  [`migrations/2026-09-21-login-admin-funcoes.sql`](./migrations/2026-09-21-login-admin-funcoes.sql):
+  ele cria só as duas funções, sem tocar em conta nem em senha. Depois entre
+  com a senha de sempre — uma conta que ainda estivesse em texto puro é aceita
+  e convertida em hash na hora. Rodar o `schema.sql` inteiro de novo também
+  resolve.
+
+- **A função existe, mas quebra por dentro.** O jeito de ver é chamá-la direto
+  no SQL Editor, onde o erro aparece inteiro:
+
+  ```sql
+  select public.login_admin('seu@email.com', 'sua-senha');
+  ```
+
+  Se responder `function crypt(text, text) does not exist`, é o `search_path`:
+  o `crypt()` vem do pgcrypto, que o Supabase instala no schema `extensions`, e
+  a função precisa nascer com `set search_path = public, extensions`. Rode de
+  novo a migração
+  [`migrations/2026-09-21-login-admin-funcoes.sql`](./migrations/2026-09-21-login-admin-funcoes.sql),
+  que já vem corrigida.
+
+Para conferir o que o banco tem:
+
+```sql
+select email,
+       password_hash is not null as tem_hash,
+       password_changed_at
+  from public.auth_users;
+
+select proname from pg_proc
+ where proname in ('login_admin', 'set_admin_password');
+```
+
+E, se o e-mail tiver sido gravado com maiúsculas, o login não acha a conta —
+ele procura sempre em minúsculas:
+
+```sql
+update public.auth_users set email = lower(btrim(email)) where email <> lower(btrim(email));
+```
+
 ## Segurança
 
-`auth_users` guarda a senha em texto puro e fica legível pela chave `anon`, que
-vai no bundle do navegador. É o formato que o login do app compara hoje. Para
-fechar isso, o caminho é migrar o login para o serviço de autenticação do banco ou guardar só o
-hash e comparar numa função RPC — as duas mudanças pedem ajuste no código.
+Fora `auth_users`, o resto do sistema fala com o banco pela chave `anon`, que
+vai no pacote do navegador: as demais tabelas são legíveis por quem tiver essa
+chave. Fechar isso de vez pede o serviço de autenticação do banco ou leitura
+por função, tabela por tabela.

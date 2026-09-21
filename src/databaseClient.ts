@@ -1738,11 +1738,28 @@ export const DatabaseService = {
       });
 
       if (error) {
-        // Banco que ainda não recebeu a migração não tem a função: cai na
-        // comparação antiga, para ninguém ficar sem entrar no painel.
-        if (/login_admin|function|schema cache|PGRST202/i.test(error.message || '')) {
-          console.warn('Senhas ainda em texto puro: rode a migração 2026-09-19-senhas-em-hash.');
-          return this.loginAdminTextoPuro(conta, password);
+        /*
+         * Só "a função não existe" cai no caminho antigo.
+         *
+         * O teste aqui era por /login_admin|function|.../ — e "function"
+         * aparece em quase todo erro de banco: "permission denied for function
+         * login_admin", "function crypt(text, text) does not exist". Qualquer
+         * um deles era tratado como banco desatualizado, o app repetia a
+         * conferência em texto puro (que nunca casa, com a coluna vazia) e
+         * mostrava "o banco precisa ser atualizado" — escondendo a causa de
+         * verdade, que é a única coisa que diria onde mexer.
+         *
+         * Na falta da função o PostgREST responde PGRST202. Qualquer outro
+         * erro chegou ao banco e volta inteiro para a tela.
+         */
+        const funcaoNaoExiste =
+          error.code === 'PGRST202' ||
+          /could not find the function|schema cache/i.test(error.message || '');
+        if (funcaoNaoExiste) {
+          console.warn(
+            'Banco sem login_admin: rode db/migrations/2026-09-21-login-admin-funcoes.sql.'
+          );
+          return this.loginAdminTextoPuro(conta, password, true);
         }
         throw error;
       }
@@ -1757,8 +1774,17 @@ export const DatabaseService = {
     }
   },
 
-  /** Caminho antigo, só enquanto a migração das senhas não roda. */
-  async loginAdminTextoPuro(email: string, password: string) {
+  /**
+   * Caminho antigo, só enquanto a migração das senhas não roda.
+   *
+   * `semFuncaoDeLogin` diz que viemos para cá porque o banco não tem a função
+   * login_admin — e aí uma senha recusada aqui quase nunca é senha errada: a
+   * coluna `password` nasce vazia desde que as senhas viraram hash, então
+   * nenhuma senha do mundo casa com ela. Dizer "usuário ou senha inválidos"
+   * nesse caso manda o administrador caçar a senha certa por horas, quando o
+   * que falta é rodar o schema no banco.
+   */
+  async loginAdminTextoPuro(email: string, password: string, semFuncaoDeLogin = false) {
     if (!db) return { success: false, error: 'banco de dados não configurado.' };
     try {
       const { data, error } = await db
@@ -1769,6 +1795,12 @@ export const DatabaseService = {
         .maybeSingle();
       if (error) throw error;
       if (data) return { success: true, user: data };
+      if (semFuncaoDeLogin) {
+        return {
+          success: false,
+          error: 'O banco de dados precisa ser atualizado para conferir a senha (rode db/schema.sql).'
+        };
+      }
       return { success: false, error: 'Usuário ou senha inválidos.' };
     } catch (err: any) {
       console.error('Erro ao autenticar administrador:', err);

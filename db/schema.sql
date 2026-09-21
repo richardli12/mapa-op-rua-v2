@@ -484,6 +484,141 @@ create unique index if not exists idx_candidates_external
 
 
 -- ----------------------------------------------------------------------------
+-- 11.1 Login do painel, dentro do banco
+-- ----------------------------------------------------------------------------
+-- Quem confere a senha e o banco, nao o app: o hash nunca sai daqui. O
+-- security definer deixa a funcao ler auth_users mesmo com a tabela fechada
+-- para a chave anon (secao 15), e ela devolve so o que a tela precisa.
+--
+-- Sem estas duas funcoes ninguem entra no painel. O app chama login_admin, e a
+-- outra porta -- a comparacao antiga em texto puro -- nao serve mais, porque a
+-- coluna password nasce vazia: o login responderia "usuario ou senha
+-- invalidos" para a senha certa. Por isso elas vem com o schema, e nao so na
+-- migracao db/migrations/2026-09-19-senhas-em-hash.sql.
+--
+-- O search_path leva "extensions" junto de proposito. crypt() e gen_salt() vem
+-- do pgcrypto, e o Supabase instala as extensoes no schema "extensions", nao no
+-- "public". Com "set search_path = public" sozinho, a funcao nao enxerga
+-- crypt() e morre com "function crypt(text, text) does not exist" -- so na hora
+-- do login, porque os updates deste arquivo rodam com o search_path da sessao,
+-- que ja inclui extensions, e passam sem reclamar. Num banco que guarde o
+-- pgcrypto no public, o schema a mais no caminho nao atrapalha.
+create or replace function public.login_admin(p_email text, p_password text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  conta public.auth_users%rowtype;
+begin
+  select * into conta
+    from public.auth_users
+   where email = lower(btrim(p_email));
+
+  if not found then
+    return jsonb_build_object('ok', false);
+  end if;
+
+  -- Conta que ficou sem hash (criada por fora, direto na tabela) ainda entra
+  -- pelo texto puro, e a senha e convertida na hora -- assim ninguem fica
+  -- trancado do lado de fora.
+  if conta.password_hash is null then
+    if coalesce(conta.password, '') <> '' and conta.password = p_password then
+      update public.auth_users
+         set password_hash = crypt(p_password, gen_salt('bf', 10)),
+             password = '',
+             password_changed_at = now()
+       where auth_users.email = conta.email;
+      return jsonb_build_object(
+        'ok', true,
+        'email', conta.email,
+        'name', coalesce(conta.name, '')
+      );
+    end if;
+    return jsonb_build_object('ok', false);
+  end if;
+
+  if conta.password_hash = crypt(p_password, conta.password_hash) then
+    return jsonb_build_object(
+      'ok', true,
+      'email', conta.email,
+      'name', coalesce(conta.name, '')
+    );
+  end if;
+
+  return jsonb_build_object('ok', false);
+end;
+$$;
+
+do $$
+begin
+  execute 'grant execute on function public.login_admin(text, text) to anon, authenticated';
+exception when others then
+  raise notice 'grant de login_admin nao aplicado (%).', sqlerrm;
+end $$;
+
+-- A senha nova entra so em hash. Para trocar a de uma conta que ja existe, a
+-- senha atual e exigida; para criar a primeira, nao ha o que exigir.
+create or replace function public.set_admin_password(
+  p_email        text,
+  p_new_password text,
+  p_old_password text default null,
+  p_name         text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  conta   public.auth_users%rowtype;
+  -- Nome diferente do da coluna de proposito: chamada de "email", a variavel
+  -- sombrearia a coluna e o "where" viraria uma comparacao dela com ela mesma,
+  -- que e sempre verdadeira -- qualquer conta serviria.
+  v_email text := lower(btrim(p_email));
+begin
+  if length(coalesce(p_new_password, '')) < 8 then
+    return jsonb_build_object('ok', false, 'reason', 'senha_curta');
+  end if;
+
+  select * into conta from public.auth_users where auth_users.email = v_email;
+
+  if not found then
+    insert into public.auth_users (email, password, password_hash, name, password_changed_at)
+    values (v_email, '', crypt(p_new_password, gen_salt('bf', 10)), coalesce(p_name, ''), now());
+    return jsonb_build_object('ok', true, 'criado', true);
+  end if;
+
+  if conta.password_hash is not null then
+    if p_old_password is null
+       or conta.password_hash <> crypt(p_old_password, conta.password_hash) then
+      return jsonb_build_object('ok', false, 'reason', 'senha_atual_incorreta');
+    end if;
+  elsif coalesce(conta.password, '') <> '' and conta.password <> coalesce(p_old_password, '') then
+    return jsonb_build_object('ok', false, 'reason', 'senha_atual_incorreta');
+  end if;
+
+  update public.auth_users
+     set password_hash = crypt(p_new_password, gen_salt('bf', 10)),
+         password = '',
+         name = coalesce(p_name, name),
+         password_changed_at = now()
+   where auth_users.email = conta.email;
+
+  return jsonb_build_object('ok', true, 'criado', false);
+end;
+$$;
+
+do $$
+begin
+  execute 'grant execute on function public.set_admin_password(text, text, text, text) to anon, authenticated';
+exception when others then
+  raise notice 'grant de set_admin_password nao aplicado (%).', sqlerrm;
+end $$;
+
+
+-- ----------------------------------------------------------------------------
 -- 12. Usuario inicial do painel
 -- ----------------------------------------------------------------------------
 -- A senha entra ja em hash. TROQUE depois do primeiro acesso:
@@ -578,6 +713,25 @@ begin
       t
     );
   end loop;
+end $$;
+
+-- auth_users nao entra na lista acima de proposito: com o login e a troca de
+-- senha dentro do banco (secao 11.1), a chave anon nao precisa mais enxergar a
+-- tabela -- nem o hash, nem quem sao as contas. Quem entra e a funcao.
+do $$
+begin
+  execute 'alter table public.auth_users enable row level security';
+  execute 'drop policy if exists "acesso_app" on public.auth_users';
+exception when others then
+  raise notice 'auth_users: policy nao alterada (%).', sqlerrm;
+end $$;
+
+do $$
+begin
+  execute 'revoke all on table public.auth_users from anon';
+  execute 'revoke all on table public.auth_users from authenticated';
+exception when others then
+  raise notice 'auth_users: acesso nao revogado (%).', sqlerrm;
 end $$;
 
 

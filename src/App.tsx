@@ -7813,9 +7813,16 @@ export default function App() {
                     required
                     placeholder=""
                     value={adminPassword}
-                    onChange={(e) =>
-                      setAdminPassword(e.target.value.replace(/\s/g, ""))
-                    }
+                    /*
+                     * A senha vai para o banco como foi digitada.
+                     *
+                     * Aqui ela passava por replace(/\s/g, ""), que apagava os
+                     * espaços sem avisar ninguém: quem tem espaço na senha
+                     * digitava a senha certa, o sistema mandava outra e a
+                     * resposta voltava "usuário ou senha inválidos" — sem nada
+                     * na tela que explicasse por quê.
+                     */
+                    onChange={(e) => setAdminPassword(e.target.value)}
                     className="w-full py-4 bg-transparent border-none text-[15px] font-bold text-[#0D233A] placeholder-[#C2D0DC] focus:outline-hidden"
                   />
                   <button

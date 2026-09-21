@@ -1,52 +1,23 @@
 -- ============================================================================
--- Senhas do painel em hash
+-- Login do painel: as funcoes que conferem a senha
 --
--- Ate aqui auth_users guardava a senha em texto puro e o login comparava
--- "email = ? and password = ?" direto da tabela -- com a chave anonima, que vai
--- no pacote do navegador. Na pratica, qualquer pessoa com o endereco do app
--- conseguia ler as senhas do painel.
+-- Sintoma que este arquivo resolve: a tela de login recusa a senha certa, e o
+-- app diz "O banco de dados precisa ser atualizado para conferir a senha".
 --
--- Agora a senha vira hash bcrypt (pgcrypto), o texto puro e apagado da tabela e
--- a conferencia acontece dentro do banco, numa funcao: o hash nunca sai de la,
--- e a comparacao e feita com crypt(), que refaz o hash com o mesmo sal.
+-- O app confere a senha chamando login_admin dentro do banco. A funcao nasceu
+-- na migracao 2026-09-19-senhas-em-hash.sql, mas o schema.sql nao a criava --
+-- entao um banco montado so pelo schema, ou que nunca recebeu aquela migracao,
+-- fica sem ela. Sem a funcao o app cai na comparacao antiga, em texto puro, e
+-- essa porta nao existe mais: a coluna password fica vazia desde o hash, e
+-- nenhuma senha casa com ela.
 --
--- As senhas que ja existem sao convertidas por este mesmo arquivo -- ninguem
+-- Este arquivo cria as duas funcoes e nada mais. Nao apaga conta, nao troca
+-- senha e pode ser rodado mais de uma vez.
+--
+-- COMO USAR: SQL Editor -> New query -> cole tudo -> Run. Depois tente entrar
+-- com a sua senha de sempre. Se a conta ainda estiver em texto puro, a propria
+-- login_admin aceita a senha antiga e a converte em hash na hora -- ninguem
 -- precisa cadastrar senha de novo.
---
--- Rode este arquivo no SQL Editor. E idempotente e nao apaga conta nenhuma.
--- ============================================================================
-
-create extension if not exists pgcrypto;
-
-alter table public.auth_users add column if not exists password_hash text;
-alter table public.auth_users add column if not exists password_changed_at timestamptz;
-
--- ----------------------------------------------------------------------------
--- 1. Converte as senhas que ja estao la
--- ----------------------------------------------------------------------------
--- So as que ainda nao tem hash. Rodar de novo nao mexe em nada.
-update public.auth_users
-   set password_hash = crypt(password, gen_salt('bf', 10)),
-       password_changed_at = coalesce(password_changed_at, now())
- where password_hash is null
-   and password is not null
-   and btrim(password) <> '';
-
--- ----------------------------------------------------------------------------
--- 2. Apaga o texto puro
--- ----------------------------------------------------------------------------
--- A coluna continua existindo para nao quebrar um app antigo que ainda a leia,
--- mas vazia: nao ha mais senha legivel na tabela.
-update public.auth_users set password = '' where password_hash is not null;
-
-alter table public.auth_users alter column password drop not null;
-alter table public.auth_users alter column password set default '';
-
--- ----------------------------------------------------------------------------
--- 3. Login dentro do banco
--- ----------------------------------------------------------------------------
--- security definer: a funcao le a tabela mesmo quando quem chama nao pode. Ela
--- devolve so o que a tela precisa -- nunca o hash.
 --
 -- O search_path leva "extensions" junto de proposito. crypt() e gen_salt() vem
 -- do pgcrypto, e o Supabase instala as extensoes no schema "extensions", nao no
@@ -55,6 +26,15 @@ alter table public.auth_users alter column password set default '';
 -- do login, porque os updates deste arquivo rodam com o search_path da sessao,
 -- que ja inclui extensions, e passam sem reclamar. Num banco que guarde o
 -- pgcrypto no public, o schema a mais no caminho nao atrapalha.
+-- ============================================================================
+
+create extension if not exists pgcrypto;
+
+-- As colunas do hash, para o caso de o banco nunca ter recebido a migracao.
+alter table public.auth_users add column if not exists password_hash text;
+alter table public.auth_users add column if not exists password_changed_at timestamptz;
+alter table public.auth_users alter column password drop not null;
+
 create or replace function public.login_admin(p_email text, p_password text)
 returns jsonb
 language plpgsql
@@ -72,8 +52,9 @@ begin
     return jsonb_build_object('ok', false);
   end if;
 
-  -- Conta que ficou sem hash (criada por fora) ainda pode entrar pelo texto
-  -- puro, e a senha e convertida na hora -- assim ninguem fica trancado.
+  -- Conta que ficou sem hash (criada por fora, direto na tabela) ainda entra
+  -- pelo texto puro, e a senha e convertida na hora -- assim ninguem fica
+  -- trancado do lado de fora.
   if conta.password_hash is null then
     if coalesce(conta.password, '') <> '' and conta.password = p_password then
       update public.auth_users
@@ -109,11 +90,8 @@ exception when others then
   raise notice 'grant de login_admin nao aplicado (%).', sqlerrm;
 end $$;
 
--- ----------------------------------------------------------------------------
--- 4. Trocar ou cadastrar senha
--- ----------------------------------------------------------------------------
 -- A senha nova entra so em hash. Para trocar a de uma conta que ja existe, a
--- senha atual e exigida; para criar a primeira conta, nao ha o que exigir.
+-- senha atual e exigida; para criar a primeira, nao ha o que exigir.
 create or replace function public.set_admin_password(
   p_email        text,
   p_new_password text,
@@ -172,24 +150,27 @@ exception when others then
 end $$;
 
 -- ----------------------------------------------------------------------------
--- 5. Fecha a tabela
+-- Recarrega o cache do PostgREST
 -- ----------------------------------------------------------------------------
--- Com o login e a troca de senha dentro do banco, a chave anonima nao precisa
--- mais enxergar auth_users. A policy aberta cai; quem entra e a funcao.
-do $$
-begin
-  execute 'alter table public.auth_users enable row level security';
-  execute 'drop policy if exists "acesso_app" on public.auth_users';
-exception when others then
-  raise notice 'auth_users: policy nao alterada (%).', sqlerrm;
-end $$;
-
-do $$
-begin
-  execute 'revoke all on table public.auth_users from anon';
-  execute 'revoke all on table public.auth_users from authenticated';
-exception when others then
-  raise notice 'auth_users: acesso nao revogado (%).', sqlerrm;
-end $$;
-
+-- Sem este aviso a API do banco ainda nao enxerga as funcoes recem-criadas, e
+-- o app continua recebendo o mesmo erro por alguns minutos.
 notify pgrst, 'reload schema';
+
+-- ----------------------------------------------------------------------------
+-- Se mesmo assim a senha for recusada
+-- ----------------------------------------------------------------------------
+-- 1. Confira se a conta existe com o e-mail em minusculas -- e assim que o
+--    login procura:
+--
+--      select email, password_hash is not null as tem_hash from public.auth_users;
+--      update public.auth_users set email = lower(btrim(email))
+--       where email <> lower(btrim(email));
+--
+-- 2. Para definir uma senha nova sem saber a atual (so daqui do SQL Editor,
+--    que nao passa pela conferencia):
+--
+--      update public.auth_users
+--         set password_hash = crypt('SuaSenhaNova123', gen_salt('bf', 10)),
+--             password = '',
+--             password_changed_at = now()
+--       where email = lower(btrim('seu@email.com'));
