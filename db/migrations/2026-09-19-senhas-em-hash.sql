@@ -47,11 +47,19 @@ alter table public.auth_users alter column password set default '';
 -- ----------------------------------------------------------------------------
 -- security definer: a funcao le a tabela mesmo quando quem chama nao pode. Ela
 -- devolve so o que a tela precisa -- nunca o hash.
+--
+-- O search_path leva "extensions" junto de proposito. crypt() e gen_salt() vem
+-- do pgcrypto, e o Supabase instala as extensoes no schema "extensions", nao no
+-- "public". Com "set search_path = public" sozinho, a funcao nao enxerga
+-- crypt() e morre com "function crypt(text, text) does not exist" -- so na hora
+-- do login, porque os updates deste arquivo rodam com o search_path da sessao,
+-- que ja inclui extensions, e passam sem reclamar. Num banco que guarde o
+-- pgcrypto no public, o schema a mais no caminho nao atrapalha.
 create or replace function public.login_admin(p_email text, p_password text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   conta public.auth_users%rowtype;
@@ -115,7 +123,7 @@ create or replace function public.set_admin_password(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   conta   public.auth_users%rowtype;

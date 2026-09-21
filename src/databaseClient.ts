@@ -1738,10 +1738,27 @@ export const DatabaseService = {
       });
 
       if (error) {
-        // Banco que ainda não recebeu a migração não tem a função: cai na
-        // comparação antiga, para ninguém ficar sem entrar no painel.
-        if (/login_admin|function|schema cache|PGRST202/i.test(error.message || '')) {
-          console.warn('Senhas ainda em texto puro: rode db/schema.sql (cria login_admin).');
+        /*
+         * Só "a função não existe" cai no caminho antigo.
+         *
+         * O teste aqui era por /login_admin|function|.../ — e "function"
+         * aparece em quase todo erro de banco: "permission denied for function
+         * login_admin", "function crypt(text, text) does not exist". Qualquer
+         * um deles era tratado como banco desatualizado, o app repetia a
+         * conferência em texto puro (que nunca casa, com a coluna vazia) e
+         * mostrava "o banco precisa ser atualizado" — escondendo a causa de
+         * verdade, que é a única coisa que diria onde mexer.
+         *
+         * Na falta da função o PostgREST responde PGRST202. Qualquer outro
+         * erro chegou ao banco e volta inteiro para a tela.
+         */
+        const funcaoNaoExiste =
+          error.code === 'PGRST202' ||
+          /could not find the function|schema cache/i.test(error.message || '');
+        if (funcaoNaoExiste) {
+          console.warn(
+            'Banco sem login_admin: rode db/migrations/2026-09-21-login-admin-funcoes.sql.'
+          );
           return this.loginAdminTextoPuro(conta, password, true);
         }
         throw error;

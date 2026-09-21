@@ -73,6 +73,20 @@ Quase sempre é uma destas duas:
   e convertida em hash na hora. Rodar o `schema.sql` inteiro de novo também
   resolve.
 
+- **A função existe, mas quebra por dentro.** O jeito de ver é chamá-la direto
+  no SQL Editor, onde o erro aparece inteiro:
+
+  ```sql
+  select public.login_admin('seu@email.com', 'sua-senha');
+  ```
+
+  Se responder `function crypt(text, text) does not exist`, é o `search_path`:
+  o `crypt()` vem do pgcrypto, que o Supabase instala no schema `extensions`, e
+  a função precisa nascer com `set search_path = public, extensions`. Rode de
+  novo a migração
+  [`migrations/2026-09-21-login-admin-funcoes.sql`](./migrations/2026-09-21-login-admin-funcoes.sql),
+  que já vem corrigida.
+
 Para conferir o que o banco tem:
 
 ```sql
