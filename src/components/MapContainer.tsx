@@ -8,7 +8,7 @@ import { DatabaseService } from '../databaseClient';
 import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Sparkles, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
-import { UNIDADES_DE_SAUDE, UnidadeDeSaude } from '../dados/ubs';
+import { UnidadeDeSaude } from '../dados/ubs';
 import {
   VisorDoMaterial,
   formatoDoMaterial,
@@ -269,6 +269,8 @@ interface MapContainerProps {
   escolas?: Escola[];
   /** A camada de escolas so desenha quando esta ligada no dock. */
   escolasVisiveis?: boolean;
+  /** As Unidades Básicas de Saúde, lidas do banco por quem tem a conexão. */
+  ubs?: UnidadeDeSaude[];
   /** A camada das Unidades Básicas de Saúde, ligada pelo trilho. */
   ubsVisiveis?: boolean;
   /** Clique numa escola: quem mostra a ficha e a tela de cima. */
@@ -602,6 +604,7 @@ export default function MapContainer({
   checkIns,
   escolas,
   escolasVisiveis = false,
+  ubs,
   ubsVisiveis = false,
   escolaEmFoco,
   onEscolaSelecionada,
@@ -2290,8 +2293,15 @@ export default function MapContainer({
       return;
     }
 
+    // Unidade sem coordenada existe na lista e não vira pino: melhor faltar um
+    // alfinete do que pôr um no meio do oceano.
+    const comLugar = (ubs || []).filter(
+      u => u.lat !== null && u.lng !== null
+    ) as (UnidadeDeSaude & { lat: number; lng: number })[];
+    if (comLugar.length === 0) return;
+
     const cor = '#0E9F9F';
-    UNIDADES_DE_SAUDE.forEach(unidade => {
+    comLugar.forEach(unidade => {
       const icone = L.divIcon({
         className: 'pino-ubs',
         html:
@@ -2322,13 +2332,13 @@ export default function MapContainer({
     // Ligar a camada e não ver nada seria um botão quebrado: o mapa vai onde
     // as unidades estão, mas só no momento em que a camada acende.
     if (!camadaUbsLigadaRef.current) {
-      const pontos = UNIDADES_DE_SAUDE.map(u => [u.lat, u.lng] as [number, number]);
+      const pontos = comLugar.map(u => [u.lat, u.lng] as [number, number]);
       if (pontos.length > 0) {
         map.fitBounds(L.latLngBounds(pontos), { padding: [60, 60], maxZoom: 13 });
       }
     }
     camadaUbsLigadaRef.current = true;
-  }, [ubsVisiveis]);
+  }, [ubsVisiveis, ubs]);
 
   // Camada de escolas do municipio: so desenha quando ligada no dock.
   useEffect(() => {

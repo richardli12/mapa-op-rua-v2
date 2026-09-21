@@ -34,6 +34,8 @@ cita o fornecedor de banco em cada comentário.
 | `panfletagem_areas` | Áreas de panfletagem (círculos no mapa) |
 | `campaign_pins` | Pontos estratégicos (pinos no mapa) |
 | `check_ins` | Registros de campo: missão e livre, com fotos e vídeos |
+| `escolas` | Escolas do município, camada de contexto do mapa |
+| `ubs` | Unidades Básicas de Saúde, camada de contexto do mapa |
 
 Além das tabelas: o bucket `imagens` de arquivos (fotos e vídeos do check-in),
 o Realtime das tabelas do mapa e as políticas de acesso da chave `anon`.

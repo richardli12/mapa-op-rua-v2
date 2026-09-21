@@ -1441,6 +1441,62 @@ export const DatabaseService = {
    */
   // ------------------------------------------------------ niveis de prioridade
   /** Níveis de prioridade cadastrados pelo administrador, na ordem da lista. */
+  // ---------------------------------------------------------------------- ubs
+  /**
+   * Unidades Básicas de Saúde, para a camada do mapa.
+   *
+   * Sem a tabela criada o app segue sem a camada, como faz com as escolas: a
+   * lista volta vazia e quem chamou decide o que dizer. Derrubar o mapa por
+   * causa de uma camada de contexto seria trocar tudo por uma parte.
+   */
+  async fetchUnidadesDeSaude(municipio?: string) {
+    if (!db) return { success: false, data: [] as any[] };
+    try {
+      let consulta = db
+        .from('ubs')
+        .select('*')
+        .eq('ativa', true)
+        .order('nome', { ascending: true });
+      // Sem município em mãos, vêm todas: é melhor mostrar o município vizinho
+      // junto do que mostrar mapa vazio para quem ainda não escolheu cliente.
+      if (municipio && municipio.trim()) {
+        consulta = consulta.ilike('municipio', municipio.trim());
+      }
+      const { data, error } = await consulta;
+      if (error) throw error;
+
+      const linhas = (data || []).map((linha: any) => ({
+        id: linha.id,
+        nome: linha.nome,
+        endereco: linha.endereco ?? null,
+        celular: linha.celular ?? null,
+        email: linha.email ?? null,
+        responsaveis: [
+          { nome: linha.responsavel_1 ?? null, celular: linha.celular_responsavel_1 ?? null },
+          { nome: linha.responsavel_2 ?? null, celular: linha.celular_responsavel_2 ?? null }
+        ].filter((r) => r.nome),
+        /*
+         * Coordenada ausente vira `null`, nunca zero.
+         *
+         * `Number(null)` é 0, e zero é uma coordenada válida no golfo da
+         * Guiné: a unidade sem localização apareceria no meio do oceano como
+         * se fosse dado bom.
+         */
+        lat: linha.latitude === null || linha.latitude === undefined
+          ? null
+          : Number(linha.latitude),
+        lng: linha.longitude === null || linha.longitude === undefined
+          ? null
+          : Number(linha.longitude)
+      }));
+
+      return { success: true, data: linhas };
+    } catch (err: any) {
+      console.warn('Nao foi possivel buscar as unidades de saude:', err);
+      return { success: false, data: [] as any[], error: err.message };
+    }
+  },
+
   // ------------------------------------------------------------------ escolas
   /**
    * Escolas do municipio, para a camada do mapa.
