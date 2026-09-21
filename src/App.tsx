@@ -30,6 +30,7 @@ import LaserPointer from "./components/LaserPointer";
 import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
 import FichaEstabelecimento from "./components/FichaEstabelecimento";
 import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
+import FichaDoRecorteNoMapa from "./components/FichaDoRecorteNoMapa";
 import { Estabelecimento } from "./services/estabelecimentos";
 import TeamSignupPage from "./components/TeamSignupPage";
 import CheckInChat, { MissaoDoCampo } from "./components/CheckInChat";
@@ -14654,6 +14655,27 @@ export default function App() {
           tempPlacementRadius={Number(areaRadius) || 0}
           onTempRadiusChange={(metros) => setAreaRadius(metros)}
           tempPlacementType={coordsPickingMode}
+        />
+
+        {/*
+          FICHA DO SETOR SOB O CURSOR.
+
+          Fica no canto do mapa, não colada no ponteiro: são quinze números do
+          Censo, e caixa que persegue o mouse não se lê.
+        */}
+        <FichaDoRecorteNoMapa
+          recorte={
+            recortesTerritoriais.find((r) => r.id === recorteEmFoco) || null
+          }
+          uf={
+            candidateLocation?.uf ||
+            parseCandidateLocation(
+              candidateLocationText(
+                candidates.find((c) => c.id === selectedCandidateFilter),
+              ),
+            )?.uf ||
+            null
+          }
         />
       </div>
 
