@@ -82,7 +82,6 @@ const FORMATO = `Responda SOMENTE com um JSON neste formato exato:
     "naoDeveSerDito": ["afirmação que o material NÃO sustenta, e por quê"],
     "notaSugerida": "um parágrafo curto, pronto para virar nota oficial"
   },
-  "lacunas": ["o que faltou para concluir com segurança"],
   "veredito": "o fechamento, em 1 a 3 frases"
 }
 
@@ -395,7 +394,6 @@ export default async function handler(req: any, res: any) {
         naoDeveSerDito: lista(relatorio?.comunicacao?.naoDeveSerDito).map((t: any) => texto(t, 500)),
         notaSugerida: texto(relatorio?.comunicacao?.notaSugerida, 2000),
       },
-      lacunas: lista(relatorio.lacunas).map((l: any) => texto(l, 400)),
       veredito: texto(relatorio.veredito, 1500),
     },
     // A tela mostra isto no rodapé: quem leu o quê, e com que modelo.
