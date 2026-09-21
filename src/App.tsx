@@ -146,6 +146,7 @@ import {
   BarChart3,
   GraduationCap,
   HeartPulse,
+  Merge,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MapContainer, { NEIGHBORHOOD_DATA } from "./components/MapContainer";
@@ -4119,6 +4120,98 @@ export default function App() {
         : `"${tipo.label}" saiu dos check-ins.`,
       "info",
     );
+  };
+
+  /** O tipo escolhido para ser absorvido por outro, no gerenciador. */
+  const [tipoParaMesclar, setTipoParaMesclar] = useState<string | null>(null);
+
+  /**
+   * Mescla dois tipos de operação: tudo do primeiro passa a ser do segundo.
+   *
+   * A mesma coisa acaba cadastrada duas vezes — "Buracos" e "Buraco ou Cratera
+   * na Via" — e o painel passa a dividir ao meio um problema que é um só.
+   * Apagar o repetido sem mover o que está nele perderia os registros de
+   * vista: mover primeiro é o que torna o apagar seguro.
+   */
+  const mesclarTiposDeOperacao = (idOrigem: string, idDestino: string) => {
+    const origem = operationTypes.find((t) => t.id === idOrigem);
+    const destino = operationTypes.find((t) => t.id === idDestino);
+    if (!origem || !destino || origem.id === destino.id) return;
+
+    const checkInsAfetados = checkIns.filter(
+      (c: any) =>
+        c.operationTypeId === origem.id ||
+        (c.operationTypeLabel || "") === origem.label,
+    ).length;
+    const pontosAfetados = pins.filter((p) => p.iconType === origem.id).length;
+
+    askConfirmation({
+      title: "Mesclar tipos de operação",
+      message: `Tudo que está em "${origem.label}" passa a ser "${destino.label}", e "${origem.label}" sai da lista.`,
+      details: [
+        checkInsAfetados
+          ? `${checkInsAfetados} check-in(s) mudam de tipo.`
+          : "Nenhum check-in usa o tipo que sai.",
+        pontosAfetados ? `${pontosAfetados} missão(ões) mudam de ícone.` : "",
+        "Não dá para desfazer pelo painel.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      confirmLabel: "Mesclar",
+      onConfirm: async () => {
+        // A tela muda na hora; o banco recebe em seguida e, recusando, a lista
+        // de tipos volta — deixar o tipo sumido da tela e vivo no banco faria
+        // ele reaparecer no próximo carregamento, do nada.
+        const tiposAntes = operationTypes;
+        setOperationTypes((prev) => prev.filter((t) => t.id !== origem.id));
+        setCheckIns((prev: any) =>
+          prev.map((c: any) =>
+            c.operationTypeId === origem.id ||
+            (c.operationTypeLabel || "") === origem.label
+              ? {
+                  ...c,
+                  operationTypeId: destino.id,
+                  operationTypeLabel: destino.label,
+                }
+              : c,
+          ),
+        );
+        setPins((prev) =>
+          prev.map((p) =>
+            p.iconType === origem.id ? { ...p, iconType: destino.id } : p,
+          ),
+        );
+        // O filtro do mapa pode estar apontando para o tipo que acabou de sair.
+        setFiltroTiposAcao((atual) =>
+          atual.map((t) =>
+            t === origem.id || t === origem.label ? destino.id : t,
+          ),
+        );
+        setTipoParaMesclar(null);
+
+        if (!isDatabaseConfigured) {
+          triggerNotification(
+            `"${origem.label}" virou "${destino.label}".`,
+            "success",
+          );
+          return;
+        }
+
+        const res = await DatabaseService.mesclarTiposDeOperacao(
+          { id: origem.id, label: origem.label },
+          { id: destino.id, label: destino.label },
+        );
+        if (!res.success) {
+          setOperationTypes(tiposAntes);
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+          return;
+        }
+        triggerNotification(
+          `${res.movidos} check-in(s) passaram para "${destino.label}".`,
+          "success",
+        );
+      },
+    });
   };
 
   const deleteOperationType = (id: string) => {
@@ -15220,9 +15313,10 @@ export default function App() {
                         (p) => p.iconType === type.id,
                       ).length;
                       const isEditing = editingOperationTypeId === type.id;
+                      const mesclando = tipoParaMesclar === type.id;
                       return (
+                        <div key={type.id}>
                         <div
-                          key={type.id}
                           className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-all ${
                             isEditing
                               ? "border-indigo-300 bg-indigo-50/50"
@@ -15250,6 +15344,28 @@ export default function App() {
                             </p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            {/*
+                              MESCLAR: a mesma coisa cadastrada duas vezes.
+                              Escolher aqui abre a lista de destinos na própria
+                              linha — sair para outra tela para juntar dois
+                              nomes seria mais caminho do que a tarefa.
+                            */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setTipoParaMesclar(
+                                  tipoParaMesclar === type.id ? null : type.id,
+                                )
+                              }
+                              title="Mesclar com outro tipo"
+                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                tipoParaMesclar === type.id
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "hover:bg-slate-100 text-slate-400 hover:text-amber-600"
+                              }`}
+                            >
+                              <Merge className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => startEditOperationType(type)}
@@ -15267,6 +15383,57 @@ export default function App() {
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
+                        </div>
+
+                        {/*
+                          PARA ONDE VAI O QUE ESTÁ AQUI.
+
+                          A lista mostra só os outros tipos do mesmo cliente:
+                          mesclar com o tipo de outra campanha criaria um dado
+                          que nenhum relatório sabe ler.
+                        */}
+                        {mesclando && (
+                          <div className="mt-1.5 ml-4 p-3 rounded-xl border border-amber-200 bg-amber-50/60">
+                            <p className="text-[11px] font-bold text-amber-800 leading-snug">
+                              Tudo que está em "{type.label}" passa para o tipo
+                              que você escolher, e "{type.label}" sai da lista.
+                            </p>
+                            {clientOperationTypes.filter((t) => t.id !== type.id)
+                              .length === 0 ? (
+                              <p className="mt-1.5 text-[10.5px] font-semibold text-amber-700">
+                                Não há outro tipo neste cliente para receber.
+                              </p>
+                            ) : (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {clientOperationTypes
+                                  .filter((t) => t.id !== type.id)
+                                  .map((destino) => (
+                                    <button
+                                      key={destino.id}
+                                      type="button"
+                                      onClick={() =>
+                                        mesclarTiposDeOperacao(type.id, destino.id)
+                                      }
+                                      className="px-2.5 py-1.5 rounded-lg bg-white border border-amber-200 hover:border-amber-400 text-[11px] font-bold text-slate-700 cursor-pointer transition-colors flex items-center gap-1.5"
+                                    >
+                                      <span
+                                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                                        style={{ backgroundColor: destino.color }}
+                                      />
+                                      {destino.label}
+                                    </button>
+                                  ))}
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setTipoParaMesclar(null)}
+                              className="mt-2 text-[10px] font-black uppercase tracking-wider text-amber-700/70 hover:text-amber-900 cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        )}
                         </div>
                       );
                     })}
