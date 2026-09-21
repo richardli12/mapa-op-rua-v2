@@ -527,7 +527,20 @@
  * marcador é o mapa, e o porte da escola já decide o diâmetro.
  */
 .pino-escola {
-  position: relative;
+  /*
+   * ABSOLUTO, COMO TODO ÍCONE DE MARCADOR.
+   *
+   * Aqui estava `relative`, e esta folha é carregada depois da do mapa: com a
+   * mesma especificidade, a última vence e o ícone perdia o `position:
+   * absolute` que o mapa dá a todo marcador. Sem ele o pino sai do lugar
+   * absoluto e entra no fluxo do painel — um empilha embaixo do outro, e cada
+   * um acaba deslocado pela altura dos anteriores. Era por isso que as escolas
+   * desciam numa coluna e pareciam "se arrumar" ao aproximar: o deslocamento é
+   * em pixels, então vale quilômetros num mapa aberto e alguns metros num mapa
+   * fechado. Absoluto também é bloco de contenção para o corpo e as ondas, que
+   * se posicionam por `inset`.
+   */
+  position: absolute;
   width: var(--tamanho, 32px);
   height: var(--tamanho, 32px);
 }

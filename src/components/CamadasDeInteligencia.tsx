@@ -5,7 +5,6 @@ import {
   Users,
   Home,
   Gauge,
-  Vote,
   Loader2,
   AlertTriangle
 } from 'lucide-react';
@@ -26,9 +25,14 @@ interface Props {
   onAbrir: (aberto: boolean) => void;
   valor: EstadoDasCamadas;
   onMudar: (novo: EstadoDasCamadas) => void;
-  /** O painel de análise, que é a camada mais funda desta mesma gaveta. */
+  /**
+   * O painel de análise está aberto?
+   *
+   * Não é mais uma chave desta gaveta — abrir a gaveta já abre o painel. Fica
+   * porque é ele que deixa o botão aceso quando a análise está na tela sem
+   * nenhuma camada pintando o mapa.
+   */
   inteligenciaAberta: boolean;
-  onInteligencia: (aberta: boolean) => void;
   /** O que a camada está fazendo agora, contado por quem carrega os dados. */
   estado?: {
     carregando: boolean;
@@ -85,7 +89,6 @@ export default function CamadasDeInteligencia({
   valor,
   onMudar,
   inteligenciaAberta,
-  onInteligencia,
   estado
 }: Props) {
   const caixa = useRef<HTMLDivElement | null>(null);
@@ -178,26 +181,6 @@ export default function CamadasDeInteligencia({
                 </button>
               );
             })}
-
-            <button
-              type="button"
-              onClick={() => onInteligencia(!inteligenciaAberta)}
-              className="w-full flex items-center gap-2.5 px-1.5 py-2.5 cursor-pointer"
-            >
-              <Vote
-                className={`w-4 h-4 shrink-0 ${
-                  inteligenciaAberta ? 'text-[#015FC9]' : 'text-slate-300'
-                }`}
-              />
-              <span
-                className={`text-[12.5px] font-bold text-left flex-1 min-w-0 truncate ${
-                  inteligenciaAberta ? 'text-[#0D233A]' : 'text-slate-500'
-                }`}
-              >
-                Inteligência Eleitoral
-              </span>
-              <Chave ligada={inteligenciaAberta} />
-            </button>
           </div>
 
           {/*
