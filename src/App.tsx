@@ -5942,8 +5942,17 @@ export default function App() {
             localStorage.removeItem("checkin_supporter");
           }}
           onSaved={(registro) => {
+            /*
+              O registro entra na lista do painel e fica por aqui.
+
+              Quem mostra o fecho do check-in é a própria conversa: ela tem o
+              ponto gravado, as fotos que subiram e a meta já recontada. A tela
+              de sucesso antiga desta função lia campos de um formulário que
+              este fluxo não preenche mais — aparecia "Localização: ," e
+              "Check-in por missão" em registro livre. Ligar `checkInSuccess`
+              aqui era o que trocava um recibo certo por um errado.
+            */
             setCheckIns((prev) => [registro, ...prev]);
-            setCheckInSuccess(true);
           }}
         />
       );
