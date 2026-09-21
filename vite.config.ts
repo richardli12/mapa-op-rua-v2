@@ -9,6 +9,17 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        /*
+         * html2canvas cai no fork mantido.
+         *
+         * O jspdf importa 'html2canvas' por dentro, para o método .html()
+         * dele. O original parou em 2022 e quebra na primeira cor oklch() --
+         * e o Tailwind 4, que este sistema usa, escreve as cores todas assim.
+         * Com o apelido, qualquer caminho que peça html2canvas recebe a versão
+         * que sabe ler as cores modernas, e o pacote antigo não precisa nem
+         * estar instalado.
+         */
+        html2canvas: 'html2canvas-pro',
       },
     },
     server: {
