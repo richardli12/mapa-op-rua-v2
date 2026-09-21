@@ -1977,9 +1977,17 @@ export default function MapContainer({
         }).addTo(grupo);
       });
 
-    // Enquadrar uma vez por conjunto: refazer isso a cada quadro tiraria o
-    // mapa da mão de quem está navegando.
-    const assinatura = `${recortes.length}:${recortes[0]?.id}`;
+    /*
+     * Enquadrar uma vez por conjunto: refazer isso a cada quadro tiraria o
+     * mapa da mão de quem está navegando.
+     *
+     * A assinatura NÃO conta quantos são. A malha de setores da cidade chega
+     * em páginas, e o desenho cresce a cada uma; contando a quantidade, cada
+     * página viria com assinatura nova e o mapa daria um salto — vinte e cinco
+     * saltos numa carga, justamente enquanto a pessoa está olhando. O que
+     * identifica o conjunto é o que ele é e por onde começa.
+     */
+    const assinatura = `${recortes[0]?.tipo || ''}:${recortes[0]?.id || ''}`;
     if (enquadrarRecortes && limites.length > 0 && ultimoRecorteRef.current !== assinatura) {
       ultimoRecorteRef.current = assinatura;
       try {
