@@ -75,14 +75,23 @@ export default function SecaoNeo({
         <div className="text-[11px] text-slate-400 font-semibold leading-relaxed bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 space-y-1.5">
           <p>
             <span className="font-black text-slate-600">O que o NEO recebe:</span>{' '}
-            a ordem da missão, quem recebeu, onde e quando, o material de apoio,
-            as narrativas, o feedback orgânico e tudo que voltou da rua — fotos,
-            observações escritas e áudios transcritos.
+            a ordem da missão e o motivo dela — tipo de operação com a descrição,
+            nível de prioridade com o que ele significa, turno, prazo, endereço
+            por extenso, cliente e quem recebeu. Mais o material de apoio, as
+            narrativas da missão, o feedback orgânico e tudo que voltou da rua:
+            fotos, observações escritas e áudios transcritos.
+          </p>
+          <p>
+            <span className="font-black text-slate-600">O que ele devolve:</span>{' '}
+            um documento de decisão, com as imagens citadas reproduzidas ao lado
+            de cada afirmação, números do caso, alegação contra evidência,
+            recomendações com prazo e o que pode e o que não pode ser dito
+            publicamente.
           </p>
           <p>
             <span className="font-black text-slate-600">O que ele não recebe:</span>{' '}
             vídeos, que não são assistidos nesta versão, e o que passar dos
-            limites de 20 imagens e 6 áudios por missão. O relatório declara no
+            limites de 24 imagens e 6 áudios por missão. O relatório declara no
             rodapé o que ficou de fora.
           </p>
         </div>
