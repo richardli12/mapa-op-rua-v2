@@ -11,7 +11,6 @@ import {
   Clock,
   Crosshair,
   EyeOff,
-  Filter,
   Flag,
   MapPin,
   Maximize2,
@@ -839,15 +838,64 @@ export default function PainelDeCheckIns({
     const semPrioridadeNaMissao = missoes.filter(m => !m.prioridade).length;
 
     /* ---------------------------------------------- o que está pegando ---*/
-    const urgentes = graves
-      .map(c => ({
-        ...c,
-        dia: diaDoRegistro(c),
-        dias: diasEntre(diaDoRegistro(c), hoje),
-        nivel: nivelDe(c),
-        peso: niveisOrdenados.findIndex(n => n.id === c.priority)
-      }))
-      .sort((a, b) => a.peso - b.peso || b.dias - a.dias)
+    /*
+     * POR CATEGORIA, NÃO POR OCORRÊNCIA.
+     *
+     * A lista mostrava os seis registros mais graves — e como a cidade repete
+     * o mesmo problema, "Buraco ou Cratera na Via" aparecia quatro vezes
+     * seguidas, cada linha com um endereço diferente. Isso responde "qual foi
+     * o último buraco", que ninguém pergunta. A pergunta é "o que está
+     * pegando fogo", e a resposta é a categoria com a quantidade: buraco, 23.
+     *
+     * Agrupado, a linha também vira o filtro: uma categoria, um clique, e o
+     * mapa fica só com ela.
+     */
+    const porCategoriaQuente: Record<
+      string,
+      {
+        chave: string;
+        rotulo: string;
+        total: number;
+        cor: string;
+        nivel: any;
+        peso: number;
+        dias: number;
+      }
+    > = {};
+    graves.forEach(c => {
+      const rotulo =
+        c.operationTypeLabel ||
+        operationTypes.find(t => t.id === c.operationTypeId)?.label ||
+        'Sem tipo';
+      const doCadastro = operationTypes.find(
+        t => t.label === rotulo || t.id === c.operationTypeId
+      );
+      const chave = doCadastro?.id || rotulo;
+      const nivel = nivelDe(c);
+      const peso = niveisOrdenados.findIndex(n => n.id === c.priority);
+      const dias = diasEntre(diaDoRegistro(c), hoje);
+      const atual = porCategoriaQuente[chave] || {
+        chave,
+        rotulo,
+        total: 0,
+        cor: nivel?.color || SITUACAO.atrasada,
+        nivel,
+        peso: peso < 0 ? 99 : peso,
+        dias
+      };
+      atual.total += 1;
+      // A categoria herda o caso mais grave e o mais recente que tem dentro:
+      // é o pior e o último que fazem dela uma urgência.
+      if (peso >= 0 && peso < atual.peso) {
+        atual.peso = peso;
+        atual.nivel = nivel;
+        atual.cor = nivel?.color || atual.cor;
+      }
+      if (dias < atual.dias) atual.dias = dias;
+      porCategoriaQuente[chave] = atual;
+    });
+    const urgentes = Object.values(porCategoriaQuente)
+      .sort((a, b) => b.total - a.total || a.peso - b.peso)
       .slice(0, 6);
 
     /* ----------------------------------------------------- prioridades ---*/
@@ -1410,81 +1458,69 @@ export default function PainelDeCheckIns({
                 aviso={`${graves.length} grave${graves.length === 1 ? '' : 's'} no período`}
               >
                 <div className="space-y-1.5">
-                  {urgentes.map((c: any) => {
+                  {urgentes.map((cat: any) => {
                     /*
-                      A ETIQUETA DA OCORRÊNCIA TAMBÉM FILTRA.
+                      A LINHA É O FILTRO. Sem botão, sem segundo passo.
 
-                      A linha inteira leva o mapa até aquele registro — é o que
-                      se quer ao ler "pegando fogo". Mas quem bate o olho em
-                      "Esgoto a Céu Aberto" quase sempre quer ver TODOS os
-                      esgotos, não aquele. As duas intenções cabem na mesma
-                      linha: o corpo leva ao registro, a etiqueta filtra o mapa
-                      pelo tipo.
+                      Cada linha é uma categoria, não uma ocorrência — clicar
+                      deixa o mapa só com ela, clicar de novo devolve o resto.
+                      Um botão "filtrar" ao lado seria um segundo alvo para a
+                      mesma intenção, e a linha inteira já é o alvo maior.
                     */
-                    const etiqueta = c.operationTypeLabel || '';
-                    const doCadastro = operationTypes.find(
-                      t => t.label === etiqueta || t.id === c.operationTypeId
-                    );
-                    const chaveDoTipo = doCadastro?.id || etiqueta;
-                    const filtrando =
-                      !!chaveDoTipo && tiposSelecionados.includes(chaveDoTipo);
+                    const marcada = tiposSelecionados.includes(cat.chave);
                     return (
-                    <div
-                      key={c.id}
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all flex items-center gap-3"
-                    >
-                      <span
-                        className="w-1.5 h-9 rounded-full shrink-0"
-                        style={{ backgroundColor: c.nivel?.color || SITUACAO.atrasada }}
-                      />
                       <button
+                        key={cat.chave}
                         type="button"
-                        onClick={() => onIrParaCheckIn(c.id)}
-                        title="Levar o mapa até este registro"
-                        className="min-w-0 flex-1 text-left cursor-pointer"
+                        onClick={() => onTipo(cat.chave)}
+                        title={
+                          marcada
+                            ? `Mostrar tudo de novo no mapa`
+                            : `Deixar no mapa só os pins de "${cat.rotulo}"`
+                        }
+                        className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all cursor-pointer flex items-center gap-3 ${
+                          marcada
+                            ? 'border-[#015FC9] bg-[#015FC9]/5 ring-1 ring-[#015FC9]/20'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
                       >
-                        <span className="flex items-center gap-1.5">
-                          <span
-                            className="text-[9px] font-black uppercase tracking-wider"
-                            style={{ color: c.nivel?.color || SITUACAO.atrasada }}
-                          >
-                            {c.nivel?.label || 'Sem prioridade'}
+                        <span
+                          className="w-1.5 h-9 rounded-full shrink-0"
+                          style={{ backgroundColor: cat.cor }}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              className="text-[9px] font-black uppercase tracking-wider"
+                              style={{ color: cat.cor }}
+                            >
+                              {cat.nivel?.label || 'Sem prioridade'}
+                            </span>
+                            <span className="text-[9px] font-bold text-slate-300">•</span>
+                            <span className="text-[9px] font-bold text-slate-400">
+                              {desdeQuando(cat.dias)}
+                            </span>
                           </span>
-                          <span className="text-[9px] font-bold text-slate-300">•</span>
-                          <span className="text-[9px] font-bold text-slate-400">
-                            {desdeQuando(c.dias)}
+                          <span className="block text-[12px] font-bold text-slate-800 truncate mt-0.5">
+                            {cat.rotulo}
+                          </span>
+                          <span className="block text-[10px] font-semibold text-slate-400 truncate">
+                            {cat.total} {cat.total === 1 ? 'ocorrência' : 'ocorrências'} no
+                            período
                           </span>
                         </span>
-                        <span className="block text-[12px] font-bold text-slate-800 truncate mt-0.5">
-                          {etiqueta || c.name}
-                        </span>
-                        <span className="block text-[10px] font-semibold text-slate-400 truncate">
-                          {[c.rua, c.bairro].filter(Boolean).join(', ') || 'Sem endereço'}
-                        </span>
-                      </button>
-
-                      {chaveDoTipo ? (
-                        <button
-                          type="button"
-                          onClick={() => onTipo(chaveDoTipo)}
-                          title={
-                            filtrando
-                              ? `Tirar o filtro de "${etiqueta}" do mapa`
-                              : `Deixar no mapa só os pins de "${etiqueta}"`
-                          }
-                          className={`shrink-0 px-2 h-7 rounded-lg border text-[9.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center gap-1 ${
-                            filtrando
-                              ? 'bg-[#015FC9] border-[#015FC9] text-white'
-                              : 'bg-white border-slate-200 text-slate-500 hover:border-[#015FC9] hover:text-[#015FC9]'
+                        {/* O número é a informação; ele acende quando o filtro
+                            está valendo, para o estado não depender da borda. */}
+                        <span
+                          className={`shrink-0 min-w-[28px] h-7 px-2 rounded-lg text-[12px] font-black flex items-center justify-center tabular-nums ${
+                            marcada
+                              ? 'bg-[#015FC9] text-white'
+                              : 'bg-slate-100 text-slate-500'
                           }`}
                         >
-                          <Filter className="w-3 h-3" />
-                          {filtrando ? 'filtrando' : 'filtrar'}
-                        </button>
-                      ) : (
-                        <Crosshair className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                      )}
-                    </div>
+                          {cat.total}
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
