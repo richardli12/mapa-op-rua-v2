@@ -1,3 +1,6 @@
+import { MaterialDeApoio } from '../../types';
+import { TurnoId } from '../../turnos';
+
 /**
  * O que a pessoa junta durante o check-in, antes de virar registro no banco.
  *
@@ -39,3 +42,34 @@ export interface ObservacaoItem {
 /** '1:07' a partir de segundos. */
 export const mmss = (s: number) =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+/**
+ * Missão enviada pelo comitê e mostrada no alto da conversa.
+ *
+ * Área e ponto viram a mesma coisa aqui de propósito: na rua os dois são um
+ * lugar para ir com uma instrução junto, e a diferença entre círculo e pino
+ * só importa no mapa do painel.
+ */
+export interface MissaoDoCampo {
+  id: string;
+  tipo: 'area' | 'pin';
+  title: string;
+  description: string;
+  bairro?: string;
+  color: string;
+  lat: number;
+  lng: number;
+  /** Só na área: o raio em metros que o comitê desenhou. */
+  raio?: number;
+  /** Rótulo do tipo de operação, quando o comitê escolheu um. */
+  tipoLabel?: string;
+  /** Missão sem lugar no mapa: a tarefa é a missão, e o local é onde ela estiver. */
+  semLocal?: boolean;
+  /** O que o comitê mandou junto: arte, planilha, um recado gravado. */
+  material?: MaterialDeApoio[];
+  /** Parte do dia em que a missão deve acontecer, quando o comitê marcou uma. */
+  turno?: TurnoId;
+  /** Id do nível de prioridade que o comitê deu à missão. */
+  priority?: string;
+  createdAt?: string;
+}

@@ -4,8 +4,6 @@ import {
   BellRing,
   Camera,
   Check,
-  ChevronDown,
-  ClipboardList,
   Flag,
   Loader2,
   Maximize2,
@@ -13,6 +11,7 @@ import {
   MessageSquare,
   Pencil,
   Plus,
+  Siren,
   Target,
   TriangleAlert,
   X
@@ -32,8 +31,6 @@ import {
 import OperationIcon from './OperationIcon';
 import MiniMapa from './MiniMapa';
 import MapaAjuste from './MapaAjuste';
-import { MaterialDaMissao } from './MaterialDaMissao';
-import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
 import {
   METAS_VAZIAS,
   MetasDoCliente,
@@ -78,38 +75,15 @@ import BolhaDeObservacoes from './checkin/BolhaDeObservacoes';
 import PainelDoDia from './checkin/PainelDoDia';
 import FolhaDeSaida from './checkin/FolhaDeSaida';
 import Concluido from './checkin/Concluido';
-import { MidiaItem, MidiaTipo, ObservacaoItem } from './checkin/tipos';
+import OrdemDoComite from './checkin/OrdemDoComite';
+import { MidiaItem, MidiaTipo, MissaoDoCampo, ObservacaoItem } from './checkin/tipos';
+import { cumpridaHoje, eUrgente, nivelDoTopo } from './checkin/missoes';
 
-/**
- * Missão enviada pelo comitê e mostrada no alto da conversa.
- *
- * Área e ponto viram a mesma coisa aqui de propósito: na rua os dois são um
- * lugar para ir com uma instrução junto, e a diferença entre círculo e pino
- * só importa no mapa do painel.
+/*
+ * O tipo continua saindo daqui para quem já o importava — o painel monta as
+ * missões antes de passá-las para esta tela.
  */
-export interface MissaoDoCampo {
-  id: string;
-  tipo: 'area' | 'pin';
-  title: string;
-  description: string;
-  bairro?: string;
-  color: string;
-  lat: number;
-  lng: number;
-  /** Só na área: o raio em metros que o comitê desenhou. */
-  raio?: number;
-  /** Rótulo do tipo de operação, quando o comitê escolheu um. */
-  tipoLabel?: string;
-  /** Missão sem lugar no mapa: a tarefa é a missão, e o local é onde ela estiver. */
-  semLocal?: boolean;
-  /** O que o comitê mandou junto: arte, planilha, um recado gravado. */
-  material?: MaterialDeApoio[];
-  /** Parte do dia em que a missão deve acontecer, quando o comitê marcou uma. */
-  turno?: TurnoId;
-  /** Id do nível de prioridade que o comitê deu à missão. */
-  priority?: string;
-  createdAt?: string;
-}
+export type { MissaoDoCampo };
 
 interface CheckInChatProps {
   member: any;
@@ -142,27 +116,6 @@ interface CheckInChatProps {
 }
 
 const TOTAL_ETAPAS = 5;
-
-/** Distância em metros entre dois pontos, para dizer o quão longe é a missão. */
-const distanciaEmMetros = (
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number }
-) => {
-  const R = 6371000;
-  const rad = (grau: number) => (grau * Math.PI) / 180;
-  const dLat = rad(b.lat - a.lat);
-  const dLng = rad(b.lng - a.lng);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-};
-
-/** Metro vira quilômetro quando a conta fica comprida demais para a rua. */
-const distanciaCurta = (metros: number) =>
-  metros < 1000
-    ? `${Math.round(metros)} m`
-    : `${(metros / 1000).toFixed(1).replace('.', ',')} km`;
 
 /** Identificador das linhas filhas do check-in, que o banco guarda como uuid. */
 const novoId = () =>
@@ -310,8 +263,6 @@ function FioDoCheckIn({
    * registro livre numa missão que ninguém pediu.
    */
   const [missaoId, setMissaoId] = useState<string | null>(null);
-  /** Lista longa de missões fica cortada até a pessoa pedir o resto. */
-  const [verTodasMissoes, setVerTodasMissoes] = useState(false);
   /**
    * Missões que chegaram com a tela já aberta e que a pessoa ainda não viu.
    *
@@ -408,6 +359,63 @@ function FioDoCheckIn({
   /** A missão deste check-in, ou nada: o registro livre continua existindo. */
   const missao = missoes.find(m => m.id === missaoId) || null;
 
+  /** O topo da régua de gravidade deste cliente. */
+  const topoDaRegua = React.useMemo(() => nivelDoTopo(niveis), [niveis]);
+
+  /**
+   * As ordens urgentes que ainda estão de pé.
+   *
+   * Urgente é o topo da régua que o administrador cadastrou — não um nome
+   * fixo no código. E "de pé" é o que ainda não foi cumprido hoje: a ordem
+   * gravada sai da lista na hora, senão quem cumpriu ficaria trancado o
+   * resto do dia por causa do próprio trabalho.
+   */
+  const urgentesPendentes = React.useMemo(
+    () =>
+      missoes
+        .filter(m => eUrgente(m, topoDaRegua) && !cumpridaHoje(m, meusCheckIns))
+        /*
+         * A que espera há mais tempo vem antes — a mesma régua que a lista lá
+         * embaixo usa. Ordenar aqui e não só na lista importa: é desta ordem
+         * que sai a ordem escolhida sozinha quando a tela tranca.
+         */
+        .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')),
+    [missoes, topoDaRegua, meusCheckIns]
+  );
+
+  /**
+   * A rua está trancada?
+   *
+   * Existindo ordem urgente aberta, não há escolha a fazer: ela entra no
+   * check-in e o registro livre e as outras missões saem de cena.
+   *
+   * A exceção é a ordem que chega no meio do caminho. Quem já marcou o ponto
+   * ou já mandou foto está com trabalho em cima da mesa, e apagar isso para
+   * impor a ordem nova seria punir quem estava trabalhando: nesse caso a
+   * tranca espera o registro atual ser gravado. Escolher a operação não
+   * conta como trabalho em cima da mesa — é um toque, e se refaz em um.
+   */
+  const trabalhoEmCima =
+    localConfirmado || midias.length > 0 || observacoes.length > 0;
+  const travado =
+    urgentesPendentes.length > 0 &&
+    (!trabalhoEmCima || urgentesPendentes.some(m => m.id === missaoId));
+
+  /**
+   * Trancado, a ordem entra sozinha no check-in.
+   *
+   * Sem isto a pessoa veria a ordem na tela e mesmo assim gravaria um
+   * registro livre — e é exatamente isso que não pode acontecer.
+   */
+  useEffect(() => {
+    if (!travado) return;
+    if (missaoId && urgentesPendentes.some(m => m.id === missaoId)) return;
+    setMissaoId(urgentesPendentes[0]?.id ?? null);
+  }, [travado, urgentesPendentes, missaoId]);
+
+  /** A ordem urgente chegou com um registro livre já em andamento. */
+  const urgenteEsperando = urgentesPendentes.length > 0 && !travado;
+
   /** O turno que está acontecendo agora, recalculado a cada pulso. */
   const turnoAgora = React.useMemo(() => turnoDeAgora(janelas), [janelas, pulso]);
 
@@ -417,9 +425,6 @@ function FioDoCheckIn({
     return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  /** O nível cadastrado com este id, se ele ainda existir. */
-  const nivelDaMissao = (id?: string) => (id ? niveis.find(n => n.id === id) : undefined);
 
   /**
    * O quanto um nível pesa.
@@ -445,7 +450,10 @@ function FioDoCheckIn({
    * sumir, mas sai da frente do que ainda dá para fazer.
    */
   const missoesEmOrdem = React.useMemo(() => {
+    const urgente = (m: MissaoDoCampo) => urgentesPendentes.some(u => u.id === m.id);
     const grupo = (m: MissaoDoCampo) => {
+      // A ordem urgente não espera turno: ela é a primeira, sempre.
+      if (urgente(m)) return -1;
       if (!m.turno) return 1;
       if (m.turno === turnoAgora) return 0;
       return situacaoDoTurno(janelaDoTurno(janelas, m.turno)).estado === 'passou' ? 3 : 2;
@@ -454,6 +462,13 @@ function FioDoCheckIn({
       const ga = grupo(a);
       const gb = grupo(b);
       if (ga !== gb) return ga - gb;
+      /*
+       * Entre urgentes, a que espera há mais tempo vem antes.
+       * Poderia ser a mais perto, mas a distância muda a cada passo que a
+       * pessoa dá — e lista que se reordena sozinha debaixo do dedo faz
+       * tocar na missão errada.
+       */
+      if (ga === -1) return (a.createdAt || '').localeCompare(b.createdAt || '');
       if (ga === 2) {
         const oa = ordemDoTurno(janelas, a.turno);
         const ob = ordemDoTurno(janelas, b.turno);
@@ -465,7 +480,7 @@ function FioDoCheckIn({
       return (b.createdAt || '').localeCompare(a.createdAt || '');
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missoes, janelas, niveis, turnoAgora, pulso]);
+  }, [missoes, janelas, niveis, turnoAgora, pulso, urgentesPendentes]);
 
   /** Quantas missões são para a hora de agora. */
   const quantasAgora = missoesEmOrdem.filter(m => m.turno && m.turno === turnoAgora).length;
@@ -478,6 +493,10 @@ function FioDoCheckIn({
    * atrás de uma missão que não está mais lá.
    */
   const novasDePe = missoesNovas.filter(id => missoes.some(m => m.id === id));
+  /** Alguma das novidades é ordem urgente? Muda a cor e o texto da tarja. */
+  const algumaNovaUrgente = novasDePe.some(id =>
+    urgentesPendentes.some(m => m.id === id)
+  );
   const titulosNovos = novasDePe
     .map(id => missoes.find(m => m.id === id)?.title)
     .filter(Boolean)
@@ -536,15 +555,37 @@ function FioDoCheckIn({
    * cortada pela doca e parecia que faltava alguma coisa.
    */
   useEffect(() => {
-    const irAoFim = () =>
-      fimRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    const perto = setTimeout(irAoFim, 90);
-    const longe = setTimeout(irAoFim, 520);
+    /*
+     * Com ordem urgente aberta e nada feito ainda, o fim do fio é o lugar
+     * errado. O fio desce sozinho até a etapa 1 e a ordem — que é o que a
+     * pessoa precisa ler antes de qualquer coisa — fica acima da dobra,
+     * escondida pela própria rolagem automática. Enquanto ela não confirma a
+     * primeira etapa, quem manda na tela é a ordem.
+     */
+    const ancora =
+      travado && !operacoesConfirmadas ? blocoMissoesRef.current : fimRef.current;
+    const ir = () =>
+      ancora?.scrollIntoView({
+        behavior: 'smooth',
+        block: travado && !operacoesConfirmadas ? 'start' : 'end'
+      });
+    const perto = setTimeout(ir, 90);
+    const longe = setTimeout(ir, 520);
     return () => {
       clearTimeout(perto);
       clearTimeout(longe);
     };
-  }, [etapa, coords, endereco, midias, observacoes, operacoes, mapaPronto]);
+  }, [
+    etapa,
+    coords,
+    endereco,
+    midias,
+    observacoes,
+    operacoes,
+    mapaPronto,
+    travado,
+    operacoesConfirmadas
+  ]);
 
   /**
    * O que mudou nas missões enquanto a tela estava aberta.
@@ -570,13 +611,20 @@ function FioDoCheckIn({
       ]);
       // Missão nova traz a tarja de volta, mesmo que a anterior já tenha sido lida.
       setTarjaVista(false);
-      vibrar([15, 80, 15]);
+      /* Ordem urgente chega com outro tranco: quem está de costas para a tela
+         precisa sentir a diferença sem olhar. */
+      const temUrgente = chegaram.some(c => {
+        const m = missoes.find(x => x.id === c.id);
+        return m ? eUrgente(m, nivelDoTopo(niveis)) : false;
+      });
+      vibrar(temUrgente ? [60, 90, 60, 90, 120] : [15, 80, 15]);
     }
 
     if (missaoId && !atuais.some(m => m.id === missaoId)) {
       setMissaoId(null);
       setMissaoRetirada(antes.find(a => a.id === missaoId)?.title || 'a missão escolhida');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missoes, missaoId]);
 
   useEffect(() => {
@@ -1066,6 +1114,18 @@ function FioDoCheckIn({
 
   const confirmar = async () => {
     if (!pronto || !coords || salvando) return;
+    /*
+     * Última porta antes do banco.
+     *
+     * A tela já impede escolher outra coisa enquanto a ordem está aberta,
+     * mas uma ordem urgente pode chegar entre a revisão e o toque no botão.
+     * Gravar um registro livre nesse instante seria furar a regra por uma
+     * fresta de dois segundos.
+     */
+    if (travado && !urgentesPendentes.some(m => m.id === missaoId)) {
+      avisar('Há uma ordem urgente aberta: este check-in tem de ser o dela.', 'error');
+      return;
+    }
     setSalvando(true);
 
     const registro = montarRegistro('confirmado');
@@ -1231,6 +1291,48 @@ function FioDoCheckIn({
         onAbrirDia={() => setDiaAberto(true)}
       />
 
+      {/*
+        A TRANCA, escrita onde não dá para não ver.
+
+        A regra mora no cartão da ordem, lá no fio — mas o fio rola, e a regra
+        não pode rolar junto. Quem desceu até as fotos precisa continuar
+        sabendo por que o registro livre não está disponível.
+      */}
+      {travado && (
+        <div
+          className="shrink-0 px-3 py-2 flex items-center gap-2 ck-desce"
+          style={{ backgroundColor: '#E11D48' }}
+        >
+          <span className="relative w-4 h-4 flex items-center justify-center shrink-0">
+            <span className="ck-bate absolute inset-0 rounded-full bg-white/40" />
+            <Siren className="relative w-3.5 h-3.5 text-white" />
+          </span>
+          <p className="shrink-0 text-[11px] font-black uppercase tracking-wider text-white leading-none">
+            Ordem urgente
+          </p>
+          {/* O título da ordem já está no cartão, logo abaixo: repetir aqui
+              seria gaguejar. O que a faixa tem de dizer, e o cartão não diz
+              quando a rolagem passa por ele, é a regra que está valendo. */}
+          <span className="flex-1 min-w-0 text-[10.5px] font-bold text-white/80 truncate text-right">
+            registro livre bloqueado
+          </span>
+        </div>
+      )}
+
+      {/* A ordem chegou com trabalho em cima da mesa: avisa, mas não atropela. */}
+      {urgenteEsperando && (
+        <div
+          className="shrink-0 px-3 py-2 flex items-center gap-2 ck-desce"
+          style={{ backgroundColor: '#FEF3C7' }}
+        >
+          <TriangleAlert className="w-3.5 h-3.5 shrink-0" style={{ color: '#B45309' }} />
+          <p className="flex-1 text-[11px] font-bold leading-tight" style={{ color: '#92400E' }}>
+            Uma ordem urgente chegou. Termine e grave este registro — ela entra
+            sozinha no próximo.
+          </p>
+        </div>
+      )}
+
       {/* AVISO: o recado do sistema, na tela que a pessoa está olhando */}
       {aviso && (
         <div
@@ -1280,16 +1382,28 @@ function FioDoCheckIn({
               );
             }}
             className="sticky top-0 z-30 w-full flex items-center gap-2.5 rounded-2xl px-3.5 py-3 shadow-lg cursor-pointer active:scale-[0.99] ck-desce"
-            style={{ backgroundColor: VERDE }}
+            /* Novidade urgente não pode ter a mesma cor de novidade comum. */
+            style={{ backgroundColor: algumaNovaUrgente ? '#E11D48' : VERDE }}
           >
-            <span className="w-7 h-7 rounded-full bg-white/25 flex items-center justify-center shrink-0">
-              <BellRing className="w-3.5 h-3.5 text-white" />
+            <span className="relative w-7 h-7 rounded-full bg-white/25 flex items-center justify-center shrink-0">
+              {algumaNovaUrgente && (
+                <span className="ck-bate absolute inset-0 rounded-full bg-white/40" />
+              )}
+              {algumaNovaUrgente ? (
+                <Siren className="relative w-3.5 h-3.5 text-white" />
+              ) : (
+                <BellRing className="w-3.5 h-3.5 text-white" />
+              )}
             </span>
             <span className="min-w-0 flex-1 text-left">
               <span className="block text-[12.5px] font-black text-white leading-tight">
-                {novasDePe.length === 1
-                  ? 'O comitê acabou de enviar uma missão para você'
-                  : `O comitê acabou de enviar ${novasDePe.length} missões para você`}
+                {algumaNovaUrgente
+                  ? novasDePe.length === 1
+                    ? 'O comitê acabou de mandar uma ORDEM URGENTE'
+                    : 'O comitê acabou de mandar uma ORDEM URGENTE e mais missões'
+                  : novasDePe.length === 1
+                    ? 'O comitê acabou de enviar uma missão para você'
+                    : `O comitê acabou de enviar ${novasDePe.length} missões para você`}
               </span>
               <span className="block text-[11px] font-semibold text-white/90 truncate mt-0.5">
                 {titulosNovos} · toque para ver
@@ -1337,11 +1451,27 @@ function FioDoCheckIn({
           e eu vou junto.
         </Fala>
 
-        {/* MISSÕES: o que o comitê enviou para esta pessoa, antes de tudo */}
+        {/* A ORDEM DO COMITÊ: o que ele mandou, antes de qualquer pergunta */}
         {missoes.length > 0 && (
           <>
             <Fala hora={horas.abertura} atraso={450}>
-              {missao ? (
+              {travado ? (
+                urgentesPendentes.length === 1 ? (
+                  <>
+                    <strong className="font-black" style={{ color: '#E11D48' }}>
+                      Chegou uma ordem urgente para você.
+                    </strong>{' '}
+                    É ela agora — o resto espera.
+                  </>
+                ) : (
+                  <>
+                    <strong className="font-black" style={{ color: '#E11D48' }}>
+                      Você tem {urgentesPendentes.length} ordens urgentes abertas.
+                    </strong>{' '}
+                    Comece por uma delas.
+                  </>
+                )
+              ) : missao ? (
                 <>Você está na missão abaixo. Se mudar de ideia, dá para trocar.</>
               ) : missoes.length === 1 ? (
                 <>O comitê enviou uma missão para você. É essa que você está fazendo?</>
@@ -1352,7 +1482,8 @@ function FioDoCheckIn({
                     <>
                       {' '}
                       — {quantasAgora === 1 ? 'uma é' : `${quantasAgora} são`} para{' '}
-                      {NOME_DO_TURNO[turnoAgora].toLowerCase()}, e {quantasAgora === 1 ? 'ela está' : 'elas estão'} no topo
+                      {NOME_DO_TURNO[turnoAgora].toLowerCase()}, e{' '}
+                      {quantasAgora === 1 ? 'ela está' : 'elas estão'} no topo
                     </>
                   )}
                   . Qual delas você está fazendo agora?
@@ -1362,172 +1493,23 @@ function FioDoCheckIn({
 
             <div className="ck-entra flex items-end gap-2 flex-row-reverse" ref={blocoMissoesRef}>
               <span className="w-7 shrink-0" />
-              <div className="max-w-[88%] w-full flex flex-col items-stretch gap-2">
-                {/*
-                  Com missão escolhida, só ela fica na tela.
-                  Cinco cartões abertos embaixo da que ela já escolheu são cinco
-                  telas de rolagem entre a decisão e a primeira pergunta do
-                  check-in — e nenhuma delas muda mais nada.
-                */}
-                {(missao ? [missao] : verTodasMissoes ? missoesEmOrdem : missoesEmOrdem.slice(0, 3)).map(
-                  missaoDaLista => {
-                    const escolhida = missaoDaLista.id === missaoId;
-                    const eNova = novasDePe.includes(missaoDaLista.id);
-                    // A distância só existe depois do GPS: antes dele, some.
-                    const longe = coords ? distanciaEmMetros(coords, missaoDaLista) : null;
-                    const cor = missaoDaLista.color || AZUL;
-                    /**
-                     * Onde a pessoa está em relação à missão.
-                     *
-                     * Dentro da área, distância até o centro não diz nada de
-                     * útil — o que importa é que ela já chegou. Fora dela, o
-                     * número é o que decide se dá para ir a pé.
-                     */
-                    const ondeEstou =
-                      missaoDaLista.semLocal || longe === null
-                        ? null
-                        : missaoDaLista.raio && longe <= missaoDaLista.raio
-                          ? 'você já está dentro'
-                          : longe < 30
-                            ? 'você está no ponto'
-                            : `a ${distanciaCurta(longe)} de você`;
-                    const detalhes = [
-                      missaoDaLista.semLocal
-                        ? 'Sem local marcado · faça o check-in onde você estiver'
-                        : missaoDaLista.tipo === 'area'
-                          ? 'Área de trabalho'
-                          : 'Ponto no mapa',
-                      missaoDaLista.bairro,
-                      missaoDaLista.tipoLabel,
-                      missaoDaLista.raio ? `raio de ${distanciaCurta(missaoDaLista.raio)}` : null,
-                      ondeEstou
-                    ]
-                      .filter(Boolean)
-                      .join(' · ');
-
-                    return (
-                      /*
-                       * Cartão é div, não botão: o material traz link e tocador
-                       * de áudio, e botão dentro de botão não é HTML válido --
-                       * tocar no play escolheria a missão junto.
-                       */
-                      <div
-                        key={missaoDaLista.id}
-                        className="w-full text-left rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition-all"
-                        style={{
-                          borderColor: escolhida || eNova ? VERDE : '#E2E8F0',
-                          boxShadow: escolhida || eNova ? `0 0 0 2px ${VERDE}33` : undefined
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            vibrar();
-                            setMissaoId(escolhida ? null : missaoDaLista.id);
-                            // Tocou: já viu. A marca de novidade sai daqui.
-                            setMissoesNovas(prev => prev.filter(id => id !== missaoDaLista.id));
-                          }}
-                          className="w-full text-left flex items-start gap-2.5 cursor-pointer active:scale-[0.99] transition-transform"
-                        >
-                          <span
-                            className="w-9 h-9 rounded-xl shrink-0 flex items-center justify-center"
-                            style={{ backgroundColor: `${cor}1A`, color: cor }}
-                          >
-                            {missaoDaLista.semLocal ? (
-                              <ClipboardList className="w-4 h-4" />
-                            ) : missaoDaLista.tipo === 'area' ? (
-                              <Target className="w-4 h-4" />
-                            ) : (
-                              <MapPin className="w-4 h-4" />
-                            )}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[13.5px] font-black leading-tight" style={{ color: AZUL }}>
-                              {missaoDaLista.title}
-                            </p>
-                            {eNova && (
-                              <span
-                                className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider text-white"
-                                style={{ backgroundColor: VERDE }}
-                              >
-                                <BellRing className="w-2.5 h-2.5" />
-                                Chegou agora
-                              </span>
-                            )}
-                            {missaoDaLista.description && (
-                              <p className="text-[12px] text-slate-500 leading-snug mt-0.5 whitespace-pre-line">
-                                {missaoDaLista.description}
-                              </p>
-                            )}
-                            {(missaoDaLista.turno || nivelDaMissao(missaoDaLista.priority)) && (
-                              <span className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                                {missaoDaLista.turno && (
-                                  <EtiquetaDeTurno
-                                    turno={missaoDaLista.turno}
-                                    janelas={janelas}
-                                    mostrarHoras={false}
-                                    aoVivo
-                                    tamanho="mini"
-                                  />
-                                )}
-                                {nivelDaMissao(missaoDaLista.priority) && (
-                                  <EtiquetaDePrioridade
-                                    nivel={nivelDaMissao(missaoDaLista.priority)!}
-                                    tamanho="mini"
-                                  />
-                                )}
-                              </span>
-                            )}
-                            {detalhes && (
-                              <p className="text-[10.5px] text-slate-400 font-bold mt-1.5">
-                                {detalhes}
-                              </p>
-                            )}
-                          </div>
-                          {escolhida && (
-                            <span
-                              className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center ck-selo"
-                              style={{ backgroundColor: VERDE }}
-                            >
-                              <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
-                            </span>
-                          )}
-                        </button>
-
-                        {missaoDaLista.material && missaoDaLista.material.length > 0 && (
-                          <MaterialDaMissao itens={missaoDaLista.material} />
-                        )}
-                      </div>
-                    );
-                  }
-                )}
-
-                {/* A lista longa fica cortada: as três do topo são as que importam */}
-                {!missao && !verTodasMissoes && missoesEmOrdem.length > 3 && (
-                  <button
-                    type="button"
-                    onClick={() => setVerTodasMissoes(true)}
-                    className="w-full py-2.5 rounded-2xl border border-dashed border-slate-300 bg-white/60 text-[12px] font-black uppercase tracking-wider text-slate-500 flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
-                  >
-                    <ChevronDown className="w-3.5 h-3.5" />
-                    Ver as outras {missoesEmOrdem.length - 3}
-                  </button>
-                )}
-
-                {missao ? (
-                  <button
-                    type="button"
-                    onClick={() => setMissaoId(null)}
-                    className="self-end px-2 py-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400 cursor-pointer"
-                  >
-                    Trocar de missão
-                  </button>
-                ) : (
-                  <p className="text-[11px] text-slate-400 font-semibold text-right leading-snug">
-                    Toque na missão que você está fazendo. Se for outra coisa,
-                    siga sem escolher — entra como registro livre.
-                  </p>
-                )}
+              <div className="max-w-[92%] w-full">
+                <OrdemDoComite
+                  missoes={missoesEmOrdem}
+                  urgentes={urgentesPendentes}
+                  travado={travado}
+                  missaoId={missaoId}
+                  onEscolher={id => {
+                    setMissaoId(id);
+                    // Tocou: já viu. A marca de novidade sai daqui.
+                    if (id) setMissoesNovas(prev => prev.filter(n => n !== id));
+                  }}
+                  novas={novasDePe}
+                  niveis={niveis}
+                  janelas={janelas}
+                  turnoAgora={turnoAgora}
+                  coords={coords}
+                />
               </div>
             </div>
           </>
@@ -1911,7 +1893,7 @@ function FioDoCheckIn({
                     </span>
                     <span className="flex-1 min-w-0">
                       <span className="block text-[9.5px] font-black uppercase tracking-widest text-emerald-700/60">
-                        Missão do comitê
+                        {travado ? 'Ordem urgente do comitê' : 'Missão do comitê'}
                       </span>
                       <span className="block text-[12.5px] font-bold leading-snug" style={{ color: '#05603F' }}>
                         {missao.title}
@@ -2062,7 +2044,7 @@ function FioDoCheckIn({
               salvando
                 ? 'Gravando o check-in...'
                 : missao
-                  ? `Vai como missão: ${missao.title}`
+                  ? `${travado ? 'Vai como ordem urgente' : 'Vai como missão'}: ${missao.title}`
                   : 'Vai como registro livre.'
             }
           >
