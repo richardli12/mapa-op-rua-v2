@@ -315,6 +315,16 @@ function FioDoCheckIn({
   /** Espelho de `seguirGps` para ser lido dentro dos avisos do GPS e do mapa. */
   const seguirGpsRef = useRef(true);
   /**
+   * O ponto foi posto à mão?
+   *
+   * Arrastado o mapa, o pino é escolha da pessoa — e uma escolha não pode ser
+   * desfeita pelo aparelho. Sem esta memória, voltar da revisão para corrigir
+   * o local chamava a captura de novo, a captura reativava o acompanhamento e
+   * o mapa pulava de volta para a coordenada crua do GPS, jogando fora o
+   * ajuste sem avisar ninguém. Só o toque na mira desfaz.
+   */
+  const pontoAMaoRef = useRef(false);
+  /**
    * Indo para uma missão: o GPS não pode parar.
    *
    * No registro livre a captura é uma foto do lugar — pega a melhor leitura,
@@ -783,7 +793,9 @@ function FioDoCheckIn({
     setBuscandoGps(true);
     setErroGps(null);
     setMapaPronto(false);
-    definirSeguirGps(true);
+    // Ponto posto à mão continua sendo dele: o GPS volta a ler, mas não
+    // recentraliza o mapa por conta própria.
+    if (!pontoAMaoRef.current) definirSeguirGps(true);
 
     let melhor: GeolocationPosition | null = null;
     const encerrarBusca = () => {
@@ -1988,9 +2000,15 @@ function FioDoCheckIn({
                         height={280}
                         onReady={() => setMapaPronto(true)}
                         onMoverInicio={() => setAjustando(true)}
-                        onArrastarInicio={() => definirSeguirGps(false)}
+                        onArrastarInicio={() => {
+                          pontoAMaoRef.current = true;
+                          definirSeguirGps(false);
+                        }}
                         onAjustado={aoAjustar}
-                        onVoltarAoGps={() => definirSeguirGps(true)}
+                        onVoltarAoGps={() => {
+                          pontoAMaoRef.current = false;
+                          definirSeguirGps(true);
+                        }}
                       />
                       <button
                         type="button"
@@ -2400,9 +2418,15 @@ function FioDoCheckIn({
               height="100%"
               onReady={() => setMapaPronto(true)}
               onMoverInicio={() => setAjustando(true)}
-              onArrastarInicio={() => definirSeguirGps(false)}
+              onArrastarInicio={() => {
+                pontoAMaoRef.current = true;
+                definirSeguirGps(false);
+              }}
               onAjustado={aoAjustar}
-              onVoltarAoGps={() => definirSeguirGps(true)}
+              onVoltarAoGps={() => {
+                pontoAMaoRef.current = false;
+                definirSeguirGps(true);
+              }}
             />
           </div>
 
