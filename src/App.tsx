@@ -13448,6 +13448,37 @@ export default function App() {
           <span className="text-xs font-black bg-white/10 border border-white/20 px-3 py-1 rounded-full">
             {areaRadius === "" ? "sem raio" : `${areaRadius} m`}
           </span>
+          {/*
+            O CÍRCULO JÁ ESTÁ DESENHADO — E A PERGUNTA VEM AQUI.
+
+            Quem acabou de marcar um raio de panfletagem quer saber o que
+            existe dentro dele: onde tem fila, onde tem sombra, onde tem gente
+            parada. Essa resposta já existia no painel de estabelecimentos, mas
+            exigia fechar este fluxo, abrir o painel e desenhar o MESMO círculo
+            de novo — o sistema pedindo duas vezes uma coisa que a pessoa já
+            fez.
+
+            O botão aproveita o círculo que está na tela. O rascunho da área
+            continua de pé atrás: pesquisar não é sair.
+          */}
+          {pickedCoords && Number(areaRadius) > 0 && (
+            <button
+              onClick={() => {
+                setCirculoDeBusca({
+                  lat: pickedCoords.lat,
+                  lng: pickedCoords.lng,
+                  raio: Number(areaRadius),
+                });
+                setDesenhandoRaioDeBusca(false);
+                setPesquisaLojasAberta(true);
+              }}
+              title="Ver os estabelecimentos dentro deste raio"
+              className="px-3 py-1 bg-white/10 hover:bg-white/20 text-[10px] text-white rounded-full font-bold border border-white/20 cursor-pointer transition-all flex items-center gap-1.5"
+            >
+              <Store className="w-3 h-3" />
+              Estabelecimentos aqui
+            </button>
+          )}
           <button
             onClick={() => {
               setDefinindoRaio(false);
