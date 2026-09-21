@@ -3327,6 +3327,65 @@ export default function MapContainer({
                 </div>
               )}
 
+              {/* Onde é */}
+              <div className="space-y-2">
+                <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                  Onde a missão acontece
+                </p>
+                <div className="bg-slate-50/60 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <MapPin className="w-4 h-4 shrink-0 mt-0.5" style={{ color: missaoAberta.cor }} />
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                        Endereço
+                      </p>
+                      {buscandoEnderecoDaMissao ? (
+                        <p className="text-[11.5px] font-semibold text-slate-500 mt-0.5 flex items-center gap-1.5">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                          Procurando o endereço deste ponto...
+                        </p>
+                      ) : (
+                        <p className="text-[11.5px] font-semibold text-slate-700 mt-0.5 leading-relaxed">
+                          {enderecoDaMissao ||
+                            missaoAberta.bairro ||
+                            'Endereço não identificado para esta coordenada.'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-2.5 border-t border-slate-200/70">
+                    <span className="text-[9px] font-black text-slate-400 uppercase block mb-0.5">
+                      Criada em
+                    </span>
+                    {/* Data E hora: "criada em 20/09" não responde se a ordem
+                        saiu antes ou depois do check-in que se está olhando. */}
+                    <span className="text-[11px] font-extrabold text-slate-700">
+                      {missaoAberta.criadaEm
+                        ? `${new Date(missaoAberta.criadaEm).toLocaleDateString('pt-BR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric'
+                          })} às ${new Date(missaoAberta.criadaEm).toLocaleTimeString('pt-BR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}`
+                        : '—'}
+                    </span>
+                  </div>
+
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${missaoAberta.coords.lat},${missaoAberta.coords.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-extrabold text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 no-underline active:scale-98"
+                  >
+                    <Navigation className="w-4 h-4 stroke-[2.5]" style={{ color: missaoAberta.cor }} />
+                    Abrir no Google Maps
+                  </a>
+                </div>
+              </div>
+
               {/*
                 O FEEDBACK DA MISSÃO.
 
@@ -3474,65 +3533,6 @@ export default function MapContainer({
                   </div>
                 );
               })()}
-
-              {/* Onde é */}
-              <div className="space-y-2">
-                <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                  Onde a missão acontece
-                </p>
-                <div className="bg-slate-50/60 border border-slate-200 rounded-xl p-3.5 space-y-3">
-                  <div className="flex items-start gap-2.5">
-                    <MapPin className="w-4 h-4 shrink-0 mt-0.5" style={{ color: missaoAberta.cor }} />
-                    <div className="min-w-0">
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
-                        Endereço
-                      </p>
-                      {buscandoEnderecoDaMissao ? (
-                        <p className="text-[11.5px] font-semibold text-slate-500 mt-0.5 flex items-center gap-1.5">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                          Procurando o endereço deste ponto...
-                        </p>
-                      ) : (
-                        <p className="text-[11.5px] font-semibold text-slate-700 mt-0.5 leading-relaxed">
-                          {enderecoDaMissao ||
-                            missaoAberta.bairro ||
-                            'Endereço não identificado para esta coordenada.'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-2.5 border-t border-slate-200/70">
-                    <span className="text-[9px] font-black text-slate-400 uppercase block mb-0.5">
-                      Criada em
-                    </span>
-                    {/* Data E hora: "criada em 20/09" não responde se a ordem
-                        saiu antes ou depois do check-in que se está olhando. */}
-                    <span className="text-[11px] font-extrabold text-slate-700">
-                      {missaoAberta.criadaEm
-                        ? `${new Date(missaoAberta.criadaEm).toLocaleDateString('pt-BR', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric'
-                          })} às ${new Date(missaoAberta.criadaEm).toLocaleTimeString('pt-BR', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}`
-                        : '—'}
-                    </span>
-                  </div>
-
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${missaoAberta.coords.lat},${missaoAberta.coords.lng}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full py-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-extrabold text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 no-underline active:scale-98"
-                  >
-                    <Navigation className="w-4 h-4 stroke-[2.5]" style={{ color: missaoAberta.cor }} />
-                    Abrir no Google Maps
-                  </a>
-                </div>
-              </div>
             </div>
 
             {/* Rodapé */}
