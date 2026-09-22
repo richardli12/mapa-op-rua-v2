@@ -5,7 +5,7 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, Sparkles, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, FilePlus, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
 import { UnidadeDeSaude } from '../dados/ubs';
@@ -4268,7 +4268,7 @@ export default function MapContainer({
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-3.5 h-3.5 stroke-[2.5] text-emerald-400" />
+                      <FilePlus className="w-3.5 h-3.5 stroke-[2.5] text-emerald-400" />
                       Gerar Relatório
                     </>
                   )}
