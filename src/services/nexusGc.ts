@@ -19,9 +19,41 @@
  *   perguntar "já mandei esta?" antes de mandar de novo.
  */
 
-/** O rótulo que liga uma missão do Nexu-GC à ordem daqui. */
+/**
+ * DOIS RÓTULOS NOSSOS, PARA DUAS PERGUNTAS DIFERENTES.
+ *
+ * `referencia` AGRUPA: "quais missões saíram desta ordem?". Repete à vontade —
+ * uma ordem pode ser despachada mais de uma vez, e todas carregam a mesma.
+ *
+ * `id_externo` APONTA: "qual missão do Nexu-GC é ESTE envio?". Vale para um
+ * envio só, e é por ele que se descobre, depois de uma resposta perdida no
+ * caminho, se a missão entrou ou não.
+ *
+ * Nenhum dos dois aparece para a equipe: ficam no banco do Nexu-GC, e voltam
+ * nas respostas desta API.
+ */
 export const referenciaDaMissao = (tipo: string, id: string) =>
   `mapa-op-rua:${tipo}:${id}`;
+
+/**
+ * O id deste envio, gerado aqui.
+ *
+ * Carrega a ordem de origem por inteiro — para ler o rótulo e saber de onde
+ * ele veio, sem consultar nada — e termina num sufixo aleatório, que é o que
+ * separa dois despachos da mesma ordem.
+ *
+ * O alfabeto não tem I, O, 0 nem 1: este texto vai ser lido em voz alta e
+ * digitado à mão em algum suporte, e é ali que "O" vira zero.
+ */
+export function novoIdExterno(tipo: string, id: string): string {
+  const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const sorteio = new Uint8Array(6);
+  crypto.getRandomValues(sorteio);
+  const sufixo = Array.from(sorteio)
+    .map((n) => ALFABETO[n % ALFABETO.length])
+    .join('');
+  return `MOR-${tipo.toUpperCase()}-${id}-${sufixo}`.slice(0, 200);
+}
 
 export type PrioridadeDoNexus = "baixa" | "normal" | "alta" | "critica";
 
@@ -76,6 +108,8 @@ export interface MissaoDoNexus {
   cliente: { id: string; nome: string; foto_url?: FotoDoNexus };
   time: { id: string; nome: string; foto_url?: FotoDoNexus };
   referencia: string | null;
+  /** O id que este sistema deu ao envio. Só o banco do Nexu-GC o vê. */
+  id_externo: string | null;
   criada_em: string;
   publicada_em: string | null;
   cancelada_em: string | null;
@@ -215,6 +249,22 @@ export const lerMissoesPorReferencia = (referencia: string) =>
     params: { minhas: "true", referencia, por_pagina: 100 },
   });
 
+/**
+ * A missão deste envio, se ela existe.
+ *
+ * É a pergunta que o manual do Nexu-GC manda fazer antes de reenviar: não há
+ * proteção contra duplicado, e uma resposta perdida no caminho não significa
+ * que a missão não entrou. Aqui ela é feita sozinha, antes de qualquer
+ * segunda tentativa — repetir às cegas mandaria a mesma ordem duas vezes para
+ * a equipe.
+ */
+export const lerMissaoPorIdExterno = async (idExterno: string) => {
+  const resposta = await chamar<{ data: MissaoDoNexus[] }>("missoes", {
+    params: { minhas: "true", id_externo: idExterno, por_pagina: 5 },
+  });
+  return resposta.data?.[0] || null;
+};
+
 export const lerMissao = (missao: string) =>
   chamar<{ data: MissaoDoNexus }>("missao", { params: { missao } });
 
@@ -234,6 +284,7 @@ export interface NovaMissaoDoNexus {
   /** `false` cria rascunho — e aí destinatários são proibidos aqui. */
   publicar?: boolean;
   referencia?: string;
+  id_externo?: string;
 }
 
 export const criarMissao = (missao: NovaMissaoDoNexus) =>
