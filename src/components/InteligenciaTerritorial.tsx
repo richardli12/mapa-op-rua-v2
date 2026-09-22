@@ -119,21 +119,13 @@ const MOTIVOS: { [chave: string]: string } = {
  * Inteligência territorial: quem mora no território que a equipe trabalha.
  *
  * O mapa operacional responde onde a equipe esteve. Este painel responde a
- * pergunta que vem antes de decidir para onde ir: quanta gente mora aqui.
+ * pergunta que vem antes de decidir para onde ir: quanta gente mora aqui —
+ * com os indicadores do Censo do município, direto, sem escolher aba nem
+ * apertar "Carregar".
  *
- * São três perguntas, e cada uma é uma aba:
- *
- * - **Raio** — quantas pessoas moram dentro do círculo que estou olhando.
- *   É a única que aceita área desenhada, e por isso a resposta vem em dois
- *   números: a estimativa e o piso exato.
- * - **Bairros** — a lista do município com população, domicílios e
- *   densidade, ordenável. É onde se decide qual bairro merece equipe.
- * - **Censo** — os indicadores oficiais do recorte escolhido.
- *
- * Três regras do manual do CCO aparecem na tela, e não só no código, porque
- * são elas que separam número confiável de número bonito: estimativa se
- * chama estimativa, soma parcial é avisada, e `null` nunca é mostrado como
- * zero.
+ * Duas regras do manual do CCO aparecem na tela, e não só no código, porque
+ * são elas que separam número confiável de número bonito: soma parcial é
+ * avisada, e `null` nunca é mostrado como zero.
  */
 export default function InteligenciaTerritorial({
   aberto,
@@ -188,6 +180,16 @@ export default function InteligenciaTerritorial({
    * espaço" — seria trabalho de quem usa, não do sistema.
    */
   const [telaCheia, setTelaCheia] = useState(false);
+  /*
+   * O seletor de UF/município só aparece quando é preciso escolher.
+   *
+   * Para a esmagadora maioria das aberturas, o município já vem certo do
+   * cadastro do cliente -- e duas caixas de seleção mostrando um valor que
+   * ninguém vai trocar são só ruído acima do que a pessoa realmente veio ver.
+   * "Trocar município" chama o seletor de volta para os casos raros: cliente
+   * com cidade ambígua, ou a detecção errando.
+   */
+  const [seletorAberto, setSeletorAberto] = useState(false);
   const [erro, setErro] = useState<ErroDoTerritorio | null>(null);
 
   /* ------------------------------------------------------- cobertura --- */
@@ -914,51 +916,71 @@ export default function InteligenciaTerritorial({
           </div>
         </div>
 
-        {/* UF e município */}
-        <div className="mt-3 grid grid-cols-[76px_1fr] gap-2">
-          <select
-            value={uf}
-            onChange={(e) => {
-              setUfEscolhidaNaMao(true);
-              setUf(e.target.value.toUpperCase());
-              setMunicipios([]);
-              setMunicipio(null);
-              setBairros([]);
-              setCenso(null);
-              setAnalise(null);
-              onCirculoAnalisado(null);
-            }}
-            className="h-9 px-2 bg-white border border-slate-200 rounded-xl text-[11.5px] font-bold text-slate-700 cursor-pointer focus:outline-hidden"
-          >
-            <option value="">UF</option>
-            {(ufsComTerritorio.length > 0 ? ufsComTerritorio : [uf].filter(Boolean)).map(
-              (sigla) => (
-                <option key={sigla} value={sigla}>
-                  {sigla}
-                </option>
-              )
-            )}
-          </select>
+        {/*
+          UF e município.
 
-          <select
-            value={municipio?.codigo || ''}
-            onChange={(e) => {
-              const alvo = municipios.find((m) => m.codigo === e.target.value);
-              if (alvo) escolherMunicipio(alvo);
-            }}
-            disabled={municipios.length === 0}
-            className="h-9 px-2 bg-white border border-slate-200 rounded-xl text-[11.5px] font-bold text-slate-700 cursor-pointer focus:outline-hidden disabled:opacity-50 truncate"
+          Escondido sempre que já existe um município resolvido: é o caso de
+          quase toda abertura, porque a cidade vem do cadastro do cliente. Sem
+          um município ainda, ou depois de "Trocar município", as duas caixas
+          aparecem — é a única situação em que alguém precisa mexer nelas.
+        */}
+        {municipio && !seletorAberto ? (
+          <button
+            type="button"
+            onClick={() => setSeletorAberto(true)}
+            className="mt-2 text-[10.5px] font-bold text-slate-400 hover:text-[#015FC9] cursor-pointer transition-colors"
           >
-            <option value="">
-              {carregandoMunicipios ? 'Carregando municípios...' : 'Escolha o município'}
-            </option>
-            {municipios.map((m) => (
-              <option key={m.codigo} value={m.codigo}>
-                {m.nome}
+            Trocar município
+          </button>
+        ) : (
+          <div className="mt-3 grid grid-cols-[76px_1fr] gap-2">
+            <select
+              value={uf}
+              onChange={(e) => {
+                setUfEscolhidaNaMao(true);
+                setUf(e.target.value.toUpperCase());
+                setMunicipios([]);
+                setMunicipio(null);
+                setBairros([]);
+                setCenso(null);
+                setAnalise(null);
+                onCirculoAnalisado(null);
+              }}
+              className="h-9 px-2 bg-white border border-slate-200 rounded-xl text-[11.5px] font-bold text-slate-700 cursor-pointer focus:outline-hidden"
+            >
+              <option value="">UF</option>
+              {(ufsComTerritorio.length > 0 ? ufsComTerritorio : [uf].filter(Boolean)).map(
+                (sigla) => (
+                  <option key={sigla} value={sigla}>
+                    {sigla}
+                  </option>
+                )
+              )}
+            </select>
+
+            <select
+              value={municipio?.codigo || ''}
+              onChange={(e) => {
+                const alvo = municipios.find((m) => m.codigo === e.target.value);
+                if (alvo) {
+                  escolherMunicipio(alvo);
+                  setSeletorAberto(false);
+                }
+              }}
+              disabled={municipios.length === 0}
+              className="h-9 px-2 bg-white border border-slate-200 rounded-xl text-[11.5px] font-bold text-slate-700 cursor-pointer focus:outline-hidden disabled:opacity-50 truncate"
+            >
+              <option value="">
+                {carregandoMunicipios ? 'Carregando municípios...' : 'Escolha o município'}
               </option>
-            ))}
-          </select>
-        </div>
+              {municipios.map((m) => (
+                <option key={m.codigo} value={m.codigo}>
+                  {m.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* A cobertura é estado do sistema, e a tela diz qual é. */}
         {carregandoCobertura && (

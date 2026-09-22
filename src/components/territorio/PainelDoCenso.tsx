@@ -247,6 +247,65 @@ function CartaoDeNumero({
   );
 }
 
+/* ----------------------------------------------------- gráfico genérico --- */
+
+/**
+ * Um gráfico de barras para QUALQUER grupo de indicadores, sem saber o nome
+ * de nenhum deles de antemão.
+ *
+ * A pirâmide etária, a composição por raça e o saneamento são leituras
+ * PRECISAS, mas dependem de acertar o texto exato que a fonte usa — e a
+ * fonte é de fora, o texto muda de estado para estado, e às vezes o padrão
+ * não bate. Quando isso acontece, a seção correspondente some (é a regra: um
+ * gráfico com metade do dado é pior que gráfico nenhum) — mas sumir tudo não
+ * pode ser a experiência inteira. Este gráfico não lê rótulo nenhum: pega os
+ * indicadores numéricos que o grupo realmente tem e desenha, sempre.
+ */
+function GraficoDoGrupo({ titulo, itens }: { titulo?: string; itens: IndicadorDoCenso[]; key?: string }) {
+  const comValor = itens
+    .filter((i) => i.valor !== null && (i.valor as number) > 0)
+    .sort((a, b) => (b.valor as number) - (a.valor as number))
+    .slice(0, 12);
+
+  // Um indicador só não é comparação nenhuma — a barra ficaria sozinha.
+  if (comValor.length < 2) return null;
+
+  const maior = Math.max(...comValor.map((i) => i.valor as number));
+  const mesmaUnidade = comValor.every((i) => i.unidade === comValor[0].unidade);
+
+  return (
+    <div className="rounded-xl border border-slate-100 p-3.5">
+      {titulo && <p className="text-[11.5px] font-black text-[#0D233A] mb-3">{titulo}</p>}
+      <div className="space-y-2">
+        {comValor.map((indicador) => (
+          <div key={indicador.id}>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="text-[10.5px] font-bold text-slate-600 truncate">
+                {indicador.rotulo}
+              </span>
+              <span className="text-[10.5px] font-black text-[#0D233A] shrink-0 tabular-nums">
+                {(indicador.valor as number).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}
+                {mesmaUnidade ? '' : ` ${indicador.unidade}`}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-[#015FC9]"
+                style={{ width: `${Math.max(2, ((indicador.valor as number) / maior) * 100)}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      {mesmaUnidade && comValor[0].unidade && (
+        <p className="mt-2.5 text-[9.5px] font-semibold text-slate-400">
+          Valores em {comValor[0].unidade}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* =============================================================== painel === */
 
 export default function PainelDoCenso({
@@ -547,6 +606,30 @@ export default function PainelDoCenso({
                 </div>
               )}
 
+              {/*
+                FALLBACK: nenhum dos três gráficos curados bateu.
+
+                Pirâmide, raça e saneamento dependem de acertar o texto exato
+                que esta fonte usa, e às vezes não bate. Quando isso acontece
+                para os três de uma vez, a resposta não pode ser "visão geral
+                sem gráfico nenhum" — é o próprio motivo de existir da tela.
+                Desenha-se então um gráfico de cada um dos dois primeiros
+                grupos que a fonte realmente mandou, sem tentar adivinhar o
+                que eles significam: os números que existem, do jeito que
+                vieram.
+              */}
+              {piramide.length === 0 && raca.length === 0 && saneamento.length === 0 && (
+                <>
+                  {censo.grupos.slice(0, 2).map((grupo) => (
+                    <GraficoDoGrupo
+                      key={grupo.id}
+                      titulo={grupo.titulo}
+                      itens={[...grupo.principais, ...grupo.detalhes]}
+                    />
+                  ))}
+                </>
+              )}
+
               {/* ------------------------------------------- explorar --- */}
               <button
                 type="button"
@@ -612,11 +695,24 @@ export default function PainelDoCenso({
             </div>
           ) : (
             /* --------------------------------------- uma categoria só --- */
-            <div className="mt-3 rounded-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden">
+            <div className="mt-3 space-y-3">
               {grupoSelecionado ? (
-                [...grupoSelecionado.principais, ...grupoSelecionado.detalhes].map((indicador) => (
-                  <LinhaDeIndicador key={indicador.id} indicador={indicador} />
-                ))
+                <>
+                  {/*
+                    O gráfico da categoria: os números dela, comparados, sem
+                    precisar que o rótulo bata em nenhum padrão conhecido.
+                  */}
+                  <GraficoDoGrupo
+                    itens={[...grupoSelecionado.principais, ...grupoSelecionado.detalhes]}
+                  />
+                  <div className="rounded-xl border border-slate-100 divide-y divide-slate-50 overflow-hidden">
+                    {[...grupoSelecionado.principais, ...grupoSelecionado.detalhes].map(
+                      (indicador) => (
+                        <LinhaDeIndicador key={indicador.id} indicador={indicador} />
+                      )
+                    )}
+                  </div>
+                </>
               ) : (
                 <p className="px-3 py-6 text-center text-[11px] font-bold text-slate-400">
                   Categoria sem indicadores neste recorte.
