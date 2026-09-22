@@ -35,6 +35,7 @@ import {
   GenteJunta,
   CertezaDoRaio
 } from './territorio/GraficosDoTerritorio';
+import PainelDoCenso from './territorio/PainelDoCenso';
 
 interface InteligenciaTerritorialProps {
   aberto: boolean;
@@ -221,7 +222,6 @@ export default function InteligenciaTerritorial({
   );
   const [censo, setCenso] = useState<IndicadoresDoRecorte | null>(null);
   const [carregandoCenso, setCarregandoCenso] = useState(false);
-  const [grupoAberto, setGrupoAberto] = useState<string | null>(null);
 
   /* ---------------------------------------------------------- desenho --- */
   const [desenharNoMapa, setDesenharNoMapa] = useState(true);
@@ -564,6 +564,33 @@ export default function InteligenciaTerritorial({
     if (setoresDe !== municipio.codigo) carregarSetoresDaCidade();
   };
 
+  /**
+   * População e domicílios do recorte aberto no Censo, direto do cadastro.
+   *
+   * Não são lidos de dentro dos indicadores: `MunicipioDoTerritorio`,
+   * `BairroDoTerritorio` e `SetorDoTerritorio` já trazem os dois campos,
+   * tipados, e é o mesmo número usado nas listas de bairros e setores desta
+   * tela. Ler daqui em vez de caçar um indicador chamado "população" evita
+   * depender de como o Censo escreveu o rótulo.
+   */
+  const populacaoDoRecorteAtual =
+    recorte?.nivel === 'municipio'
+      ? municipio?.populacao ?? null
+      : recorte?.nivel === 'bairro'
+        ? bairros.find((b) => b.codigo === recorte.codigo)?.populacao ?? null
+        : recorte?.nivel === 'setor'
+          ? setores.find((s) => s.codigo === recorte.codigo)?.populacao ?? null
+          : null;
+
+  const domiciliosDoRecorteAtual =
+    recorte?.nivel === 'municipio'
+      ? municipio?.domicilios ?? null
+      : recorte?.nivel === 'bairro'
+        ? bairros.find((b) => b.codigo === recorte.codigo)?.domicilios ?? null
+        : recorte?.nivel === 'setor'
+          ? setores.find((s) => s.codigo === recorte.codigo)?.domicilios ?? null
+          : null;
+
   const carregarCenso = async (nivel: string, codigo: string, nome: string) => {
     setAba('censo');
     setRecorte({ nivel, codigo, nome });
@@ -573,7 +600,7 @@ export default function InteligenciaTerritorial({
     try {
       const dados = await lerIndicadores(uf, nivel, codigo);
       setCenso(dados);
-      setGrupoAberto(dados.grupos?.[0]?.id || null);
+      // Qual grupo abre expandido é decisão do PainelDoCenso, não daqui.
     } catch (falha: any) {
       setErro(falha);
     } finally {
@@ -1652,8 +1679,17 @@ export default function InteligenciaTerritorial({
                     <p className="text-[12.5px] font-black text-[#0D233A] truncate">
                       {recorte.nome}
                     </p>
+                    {/*
+                      A UF e o ano só entram quando o Censo já respondeu: antes
+                      disso não sabemos nem se este recorte tem indicador
+                      publicado, e escrever "Censo Demográfico 2022" de
+                      antemão seria prometer um ano que pode não valer aqui.
+                    */}
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       {recorte.nivel}
+                      {uf && ` · ${uf}`}
+                      {censo?.fonte?.anoReferencia &&
+                        ` · Censo Demográfico ${censo.fonte.anoReferencia}`}
                     </p>
                   </div>
                   {!censo && !carregandoCenso && (
@@ -1684,98 +1720,22 @@ export default function InteligenciaTerritorial({
                 )}
 
                 {censo?.status === 'ok' && (
-                  /*
-                   * Os grupos viram colunas de alvenaria quando há largura.
-                   *
-                   * Empilhados, "Domicílios" ficava a três rolagens de
-                   * "População" e comparar os dois virava exercício de
-                   * memória. Lado a lado, a leitura é de relance — que é a
-                   * única razão de existir uma tela de indicadores.
-                   */
-                  <div className="mt-3 @2xl:columns-2 @5xl:columns-3 gap-2 space-y-2 [&>*]:break-inside-avoid">
-                    {censo.grupos.map((grupo) => {
-                      const aberto2 = grupoAberto === grupo.id;
-                      const lista = aberto2
-                        ? [...grupo.principais, ...grupo.detalhes]
-                        : grupo.principais;
-                      return (
-                        <div
-                          key={grupo.id}
-                          className="rounded-xl border border-slate-100 overflow-hidden"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setGrupoAberto(aberto2 ? null : grupo.id)}
-                            className="w-full px-3 py-2 bg-slate-50/60 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-100/60"
-                          >
-                            <span className="text-[11.5px] font-black text-[#0D233A]">
-                              {grupo.titulo}
-                            </span>
-                            <ChevronRight
-                              className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
-                                aberto2 ? 'rotate-90' : ''
-                              }`}
-                            />
-                          </button>
-
-                          <div className="divide-y divide-slate-50">
-                            {lista.map((indicador) => (
-                              <div
-                                key={indicador.id}
-                                className="px-3 py-2 flex items-center justify-between gap-3"
-                              >
-                                <span className="min-w-0 flex-1">
-                                  <span className="block text-[11.5px] font-bold text-slate-700 leading-tight">
-                                    {indicador.rotulo}
-                                  </span>
-                                  <span className="flex items-center gap-1.5 mt-0.5">
-                                    {/* Medido ou calculado: quem cita o número
-                                        precisa saber a diferença. */}
-                                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-300">
-                                      {indicador.origem}
-                                    </span>
-                                    {indicador.setoresSemDado > 0 && (
-                                      <span className="text-[9px] font-black uppercase tracking-wider text-amber-600">
-                                        soma parcial · {indicador.setoresSemDado}{' '}
-                                        setor(es) sem dado
-                                      </span>
-                                    )}
-                                  </span>
-                                </span>
-
-                                <span className="text-right shrink-0">
-                                  {/* null é ausência, nunca zero. */}
-                                  {indicador.valor === null ? (
-                                    <span className="text-[10px] font-bold text-slate-300 italic">
-                                      {MOTIVOS[indicador.motivoIndisponivel || ''] ||
-                                        'sem dado'}
-                                    </span>
-                                  ) : (
-                                    <>
-                                      <span className="block text-[13px] font-black text-[#0D233A] leading-none">
-                                        {indicador.valor.toLocaleString('pt-BR', {
-                                          maximumFractionDigits: 2
-                                        })}
-                                      </span>
-                                      <span className="block text-[9px] font-bold text-slate-400">
-                                        {indicador.unidade}
-                                      </span>
-                                    </>
-                                  )}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {censo.fonte && (
-                      <p className="text-[9.5px] font-semibold text-slate-400 leading-snug pt-1">
-                        {censo.fonte.censo} · {censo.fonte.instituto} ·{' '}
-                        {censo.totalSetores} setores no recorte
-                      </p>
-                    )}
+                  <div className="mt-3">
+                    <PainelDoCenso
+                      censo={censo}
+                      populacaoDoRecorte={populacaoDoRecorteAtual}
+                      domiciliosDoRecorte={domiciliosDoRecorteAtual}
+                      onVerSetores={
+                        recorte?.nivel === 'bairro'
+                          ? () => {
+                              const alvo = bairros.find((b) => b.codigo === recorte.codigo);
+                              if (alvo) abrirSetores(alvo);
+                            }
+                          : recorte?.nivel === 'municipio'
+                            ? () => setAba('setores')
+                            : undefined
+                      }
+                    />
                   </div>
                 )}
               </>
