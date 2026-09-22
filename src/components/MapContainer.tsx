@@ -17,6 +17,7 @@ import {
 import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
 import TempoDaMissao from './TempoDaMissao';
 import RelatorioNeo from './RelatorioNeo';
+import MissaoParaODelta from './missao/MissaoParaODelta';
 import { CHAVE_PROMPT_NEO, PROMPT_NEO_PADRAO, RelatorioDoNeo } from '../neo';
 import { gerarRelatorioDaMissao, PecaDoDossie } from '../services/neo';
 import { JanelaDeTurno, NOME_DO_TURNO, TURNOS_PADRAO, TurnoId } from '../turnos';
@@ -264,6 +265,29 @@ export const NEIGHBORHOOD_DATA = [
     ]
   }
 ];
+
+/**
+ * A prioridade daqui dita no vocabulário do Nexu-GC.
+ *
+ * São duas escalas diferentes: a daqui é configurável pelo administrador
+ * ("Grave — risco à vida", "Rotina"), a de lá é fixa em quatro valores. O
+ * palpite é pela palavra, e é só um palpite — por isso ele chega ao bloco do
+ * Delta como valor inicial de uma caixa que continua aberta para trocar, e
+ * nunca como decisão tomada.
+ */
+function prioridadeNoNexus(
+  rotulo?: string
+): 'baixa' | 'normal' | 'alta' | 'critica' {
+  const texto = (rotulo || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (!texto) return 'normal';
+  if (/critic|grave|urgent|emergenc|maxima|vida/.test(texto)) return 'critica';
+  if (/alta|prioritari|important/.test(texto)) return 'alta';
+  if (/baixa|rotina|leve|normalizad/.test(texto)) return 'baixa';
+  return 'normal';
+}
 
 interface MapContainerProps {
   areas: PanfletagemArea[];
@@ -4083,6 +4107,34 @@ export default function MapContainer({
                       )}
                     </div>
                   )}
+
+                  {/*
+                    A MESMA ORDEM, PARA QUEM NÃO ABRE ESTE MAPA.
+
+                    A equipe Delta trabalha noutro sistema, o Nexu-GC. Mandar
+                    uma ordem para ela era copiar título, descrição e prazo na
+                    mão de uma tela para a outra — e o que se perdia no caminho
+                    não era tempo, era rastro: ninguém sabia depois se a ordem
+                    tinha sido mandada, para quem, nem se alguém concluiu.
+
+                    Fica ANTES dos dois blocos de feedback porque é dessa
+                    ordem: primeiro se despacha, depois volta o retorno.
+                  */}
+                  <MissaoParaODelta
+                    missao={{
+                      tipo: missaoAberta.tipo,
+                      id: missaoAberta.id,
+                      titulo: missaoAberta.titulo,
+                      descricao: missaoAberta.descricao,
+                      prazo: missaoAberta.prazo
+                    }}
+                    clienteSugerido={
+                      candidates?.find((c) => c.id === selectedCandidateId)?.name || null
+                    }
+                    prioridadeSugerida={prioridadeNoNexus(
+                      (priorityLevels || []).find((n) => n.id === missaoAberta.prioridade)?.label
+                    )}
+                  />
 
                   {/*
                     DOIS TÓPICOS, PORQUE SÃO DUAS ORIGENS.
