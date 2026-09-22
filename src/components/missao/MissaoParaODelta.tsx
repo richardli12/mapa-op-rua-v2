@@ -514,6 +514,7 @@ export default function MissaoParaODelta({
               {jaEnviadas.map((m) => (
                 <div key={m.id} className="rounded-xl border border-slate-200 p-3">
                   <div className="flex items-start gap-2">
+                    <Retrato nome={m.time?.nome || 'Time'} url={m.time?.foto_url} tamanho={30} />
                     <div className="min-w-0 flex-1">
                       <p className="text-[12px] font-black text-slate-800 leading-snug">
                         {m.titulo}
@@ -554,6 +555,37 @@ export default function MissaoParaODelta({
                       {m.destinatarios.concluidos}/{m.destinatarios.total} concluíram
                     </span>
                   </div>
+
+                  {/*
+                    Quem recebeu, pela cara.
+
+                    "6 destinatários" é uma contagem; seis rostos são as seis
+                    pessoas. Quem já concluiu ganha o anel verde — é a mesma
+                    informação da barra acima, mas com nome e rosto em vez de
+                    fração.
+                  */}
+                  {m.destinatarios.itens && m.destinatarios.itens.length > 0 && (
+                    <div className="mt-2 flex items-center gap-1 flex-wrap">
+                      {m.destinatarios.itens.slice(0, 10).map((pessoa) => (
+                        <span
+                          key={pessoa.id}
+                          title={`${pessoa.nome} — ${
+                            pessoa.status === 'concluida' ? 'concluiu' : pessoa.status
+                          }`}
+                          className={`rounded-full ${
+                            pessoa.status === 'concluida' ? 'ring-2 ring-emerald-500' : ''
+                          }`}
+                        >
+                          <Retrato nome={pessoa.nome} url={pessoa.foto_url} tamanho={24} />
+                        </span>
+                      ))}
+                      {m.destinatarios.itens.length > 10 && (
+                        <span className="text-[10px] font-black text-slate-400 tabular-nums pl-1">
+                          +{m.destinatarios.itens.length - 10}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   {m.status === 'publicada' && (
                     <button
@@ -631,6 +663,11 @@ export default function MissaoParaODelta({
                       onChange={(e) => setTodosDoTime(e.target.checked)}
                       className="w-4 h-4 accent-indigo-600 cursor-pointer"
                     />
+                    <Retrato
+                      nome={times.find((t) => t.id === timeId)?.nome || 'Time'}
+                      url={times.find((t) => t.id === timeId)?.foto_url}
+                      tamanho={24}
+                    />
                     <span className="text-[12px] font-bold text-slate-700">
                       Mandar para o time inteiro
                     </span>
@@ -669,6 +706,16 @@ export default function MissaoParaODelta({
                                 }
                                 className="w-4 h-4 accent-indigo-600 cursor-pointer"
                               />
+                              {/*
+                                A cara de quem vai receber.
+
+                                Despachar para a equipe errada é o erro mais
+                                caro deste bloco, e o mais fácil de cometer: os
+                                nomes de dois times se parecem, os ids não
+                                dizem nada. Um rosto conhecido na lista é o que
+                                faz esse engano aparecer antes do envio.
+                              */}
+                              <Retrato nome={d.nome} url={d.foto_url} />
                               <span className="min-w-0 flex-1">
                                 <span className="block text-[11.5px] font-bold text-slate-700 truncate">
                                   {d.nome}
@@ -979,6 +1026,66 @@ export default function MissaoParaODelta({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A foto de quem recebe — e as iniciais quando ela não vem.
+ *
+ * A URL do Nexu-GC é assinada e vence em cerca de uma hora. Um bloco aberto
+ * desde a manhã continuaria apontando para um endereço morto, e o que
+ * apareceria seria o ícone de imagem quebrada — que quem olha lê como defeito
+ * do sistema, não como assinatura vencida.
+ *
+ * Por isso a queda para as iniciais não é só para `foto_url` nula: é também
+ * para o carregamento que falhou. Os dois casos têm a mesma resposta na tela,
+ * e nenhum deles tem por que assustar.
+ */
+function Retrato({
+  nome,
+  url,
+  tamanho = 28
+}: {
+  nome: string;
+  url?: string | null;
+  tamanho?: number;
+}) {
+  const [quebrou, setQuebrou] = useState(false);
+  const iniciais = nome
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((parte) => parte[0])
+    .filter((letra, i, todas) => i === 0 || i === todas.length - 1)
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  const estilo = { width: tamanho, height: tamanho };
+
+  if (!url || quebrou) {
+    return (
+      <span
+        aria-hidden
+        style={estilo}
+        className="shrink-0 rounded-full bg-slate-100 border border-slate-200 text-slate-500 flex items-center justify-center text-[9.5px] font-black"
+      >
+        {iniciais || '—'}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={nome}
+      title={nome}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setQuebrou(true)}
+      style={estilo}
+      className="shrink-0 rounded-full object-cover border border-slate-200 bg-slate-100"
+    />
   );
 }
 
