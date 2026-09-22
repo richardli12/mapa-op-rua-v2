@@ -5,7 +5,7 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Sparkles, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, Sparkles, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
 import { UnidadeDeSaude } from '../dados/ubs';
@@ -4097,7 +4097,6 @@ export default function MapContainer({
                     {
                       topico: 'missao' as const,
                       titulo: 'Feedback Missão',
-                      ajuda: '',
                       /*
                        * Verde fixo, não a cor da missão.
                        *
@@ -4117,11 +4116,21 @@ export default function MapContainer({
                     {
                       topico: 'organico' as const,
                       titulo: 'Feedback Orgânico',
-                      ajuda: 'O que apareceu sem ordem nenhuma.',
                       // Cor própria, e não a da missão: a origem diferente
                       // precisa ser vista antes de ser lida.
                       cor: '#7C3AED',
-                      Icone: Sparkles,
+                      /*
+                       * Caixa de entrada, e não a estrelinha.
+                       *
+                       * "Orgânico" aqui é o que CHEGOU por fora — print de
+                       * grupo, vídeo de morador, áudio que alguém mandou. A
+                       * estrela de quatro pontas virou, no resto do mercado,
+                       * o símbolo de "isto foi gerado por IA", e é exatamente
+                       * o que este material não é: é gente mandando coisa. No
+                       * sistema ela fica reservada ao NEO, que é IA de
+                       * verdade.
+                       */
+                      Icone: Inbox,
                       itens: organicasNaTela,
                       aoMudar: setOrganicasNaTela,
                       vazio:
@@ -4166,11 +4175,6 @@ export default function MapContainer({
                           >
                             {bloco.titulo}
                           </p>
-                          {bloco.ajuda && (
-                            <p className="text-[10.5px] font-semibold text-slate-500 leading-snug truncate">
-                              {bloco.ajuda}
-                            </p>
-                          )}
                         </div>
                         <span
                           className="shrink-0 px-2.5 h-[22px] rounded-full bg-white text-[10px] font-black uppercase tracking-wider flex items-center border"
