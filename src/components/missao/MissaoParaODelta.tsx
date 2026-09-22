@@ -4,7 +4,10 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  Clock,
   Copy,
+  Eye,
+  Pencil,
   Loader2,
   Paperclip,
   RefreshCw,
@@ -18,6 +21,8 @@ import {
   anexarMaterial,
   cancelarMissao,
   criarMissao,
+  editarMissao,
+  ehDaOrdem,
   lerClientes,
   lerDestinatarios,
   lerMissaoPorIdExterno,
@@ -29,7 +34,9 @@ import {
   type ClienteDoNexus,
   type DestinatarioDoNexus,
   type ErroDoNexus,
+  type DestinatarioDaMissao,
   type MissaoDoNexus,
+  type MudancasDaMissao,
   type PrioridadeDoNexus,
   type TimeDoNexus
 } from '../../services/nexusGc';
@@ -94,16 +101,40 @@ const tamanhoLegivel = (bytes: number) =>
     ? `${(bytes / (1024 * 1024)).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`
     : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
+/**
+ * O prazo que voltou em UTC, escrito de novo no horário de Maceió.
+ *
+ * A conta é exata porque Maceió é UTC-3 fixo, sem horário de verão — e é ela
+ * que impede o formulário de edição de mostrar 21:00 para um prazo que foi
+ * escrito como 18:00.
+ */
+const prazoEmMaceio = (iso: string | null | undefined) => {
+  if (!iso) return { data: '', hora: '' };
+  const instante = new Date(iso);
+  if (Number.isNaN(instante.getTime())) return { data: '', hora: '' };
+  const local = new Date(instante.getTime() - 3 * 3600_000).toISOString();
+  return { data: local.slice(0, 10), hora: local.slice(11, 16) };
+};
+
 /** "2026-09-30T18:00" no horário de Maceió vira o instante certo. */
 const instanteEmMaceio = (data: string, hora: string) =>
   new Date(`${data}T${(hora || '23:59').slice(0, 5)}:00-03:00`);
 
-const dataCurta = (iso: string | null) => {
+/**
+ * Toda data desta tela é escrita no horário de Maceió.
+ *
+ * O Nexu-GC devolve tudo em UTC e lê tudo como Maceió — é o fuso da operação.
+ * Deixar o navegador formatar no fuso DELE faria a mesma missão mostrar horas
+ * diferentes para quem abre de outro estado, e ninguém saberia qual das duas é
+ * a que vale para o prazo.
+ */
+const dataCurta = (iso: string | null | undefined) => {
   if (!iso) return '—';
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
     ? '—'
     : d.toLocaleString('pt-BR', {
+        timeZone: 'America/Maceio',
         day: '2-digit',
         month: '2-digit',
         hour: '2-digit',
@@ -183,6 +214,12 @@ export default function MissaoParaODelta({
    */
   const [idExterno, setIdExterno] = useState<string | null>(null);
   const [idCopiado, setIdCopiado] = useState<string | null>(null);
+  /** Qual missão está com o painel de respostas aberto. */
+  const [respostasAbertas, setRespostasAbertas] = useState<string | null>(null);
+  /** Qual missão está sendo editada, e o que já foi mexido nela. */
+  const [editando, setEditando] = useState<string | null>(null);
+  const [mudancas, setMudancas] = useState<MudancasDaMissao>({});
+  const [salvando, setSalvando] = useState(false);
 
   const [enviando, setEnviando] = useState(false);
   const [jaEnviadas, setJaEnviadas] = useState<MissaoDoNexus[]>([]);
@@ -292,7 +329,17 @@ export default function MissaoParaODelta({
     };
   }, [timeId]);
 
-  const vivas = jaEnviadas.filter((m) => m.status !== 'cancelada');
+  /**
+   * SÓ A MISSÃO DESTA ORDEM APARECE AQUI.
+   *
+   * A consulta é por `referencia`, que agrupa — mas agrupar não é o mesmo que
+   * identificar: a mesma chave de API serve outras origens, e nada impede que
+   * um rótulo se repita fora daqui. Quem responde "esta missão é desta ordem?"
+   * é o id do envio, que carrega a ordem por inteiro. Os dois precisam
+   * concordar; qualquer coisa que passe só pelo rótulo fica de fora.
+   */
+  const daOrdem = jaEnviadas.filter((m) => ehDaOrdem(m.id_externo, missao.tipo, missao.id));
+  const vivas = daOrdem.filter((m) => m.status !== 'cancelada');
   const quantosRecebem = todosDoTime
     ? times.find((t) => t.id === timeId)?.membros_ativos ?? destinatarios.length
     : escolhidos.length;
@@ -450,6 +497,26 @@ export default function MissaoParaODelta({
     }
   };
 
+  /** Manda só o que mudou — a edição do Nexu-GC é parcial de propósito. */
+  const salvarEdicao = async (m: MissaoDoNexus) => {
+    if (Object.keys(mudancas).length === 0) {
+      setEditando(null);
+      return;
+    }
+    setSalvando(true);
+    setErro(null);
+    try {
+      const resposta = await editarMissao(m.id, mudancas);
+      setJaEnviadas((atual) => atual.map((x) => (x.id === m.id ? resposta.data : x)));
+      setEditando(null);
+      setMudancas({});
+    } catch (falha: any) {
+      setErro(falha as ErroDoNexus);
+    } finally {
+      setSalvando(false);
+    }
+  };
+
   const cancelar = async (id: string) => {
     setCancelando(id);
     setErro(null);
@@ -538,7 +605,7 @@ export default function MissaoParaODelta({
           )}
 
           {/* ------------------------------------------ já enviadas --- */}
-          {jaEnviadas.length > 0 && (
+          {daOrdem.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <p className="text-[9.5px] font-black uppercase tracking-wider text-slate-400">
@@ -556,7 +623,7 @@ export default function MissaoParaODelta({
                 </button>
               </div>
 
-              {jaEnviadas.map((m) => (
+              {daOrdem.map((m) => (
                 <div key={m.id} className="rounded-xl border border-slate-200 p-3">
                   <div className="flex items-start gap-2">
                     <Retrato nome={m.time?.nome || 'Time'} url={m.time?.foto_url} tamanho={30} />
@@ -581,6 +648,19 @@ export default function MissaoParaODelta({
                       {ESTADOS[m.status]?.texto || m.status}
                     </span>
                   </div>
+
+                  {/*
+                    Atrasada é contado na leitura, contra a hora da chamada —
+                    não existe lá um campo esperando alguém virar uma chave. Por
+                    isso ele aparece junto do "Atualizar", e não como estado
+                    guardado aqui.
+                  */}
+                  {m.atrasada && (
+                    <p className="mt-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 text-[9.5px] font-black uppercase tracking-wider">
+                      <Clock className="w-3 h-3" />
+                      Prazo estourado
+                    </p>
+                  )}
 
                   {/*
                     O id que demos a este envio.
@@ -630,6 +710,23 @@ export default function MissaoParaODelta({
                   </div>
 
                   {/*
+                    O funil, quando o Nexu-GC manda os passos.
+
+                    "Recebeu" não é "viu", e "viu" não é "começou". Sem a
+                    distinção, missão parada por falta de gente e missão parada
+                    porque ninguém abriu o aplicativo são a mesma barra em
+                    zero — e a decisão de quem despachou é diferente em cada
+                    caso.
+                  */}
+                  {m.progresso && (
+                    <p className="mt-1.5 text-[10px] font-bold text-slate-400 tabular-nums">
+                      {m.progresso.total} receberam · {m.progresso.visualizados} viram ·{' '}
+                      {m.progresso.iniciados} começaram · {m.progresso.concluidos}{' '}
+                      concluíram
+                    </p>
+                  )}
+
+                  {/*
                     Quem recebeu, pela cara.
 
                     "6 destinatários" é uma contagem; seis rostos são as seis
@@ -660,21 +757,76 @@ export default function MissaoParaODelta({
                     </div>
                   )}
 
-                  {m.status === 'publicada' && (
-                    <button
-                      type="button"
-                      onClick={() => cancelar(m.id)}
-                      disabled={cancelando === m.id}
-                      title="Encerra as atribuições em aberto; quem já concluiu mantém os pontos"
-                      className="mt-2.5 px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 transition-colors"
-                    >
-                      {cancelando === m.id ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <X className="w-3 h-3" />
-                      )}
-                      Cancelar no Nexu-GC
-                    </button>
+                  {/* ------------------------------------ o que dá para fazer --- */}
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    {m.destinatarios.itens && m.destinatarios.itens.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRespostasAbertas(respostasAbertas === m.id ? null : m.id)
+                        }
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 transition-colors"
+                      >
+                        <Eye className="w-3 h-3" />
+                        {respostasAbertas === m.id ? 'Fechar respostas' : 'Ver respostas'}
+                      </button>
+                    )}
+
+                    {/*
+                      Missão cancelada ou arquivada não é editável no Nexu-GC:
+                      ela saiu da operação, e mexer no texto de um histórico só
+                      confunde quem lê depois.
+                    */}
+                    {(m.status === 'publicada' || m.status === 'rascunho') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditando(editando === m.id ? null : m.id);
+                          setMudancas({});
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" />
+                        {editando === m.id ? 'Fechar' : 'Editar'}
+                      </button>
+                    )}
+
+                    {m.status === 'publicada' && (
+                      <button
+                        type="button"
+                        onClick={() => cancelar(m.id)}
+                        disabled={cancelando === m.id}
+                        title="Encerra as atribuições em aberto; quem já concluiu mantém os pontos"
+                        className="px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 transition-colors"
+                      >
+                        {cancelando === m.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <X className="w-3 h-3" />
+                        )}
+                        Cancelar no Nexu-GC
+                      </button>
+                    )}
+                  </div>
+
+                  {/* ------------------------------------------ respostas --- */}
+                  {respostasAbertas === m.id && m.destinatarios.itens && (
+                    <div className="mt-2.5 rounded-xl border border-slate-200 divide-y divide-slate-100">
+                      {m.destinatarios.itens.map((pessoa) => (
+                        <LinhaDaPessoa key={pessoa.atribuicao_id || pessoa.id} pessoa={pessoa} />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* -------------------------------------------- edição --- */}
+                  {editando === m.id && (
+                    <FormularioDeEdicao
+                      missao={m}
+                      mudancas={mudancas}
+                      onMudar={setMudancas}
+                      salvando={salvando}
+                      onSalvar={() => salvarEdicao(m)}
+                    />
                   )}
                 </div>
               ))}
@@ -1159,6 +1311,230 @@ function Retrato({
       style={estilo}
       className="shrink-0 rounded-full object-cover border border-slate-200 bg-slate-100"
     />
+  );
+}
+
+const PASSOS: {
+  [chave: string]: { texto: string; classe: string };
+} = {
+  concluida: { texto: 'Concluiu', classe: 'bg-emerald-100 text-emerald-700' },
+  em_andamento: { texto: 'Começou', classe: 'bg-blue-100 text-blue-700' },
+  pendente: { texto: 'Não começou', classe: 'bg-slate-100 text-slate-500' },
+  cancelada: { texto: 'Saiu da missão', classe: 'bg-rose-100 text-rose-700' }
+};
+
+/**
+ * Uma pessoa, e o que ela fez com a missão.
+ *
+ * O QUE ELA ESCREVEU É O QUE IMPORTA AQUI. "Concluída" é um carimbo; o
+ * resultado é a entrega — e é a única coisa desta tela que responde "o que
+ * voltou?". Por isso ele aparece por extenso, e não atrás de outro clique.
+ *
+ * Os passos vêm como booleano junto com o carimbo de hora, então nada aqui
+ * precisa deduzir "já viu?" comparando data com nulo.
+ */
+function LinhaDaPessoa({ pessoa }: { pessoa: DestinatarioDaMissao; key?: string }) {
+  const passo = PASSOS[pessoa.status] || PASSOS.pendente;
+  return (
+    <div className="p-3">
+      <div className="flex items-start gap-2.5">
+        <Retrato nome={pessoa.nome} url={pessoa.foto_url} tamanho={30} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[11.5px] font-black text-slate-800 leading-tight truncate">
+            {pessoa.nome}
+          </p>
+          <p className="text-[9.5px] font-semibold text-slate-400 leading-snug mt-0.5">
+            {pessoa.visualizada ? `Abriu ${dataCurta(pessoa.vista_em || null)}` : 'Não abriu'}
+            {pessoa.iniciada && ` · começou ${dataCurta(pessoa.iniciada_em || null)}`}
+            {pessoa.concluida && ` · concluiu ${dataCurta(pessoa.concluida_em)}`}
+          </p>
+        </div>
+        <span className="shrink-0 flex flex-col items-end gap-1">
+          <span
+            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${passo.classe}`}
+          >
+            {passo.texto}
+          </span>
+          {pessoa.pontos_creditados > 0 && (
+            <span className="text-[9.5px] font-black text-slate-400 tabular-nums">
+              +{pessoa.pontos_creditados} pontos
+            </span>
+          )}
+        </span>
+      </div>
+
+      {pessoa.concluida_com_atraso && (
+        <p className="mt-1.5 ml-[38px] text-[9.5px] font-black uppercase tracking-wider text-amber-600">
+          Entregou depois do prazo
+        </p>
+      )}
+
+      {pessoa.resultado ? (
+        <p className="mt-2 ml-[38px] rounded-lg bg-slate-50 border border-slate-100 px-2.5 py-2 text-[11.5px] font-semibold text-slate-700 leading-relaxed whitespace-pre-wrap">
+          {pessoa.resultado}
+        </p>
+      ) : (
+        pessoa.concluida && (
+          <p className="mt-1.5 ml-[38px] text-[10px] font-semibold text-slate-400 italic">
+            Concluiu sem escrever retorno.
+          </p>
+        )
+      )}
+    </div>
+  );
+}
+
+/**
+ * Mudar o que já foi mandado.
+ *
+ * SÓ SAI O QUE FOI MEXIDO. A edição do Nexu-GC é parcial, e reenviar o objeto
+ * inteiro "para garantir" é justamente o que apaga conteúdo sem intenção — um
+ * campo que a tela não sabia existir voltaria nulo. Então cada controle grava
+ * a sua chave em `mudancas`, e só essas chaves viajam.
+ */
+function FormularioDeEdicao({
+  missao,
+  mudancas,
+  onMudar,
+  salvando,
+  onSalvar
+}: {
+  missao: MissaoDoNexus;
+  mudancas: MudancasDaMissao;
+  onMudar: (m: MudancasDaMissao) => void;
+  salvando: boolean;
+  onSalvar: () => void;
+}) {
+  const prazo = prazoEmMaceio(missao.prazo);
+  const data = mudancas.prazo ?? prazo.data;
+  const hora = mudancas.prazo_hora ?? prazo.hora;
+
+  const mexer = (campo: keyof MudancasDaMissao, valor: any) =>
+    onMudar({ ...mudancas, [campo]: valor });
+
+  const quando = data ? instanteEmMaceio(data, hora) : null;
+  const problema =
+    (mudancas.titulo !== undefined && mudancas.titulo.trim().length < 3 && 'O título precisa de 3 caracteres.') ||
+    (mudancas.descricao !== undefined && mudancas.descricao.trim().length < 3 && 'A descrição precisa de 3 caracteres.') ||
+    (mudancas.pontos !== undefined && (mudancas.pontos < 1 || mudancas.pontos > 100000) && 'Os pontos vão de 1 a 100000.') ||
+    ((mudancas.prazo !== undefined || mudancas.prazo_hora !== undefined) &&
+      quando &&
+      quando.getTime() <= Date.now() &&
+      'O prazo novo precisa estar no futuro — para encerrar, use cancelar.') ||
+    null;
+
+  const mexidos = Object.keys(mudancas).length;
+
+  return (
+    <div className="mt-2.5 rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2.5">
+      <Campo rotulo="Título">
+        <input
+          value={mudancas.titulo ?? missao.titulo}
+          onChange={(e) => mexer('titulo', e.target.value)}
+          maxLength={160}
+          className="w-full h-9 px-3 bg-white border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 focus:outline-hidden focus:border-slate-300"
+        />
+      </Campo>
+      <Campo rotulo="O que precisa ser feito">
+        <textarea
+          value={mudancas.descricao ?? missao.descricao}
+          onChange={(e) => mexer('descricao', e.target.value)}
+          rows={3}
+          maxLength={8000}
+          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 leading-relaxed resize-y focus:outline-hidden focus:border-slate-300"
+        />
+      </Campo>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Campo rotulo="Prioridade">
+          <select
+            value={mudancas.prioridade ?? missao.prioridade}
+            onChange={(e) => mexer('prioridade', e.target.value as PrioridadeDoNexus)}
+            className="w-full h-9 px-2 bg-white border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 cursor-pointer focus:outline-hidden focus:border-slate-300"
+          >
+            {PRIORIDADES.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.rotulo}
+              </option>
+            ))}
+          </select>
+        </Campo>
+        <Campo rotulo="Pontos">
+          <input
+            type="number"
+            min={1}
+            max={100000}
+            value={mudancas.pontos ?? missao.pontos}
+            onChange={(e) => mexer('pontos', Math.trunc(Number(e.target.value) || 0))}
+            className="w-full h-9 px-2.5 bg-white border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 focus:outline-hidden focus:border-slate-300"
+          />
+        </Campo>
+        <Campo rotulo="Prazo">
+          <input
+            type="date"
+            value={data}
+            onChange={(e) => {
+              // O prazo viaja como data + hora separadas, como na criação.
+              onMudar({ ...mudancas, prazo: e.target.value, prazo_hora: hora || '23:59' });
+            }}
+            className="w-full h-9 px-2 bg-white border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 focus:outline-hidden focus:border-slate-300"
+          />
+        </Campo>
+        <Campo rotulo="Hora">
+          <input
+            type="time"
+            value={hora}
+            onChange={(e) =>
+              onMudar({ ...mudancas, prazo: data, prazo_hora: e.target.value })
+            }
+            className="w-full h-9 px-2 bg-white border border-slate-200 rounded-lg text-[12px] font-semibold text-slate-700 focus:outline-hidden focus:border-slate-300"
+          />
+        </Campo>
+      </div>
+
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={mudancas.feedback_obrigatorio ?? missao.feedback_obrigatorio}
+          onChange={(e) => mexer('feedback_obrigatorio', e.target.checked)}
+          className="w-4 h-4 accent-indigo-600 cursor-pointer"
+        />
+        <span className="text-[11.5px] font-bold text-slate-700">
+          Exigir retorno escrito para concluir
+        </span>
+      </label>
+
+      {/*
+        Mexer nos pontos não tira o que já foi creditado a quem concluiu: o
+        valor novo vale para as conclusões seguintes. Dizer isso aqui evita a
+        decisão tomada achando que se está corrigindo o passado.
+      */}
+      {mudancas.pontos !== undefined && missao.destinatarios.concluidos > 0 && (
+        <p className="text-[10px] font-semibold text-amber-700 leading-snug">
+          Quem já concluiu mantém os pontos que recebeu — o valor novo vale para
+          as próximas conclusões.
+        </p>
+      )}
+
+      <div className="flex items-center gap-2.5 pt-0.5">
+        <button
+          type="button"
+          onClick={onSalvar}
+          disabled={salvando || mexidos === 0 || Boolean(problema)}
+          title={problema || undefined}
+          className="h-9 px-3.5 rounded-lg text-white text-[10px] font-black uppercase tracking-wider cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+          style={{ backgroundColor: COR }}
+        >
+          {salvando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+          Salvar
+        </button>
+        <p className="text-[10px] font-semibold text-slate-400 leading-snug">
+          {problema ||
+            (mexidos === 0
+              ? 'Mude alguma coisa para salvar.'
+              : `Só ${mexidos === 1 ? 'o campo mexido vai' : `os ${mexidos} campos mexidos vão`} para o Nexu-GC.`)}
+        </p>
+      </div>
+    </div>
   );
 }
 

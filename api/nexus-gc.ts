@@ -32,7 +32,7 @@ type Consulta = { [chave: string]: string };
 /** Os recursos atendidos, e nada além deles. */
 const RECURSOS: {
   [nome: string]: {
-    metodo: "GET" | "POST";
+    metodo: "GET" | "POST" | "PUT";
     /** Monta o caminho no Nexu-GC a partir dos parâmetros de rota. */
     caminho: (q: Consulta) => string;
     /** Parâmetros de rota obrigatórios, validados como UUID. */
@@ -67,6 +67,8 @@ const RECURSOS: {
       "minhas",
       "referencia",
       "id_externo",
+      "atrasadas",
+      "busca",
       "cliente_id",
       "time_id",
       "status",
@@ -81,6 +83,19 @@ const RECURSOS: {
     exige: ["missao"],
   },
   criar: { metodo: "POST", caminho: () => "/missoes" },
+  /**
+   * A edição é PARCIAL: só o que vem no corpo muda.
+   *
+   * Mandar o objeto inteiro "para garantir" é o que apaga conteúdo sem
+   * intenção — e por isso a ponte repassa o corpo como veio, sem completar
+   * campo nenhum.
+   */
+  editar: {
+    metodo: "PUT",
+    caminho: (q) => `/missoes/${q.missao}`,
+    exige: ["missao"],
+    corpo: "json",
+  },
   publicar: {
     metodo: "POST",
     caminho: (q) => `/missoes/${q.missao}/publicar`,
@@ -250,7 +265,7 @@ export default async function handler(req: any, res: any) {
      * "cancelar" não leva corpo nenhum.
      */
     const tipoDeCorpo = nome === "criar" ? "json" : recurso.corpo;
-    if (recurso.metodo === "POST" && tipoDeCorpo === "json") {
+    if (recurso.metodo !== "GET" && tipoDeCorpo === "json") {
       const corpo = await lerCorpo(req);
       if (!corpo || typeof corpo !== "object") {
         falhar(
