@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  X,
-  Layers3,
   Loader2,
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
   Maximize2,
-  Minimize2
+  Minimize2,
+  PanelRightClose
 } from 'lucide-react';
 import {
   lerUfs,
@@ -16,6 +17,7 @@ import {
   analisarRaio,
   lerSetores,
   todasAsPaginas,
+  UfDoTerritorio,
   SetorDoTerritorio,
   BairroDoTerritorio,
   MunicipioDoTerritorio,
@@ -108,6 +110,13 @@ const numero = (valor: number | null | undefined) =>
     ? '—'
     : valor.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 
+/** Como cada nível de recorte é escrito na ficha do cabeçalho. */
+const NIVEIS: { [nivel: string]: string } = {
+  municipio: 'Município',
+  bairro: 'Bairro',
+  setor: 'Setor censitário'
+};
+
 /** Texto do motivo pelo qual um indicador veio sem valor. */
 const MOTIVOS: { [chave: string]: string } = {
   'sem-dado-na-fonte': 'não divulgado para este recorte',
@@ -198,6 +207,14 @@ export default function InteligenciaTerritorial({
   const [ufEscolhidaNaMao, setUfEscolhidaNaMao] = useState(false);
   const [ufsComTerritorio, setUfsComTerritorio] = useState<string[]>([]);
   const [ufsComIndicadores, setUfsComIndicadores] = useState<string[]>([]);
+  /**
+   * As UFs por extenso.
+   *
+   * A trilha do cabeçalho diz "Pará", não "PA": a sigla já está no crachá ao
+   * lado do nome da cidade, e repeti-la na trilha não situa ninguém. O nome
+   * vem da mesma chamada de cobertura que já era feita — não é consulta nova.
+   */
+  const [ufs, setUfs] = useState<UfDoTerritorio[]>([]);
   const [carregandoCobertura, setCarregandoCobertura] = useState(false);
 
   /* -------------------------------------------------------- município --- */
@@ -207,6 +224,18 @@ export default function InteligenciaTerritorial({
 
   /* ---------------------------------------------------------- bairros --- */
   const [bairros, setBairros] = useState<BairroDoTerritorio[]>([]);
+  /**
+   * Os bairros do seletor do cabeçalho — lista separada, e sem geometria.
+   *
+   * `bairros` é a lista que o mapa pinta, e por isso vem com o polígono junto:
+   * é o dado mais pesado da base e derruba a página de 1000 para 200 linhas.
+   * O seletor só precisa de nome e código, e carregá-lo pela outra lista teria
+   * dois efeitos que ninguém pediu — a espera da geometria antes de a caixa
+   * ficar utilizável, e o mapa começando a se pintar sozinho só porque alguém
+   * abriu o painel do Censo.
+   */
+  const [bairrosDoSeletor, setBairrosDoSeletor] = useState<BairroDoTerritorio[]>([]);
+  const [carregandoBairrosDoSeletor, setCarregandoBairrosDoSeletor] = useState(false);
   const [carregandoBairros, setCarregandoBairros] = useState(false);
   const [ordem, setOrdem] = useState<'populacao' | 'densidade' | 'nome'>('populacao');
   const [buscaBairro, setBuscaBairro] = useState('');
@@ -289,6 +318,7 @@ export default function InteligenciaTerritorial({
       .then((dados) => {
         setUfsComTerritorio(dados.comTerritorio || []);
         setUfsComIndicadores(dados.comIndicadores || []);
+        setUfs(dados.ufs || []);
 
         /*
          * Sem UF em mãos, a única carregada serve.
@@ -339,6 +369,7 @@ export default function InteligenciaTerritorial({
     setErro(null);
     setMunicipio(alvo);
     setBairros([]);
+    setBairrosDoSeletor([]);
     /*
      * A malha de setores é do município, e só dele.
      *
@@ -541,6 +572,40 @@ export default function InteligenciaTerritorial({
   }, [aberto, aba, municipio?.codigo, bairros.length]);
 
   /**
+   * Os bairros do seletor vêm junto com o município.
+   *
+   * Sem isto, a caixa do cabeçalho abriria sempre dizendo que o município não
+   * tem bairros publicados — que é uma afirmação sobre o dado, não sobre a
+   * carga, e estaria errada na maioria das cidades.
+   */
+  useEffect(() => {
+    if (!aberto || !municipio) return;
+    if (bairrosDoSeletor.length > 0 || carregandoBairrosDoSeletor) return;
+    let cancelado = false;
+    setCarregandoBairrosDoSeletor(true);
+    todasAsPaginas<BairroDoTerritorio>(
+      (inicio) => lerBairros(uf, municipio.codigo, inicio, false),
+      'bairros'
+    )
+      .then((lista) => {
+        if (cancelado) return;
+        setBairrosDoSeletor(
+          lista.slice().sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+        );
+      })
+      // Falhar aqui não é motivo para banner de erro: o Censo do município,
+      // que é o que a tela veio mostrar, não depende desta lista.
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelado) setCarregandoBairrosDoSeletor(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto, uf, municipio?.codigo]);
+
+  /**
    * Entrou na aba: a malha carrega sozinha.
    *
    * A aba de setores sem setores é uma tela que só sabe pedir. Se a malha já
@@ -578,7 +643,8 @@ export default function InteligenciaTerritorial({
     recorte?.nivel === 'municipio'
       ? municipio?.populacao ?? null
       : recorte?.nivel === 'bairro'
-        ? bairros.find((b) => b.codigo === recorte.codigo)?.populacao ?? null
+        ? [...bairros, ...bairrosDoSeletor].find((b) => b.codigo === recorte.codigo)
+            ?.populacao ?? null
         : recorte?.nivel === 'setor'
           ? setores.find((s) => s.codigo === recorte.codigo)?.populacao ?? null
           : null;
@@ -587,7 +653,8 @@ export default function InteligenciaTerritorial({
     recorte?.nivel === 'municipio'
       ? municipio?.domicilios ?? null
       : recorte?.nivel === 'bairro'
-        ? bairros.find((b) => b.codigo === recorte.codigo)?.domicilios ?? null
+        ? [...bairros, ...bairrosDoSeletor].find((b) => b.codigo === recorte.codigo)
+            ?.domicilios ?? null
         : recorte?.nivel === 'setor'
           ? setores.find((s) => s.codigo === recorte.codigo)?.domicilios ?? null
           : null;
@@ -878,159 +945,260 @@ export default function InteligenciaTerritorial({
       }
     >
       {/* CABEÇALHO */}
-      <div className="px-4 pt-4 pb-3 border-b border-slate-100 shrink-0">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="text-[13px] font-black text-[#0D233A] leading-tight flex items-center gap-1.5">
-              <Layers3 className="w-4 h-4 text-emerald-600" />
+      {/*
+        O cabeçalho é a ficha do recorte, não a etiqueta da ferramenta.
+
+        Antes ele repetia o nome do painel em letra grande e mandava o nome da
+        cidade para uma linha de apoio cinza. Quem abre esta tela já sabe que
+        abriu a inteligência territorial — o que ela precisa ler primeiro é
+        QUAL lugar está na tela, em que nível de recorte e de que ano é o
+        Censo. Por isso o nome do painel virou a faixa miúda de cima e a
+        cidade ficou com o tamanho do título.
+      */}
+      <div className="shrink-0 bg-white">
+        <div className="group px-3.5 pt-3 flex items-center justify-between gap-2">
+          <h3 className="min-w-0 flex items-center gap-2">
+            <span className="w-[3px] h-3.5 rounded-full bg-[#1447E6] shrink-0" />
+            <span className="truncate text-[11.5px] font-bold uppercase tracking-[0.08em] text-[#1447E6]">
               Inteligência territorial
-            </h3>
-            <p className="text-[11px] text-slate-400 font-semibold mt-0.5 truncate">
-              {municipio
-                ? `${municipio.nome} · ${numero(municipio.populacao)} habitantes`
-                : 'População e Censo do território'}
-            </p>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
+            </span>
+          </h3>
+          <div className="shrink-0 flex items-center gap-1">
+            {/*
+              A tela cheia aparece com o ponteiro em cima do cabeçalho.
+
+              São dois botões para duas coisas muito diferentes de frequência:
+              fechar o painel é o gesto de todo dia, abrir em tela cheia é o de
+              quando a leitura ficou apertada. Deixar os dois sempre visíveis
+              fazia o canto do cabeçalho competir com o nome da cidade.
+            */}
             <button
               type="button"
               onClick={() => setTelaCheia((v) => !v)}
               title={telaCheia ? 'Voltar para meia tela' : 'Abrir em tela cheia'}
               aria-label={telaCheia ? 'Voltar para meia tela' : 'Abrir em tela cheia'}
-              className="w-8 h-8 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition-colors"
+              className="w-8 h-8 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50 flex items-center justify-center cursor-pointer transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             >
-              {telaCheia ? (
-                <Minimize2 className="w-4 h-4" />
-              ) : (
-                <Maximize2 className="w-4 h-4" />
-              )}
+              {telaCheia ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
             <button
               type="button"
               onClick={onFechar}
-              title="Fechar"
-              className="w-8 h-8 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer transition-colors"
+              title="Fechar o painel"
+              aria-label="Fechar o painel"
+              className="w-8 h-8 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50 flex items-center justify-center cursor-pointer transition-colors"
             >
-              <X className="w-4 h-4" />
+              <PanelRightClose className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/*
-          UF e município.
+        {/* ------------------------------------------- ficha do recorte --- */}
+        <div className="px-3.5 pt-1.5 flex items-center gap-3">
+          <span className="w-10 h-10 rounded-full bg-[#EFF6FF] text-[#1447E6] text-[12px] font-bold flex items-center justify-center shrink-0">
+            {uf || '—'}
+          </span>
+          <div className="min-w-0">
+            <p className="text-[16px] font-bold text-[#0F172B] leading-tight truncate">
+              {recorte?.nome || municipio?.nome || 'Escolha um município'}
+            </p>
+            {/*
+              A UF e o ano só entram quando o Censo já respondeu: antes disso
+              não sabemos nem se este recorte tem indicador publicado, e
+              escrever "Censo Demográfico 2022" de antemão seria prometer um
+              ano que pode não valer aqui.
+            */}
+            <p className="text-[11px] text-[#62748E] truncate">
+              {recorte
+                ? [
+                    NIVEIS[recorte.nivel] || recorte.nivel,
+                    uf || null,
+                    censo?.fonte?.anoReferencia
+                      ? `Censo Demográfico ${censo.fonte.anoReferencia}`
+                      : null
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
+                : 'População e Censo do território'}
+            </p>
+          </div>
+        </div>
 
-          Escondido sempre que já existe um município resolvido: é o caso de
-          quase toda abertura, porque a cidade vem do cadastro do cliente. Sem
-          um município ainda, ou depois de "Trocar município", as duas caixas
-          aparecem — é a única situação em que alguém precisa mexer nelas.
-        */}
-        {municipio && !seletorAberto ? (
-          <button
-            type="button"
-            onClick={() => setSeletorAberto(true)}
-            className="mt-2 text-[10.5px] font-bold text-slate-400 hover:text-[#015FC9] cursor-pointer transition-colors"
-          >
-            Trocar município
-          </button>
-        ) : (
-          <div className="mt-3 grid grid-cols-[76px_1fr] gap-2">
-            <select
-              value={uf}
-              onChange={(e) => {
-                setUfEscolhidaNaMao(true);
-                setUf(e.target.value.toUpperCase());
-                setMunicipios([]);
-                setMunicipio(null);
-                setBairros([]);
-                setCenso(null);
-                setAnalise(null);
-                onCirculoAnalisado(null);
-              }}
-              className="h-9 px-2 bg-white border border-slate-200 rounded-xl text-[11.5px] font-bold text-slate-700 cursor-pointer focus:outline-hidden"
+        {/* -------------------------------------------------- trilha --- */}
+        {municipio && (
+          <div className="px-3.5 mt-3 flex items-center gap-1.5 text-[12px] min-w-0">
+            <button
+              type="button"
+              onClick={() => setSeletorAberto(true)}
+              title="Trocar de UF ou de município"
+              className="shrink-0 text-[#2563EB] hover:underline cursor-pointer"
             >
-              <option value="">UF</option>
-              {(ufsComTerritorio.length > 0 ? ufsComTerritorio : [uf].filter(Boolean)).map(
-                (sigla) => (
-                  <option key={sigla} value={sigla}>
-                    {sigla}
-                  </option>
-                )
-              )}
-            </select>
-
-            <select
-              value={municipio?.codigo || ''}
-              onChange={(e) => {
-                const alvo = municipios.find((m) => m.codigo === e.target.value);
-                if (alvo) {
-                  escolherMunicipio(alvo);
-                  setSeletorAberto(false);
-                }
-              }}
-              disabled={municipios.length === 0}
-              className="h-9 px-2 bg-white border border-slate-200 rounded-xl text-[11.5px] font-bold text-slate-700 cursor-pointer focus:outline-hidden disabled:opacity-50 truncate"
-            >
-              <option value="">
-                {carregandoMunicipios ? 'Carregando municípios...' : 'Escolha o município'}
-              </option>
-              {municipios.map((m) => (
-                <option key={m.codigo} value={m.codigo}>
-                  {m.nome}
-                </option>
-              ))}
-            </select>
+              {ufs.find((u) => u.sigla === uf)?.nome || uf || 'Território'}
+            </button>
+            <ChevronRight className="w-3 h-3 text-slate-300 shrink-0" />
+            {recorte?.nivel === 'bairro' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    carregarCenso('municipio', municipio.codigo, municipio.nome)
+                  }
+                  className="shrink-0 text-[#2563EB] hover:underline cursor-pointer truncate"
+                >
+                  {municipio.nome}
+                </button>
+                <ChevronRight className="w-3 h-3 text-slate-300 shrink-0" />
+                <span className="font-semibold text-[#0F172B] truncate">{recorte.nome}</span>
+              </>
+            ) : (
+              <span className="font-semibold text-[#0F172B] truncate">{municipio.nome}</span>
+            )}
           </div>
         )}
 
-        {/* A cobertura é estado do sistema, e a tela diz qual é. */}
-        {carregandoCobertura && (
-          <p className="mt-2 text-[10.5px] font-semibold text-slate-400 flex items-center gap-1.5">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            Verificando a cobertura do território...
-          </p>
-        )}
-        {semMalha && (
-          <p className="mt-2 text-[10.5px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 leading-snug">
-            {uf} ainda não tem o território publicado. Com malha:{' '}
-            {ufsComTerritorio.join(', ') || '—'}.
-          </p>
-        )}
-        {!semMalha && semIndicadores && (
-          <p className="mt-2 text-[10.5px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug">
-            {uf} tem o território, mas ainda não os indicadores do Censo — o
-            painel vai vir vazio.
-          </p>
-        )}
+        {/* ------------------------------------------- seletor de recorte --- */}
+        <div className="px-3.5 mt-3.5 pb-4 border-b border-slate-200">
+          {/*
+            UF e município.
 
-        {!uf && !carregandoCobertura && ufsComTerritorio.length > 1 && (
-          <p className="mt-2 text-[10.5px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug">
-            Não deu para descobrir a UF deste cliente pelo cadastro. Escolha
-            acima qual território consultar.
-          </p>
-        )}
+            Escondidos sempre que já existe um município resolvido: é o caso de
+            quase toda abertura, porque a cidade vem do cadastro do cliente.
+            Sem um município ainda, ou depois de um toque na UF da trilha, as
+            duas caixas voltam — é a única situação em que alguém precisa mexer
+            nelas.
+          */}
+          {municipio && !seletorAberto ? (
+            <div className="relative">
+              <select
+                value={recorte?.nivel === 'bairro' ? recorte.codigo : ''}
+                onChange={(e) => {
+                  const alvo = bairrosDoSeletor.find((b) => b.codigo === e.target.value);
+                  if (alvo) carregarCenso('bairro', alvo.codigo, alvo.nome);
+                  else carregarCenso('municipio', municipio.codigo, municipio.nome);
+                }}
+                disabled={bairrosDoSeletor.length === 0}
+                className={`w-full h-8 pl-3 pr-9 rounded-[10px] border border-slate-100 bg-white text-[12px] appearance-none cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-[#BEDBFF] disabled:cursor-default ${
+                  bairrosDoSeletor.length === 0 ? 'text-slate-400' : 'text-[#0F172B]'
+                }`}
+              >
+                <option value="">
+                  {carregandoBairrosDoSeletor
+                    ? 'Carregando os bairros...'
+                    : bairrosDoSeletor.length === 0
+                      ? 'Este município não tem bairros publicados'
+                      : `Município inteiro · ${numero(bairrosDoSeletor.length)} bairros`}
+                </option>
+                {bairrosDoSeletor.map((b) => (
+                  <option key={b.codigo} value={b.codigo}>
+                    {b.nome}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-[76px_1fr] gap-2">
+              <select
+                value={uf}
+                onChange={(e) => {
+                  setUfEscolhidaNaMao(true);
+                  setUf(e.target.value.toUpperCase());
+                  setMunicipios([]);
+                  setMunicipio(null);
+                  setBairros([]);
+                  setBairrosDoSeletor([]);
+                  setCenso(null);
+                  setAnalise(null);
+                  onCirculoAnalisado(null);
+                }}
+                className="h-8 px-2.5 bg-white border border-slate-200 rounded-[10px] text-[12px] font-semibold text-[#0F172B] cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-[#BEDBFF]"
+              >
+                <option value="">UF</option>
+                {(ufsComTerritorio.length > 0 ? ufsComTerritorio : [uf].filter(Boolean)).map(
+                  (sigla) => (
+                    <option key={sigla} value={sigla}>
+                      {sigla}
+                    </option>
+                  )
+                )}
+              </select>
 
+              <select
+                value={municipio?.codigo || ''}
+                onChange={(e) => {
+                  const alvo = municipios.find((m) => m.codigo === e.target.value);
+                  if (alvo) {
+                    escolherMunicipio(alvo);
+                    setSeletorAberto(false);
+                  }
+                }}
+                disabled={municipios.length === 0}
+                className="h-8 px-2.5 bg-white border border-slate-200 rounded-[10px] text-[12px] text-[#0F172B] cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-[#BEDBFF] disabled:opacity-50 truncate"
+              >
+                <option value="">
+                  {carregandoMunicipios ? 'Carregando municípios...' : 'Escolha o município'}
+                </option>
+                {municipios.map((m) => (
+                  <option key={m.codigo} value={m.codigo}>
+                    {m.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* A cobertura é estado do sistema, e a tela diz qual é. */}
+          {carregandoCobertura && (
+            <p className="mt-2 text-[11.5px] text-slate-400 flex items-center gap-1.5">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Verificando a cobertura do território...
+            </p>
+          )}
+          {semMalha && (
+            <p className="mt-2 text-[11.5px] font-semibold text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 leading-snug">
+              {uf} ainda não tem o território publicado. Com malha:{' '}
+              {ufsComTerritorio.join(', ') || '—'}.
+            </p>
+          )}
+          {!semMalha && semIndicadores && (
+            <p className="mt-2 text-[11.5px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug">
+              {uf} tem o território, mas ainda não os indicadores do Censo — o
+              painel vai vir vazio.
+            </p>
+          )}
+          {!uf && !carregandoCobertura && ufsComTerritorio.length > 1 && (
+            <p className="mt-2 text-[11.5px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug">
+              Não deu para descobrir a UF deste cliente pelo cadastro. Escolha
+              acima qual território consultar.
+            </p>
+          )}
+        </div>
       </div>
 
       {/* CORPO */}
       {/*
         O CONTEÚDO RESPONDE À LARGURA DO PAINEL, NÃO À DA JANELA.
- 
+
         Meia tela num notebook e meia tela num monitor grande são larguras
         muito diferentes, e o painel ainda abre em tela cheia. Consulta de
         container (`@container`) mede a caixa em que o conteúdo está, que é a
         medida que decide se cabem duas colunas — `md:` e `lg:` mediriam a
         janela e dariam duas colunas num painel estreito ao lado de um monitor
         largo.
+
+        O fundo é cinza, e não branco: é ele que separa um cartão do outro na
+        visão geral. Sem essa diferença, "cartão" vira só uma borda fininha
+        repetida vinte vezes, e a tela inteira lê como uma lista só.
       */}
-      <div className="@container flex-1 min-h-0 overflow-y-auto px-4 py-3.5">
+      <div className="@container flex-1 min-h-0 overflow-y-auto bg-[#F6F8FC]">
         {erro && (
-          <div className="mb-3 p-3 rounded-xl bg-rose-50 border border-rose-100">
-            <p className="text-[11.5px] font-bold text-rose-700 flex items-start gap-1.5 leading-snug">
+          <div className="mx-3.5 mt-3 p-3 rounded-xl bg-rose-50 border border-rose-100">
+            <p className="text-[12.5px] font-semibold text-rose-700 flex items-start gap-1.5 leading-snug">
               <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               {erro.mensagem}
             </p>
             {erro.debugId && (
-              <p className="text-[10px] font-semibold text-rose-400 mt-1 pl-5">
+              <p className="text-[11px] text-rose-400 mt-1 pl-5">
                 Código de rastreio: {erro.debugId}
               </p>
             )}
@@ -1038,77 +1206,43 @@ export default function InteligenciaTerritorial({
         )}
 
         {/* ----------------------------------------------------- CENSO --- */}
-          <div>
-            {!recorte ? (
-              <p className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
-                Escolha um município
-              </p>
-            ) : (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-[12.5px] font-black text-[#0D233A] truncate">
-                      {recorte.nome}
-                    </p>
-                    {/*
-                      A UF e o ano só entram quando o Censo já respondeu: antes
-                      disso não sabemos nem se este recorte tem indicador
-                      publicado, e escrever "Censo Demográfico 2022" de
-                      antemão seria prometer um ano que pode não valer aqui.
-                    */}
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      {recorte.nivel}
-                      {uf && ` · ${uf}`}
-                      {censo?.fonte?.anoReferencia &&
-                        ` · Censo Demográfico ${censo.fonte.anoReferencia}`}
-                    </p>
-                  </div>
-                  {!censo && !carregandoCenso && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        carregarCenso(recorte.nivel, recorte.codigo, recorte.nome)
-                      }
-                      className="h-8 px-3 bg-[#015FC9] hover:bg-[#0150ab] text-white text-[10.5px] font-black uppercase tracking-wider rounded-lg cursor-pointer shrink-0"
-                    >
-                      Carregar
-                    </button>
-                  )}
-                </div>
-
-                {carregandoCenso && (
-                  <p className="py-8 text-center text-[11px] font-bold text-slate-400 flex items-center justify-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Consultando o Censo...
-                  </p>
-                )}
-
-                {censo?.status === 'sem_indicadores' && (
-                  <p className="mt-3 text-[11px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 leading-snug">
-                    Esta UF ainda não teve os indicadores do Censo publicados.
-                    Não é erro da consulta — é carga que ainda não foi feita.
-                  </p>
-                )}
-
-                {censo?.status === 'ok' && (
-                  <div className="mt-3">
-                    {/*
-                      Sem onVerSetores: a lista de setores não tem mais tela
-                      própria neste painel. Um botão "ver setores" sem lugar
-                      para ir seria pior do que não existir — o PainelDoCenso
-                      já sabe virar a linha em texto simples quando isto vem
-                      vazio.
-                    */}
-                    <PainelDoCenso
-                      censo={censo}
-                      populacaoDoRecorte={populacaoDoRecorteAtual}
-                      domiciliosDoRecorte={domiciliosDoRecorteAtual}
-                    />
-                  </div>
-                )}
-              </>
-            )}
+        {!recorte ? (
+          <p className="py-10 text-center text-[12.5px] text-slate-400">
+            Escolha um município para ver quem mora nele.
+          </p>
+        ) : carregandoCenso ? (
+          <p className="py-10 text-center text-[12.5px] text-slate-500 flex items-center justify-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Consultando o Censo...
+          </p>
+        ) : censo?.status === 'sem_indicadores' ? (
+          <p className="m-4 text-[12.5px] text-slate-500 bg-white border border-slate-100 rounded-[14px] px-4 py-3.5 leading-snug">
+            Esta UF ainda não teve os indicadores do Censo publicados. Não é
+            erro da consulta — é carga que ainda não foi feita.
+          </p>
+        ) : censo?.status === 'ok' ? (
+          /*
+            Sem onVerSetores: a lista de setores não tem mais tela própria
+            neste painel. Um botão "ver setores" sem lugar para ir seria pior
+            do que não existir — o PainelDoCenso já sabe esconder a linha
+            quando isto vem vazio.
+          */
+          <PainelDoCenso
+            censo={censo}
+            populacaoDoRecorte={populacaoDoRecorteAtual}
+            domiciliosDoRecorte={domiciliosDoRecorteAtual}
+          />
+        ) : (
+          <div className="px-4 py-6 flex justify-center">
+            <button
+              type="button"
+              onClick={() => carregarCenso(recorte.nivel, recorte.codigo, recorte.nome)}
+              className="h-10 px-4 bg-[#1447E6] hover:bg-[#0F3BC4] text-white text-[12.5px] font-semibold rounded-xl cursor-pointer"
+            >
+              Carregar o Censo deste recorte
+            </button>
           </div>
+        )}
       </div>
     </div>
   );
