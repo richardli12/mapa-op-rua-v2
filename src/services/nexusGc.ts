@@ -25,11 +25,26 @@ export const referenciaDaMissao = (tipo: string, id: string) =>
 
 export type PrioridadeDoNexus = "baixa" | "normal" | "alta" | "critica";
 
+/**
+ * A foto de um cadastro do Nexu-GC.
+ *
+ * É URL ASSINADA, e expira em cerca de uma hora. O bucket é privado e não
+ * existe endereço fixo de foto neste produto — então ela serve para mostrar
+ * agora, nunca para guardar. Gravada em algum lugar, vira imagem quebrada
+ * algumas horas depois, e quem olha não tem como saber se o cadastro perdeu a
+ * foto ou se o endereço venceu.
+ *
+ * Aqui ela só existe em memória, enquanto o bloco está aberto — e toda parte
+ * que a mostra cai nas iniciais quando o endereço não responde.
+ */
+export type FotoDoNexus = string | null;
+
 export interface ClienteDoNexus {
   id: string;
   nome: string;
   cidade: string | null;
   estado: string | null;
+  foto_url: FotoDoNexus;
 }
 
 export interface TimeDoNexus {
@@ -37,6 +52,7 @@ export interface TimeDoNexus {
   nome: string;
   descricao: string | null;
   membros_ativos: number;
+  foto_url: FotoDoNexus;
 }
 
 export interface DestinatarioDoNexus {
@@ -45,6 +61,7 @@ export interface DestinatarioDoNexus {
   telefone: string | null;
   /** Quando a pessoa entrou no sistema pela última vez; `null` é nunca. */
   ultimo_acesso: string | null;
+  foto_url: FotoDoNexus;
 }
 
 export interface MissaoDoNexus {
@@ -56,8 +73,8 @@ export interface MissaoDoNexus {
   pontos: number;
   prazo: string;
   feedback_obrigatorio: boolean;
-  cliente: { id: string; nome: string };
-  time: { id: string; nome: string };
+  cliente: { id: string; nome: string; foto_url?: FotoDoNexus };
+  time: { id: string; nome: string; foto_url?: FotoDoNexus };
   referencia: string | null;
   criada_em: string;
   publicada_em: string | null;
@@ -70,6 +87,7 @@ export interface MissaoDoNexus {
     itens: {
       id: string;
       nome: string;
+      foto_url?: FotoDoNexus;
       status: "pendente" | "em_andamento" | "concluida" | "cancelada";
       concluida_em: string | null;
       pontos_creditados: number;
@@ -185,7 +203,7 @@ export const lerTimes = (cliente: string) =>
 export const lerDestinatarios = (time: string) =>
   chamar<{
     data: {
-      time: { id: string; nome: string; cliente_id: string };
+      time: { id: string; nome: string; cliente_id: string; foto_url?: FotoDoNexus };
       destinatarios: DestinatarioDoNexus[];
     };
     meta: { total: number };
