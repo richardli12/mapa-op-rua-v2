@@ -4124,8 +4124,6 @@ export default function MapContainer({
                     missao={{
                       tipo: missaoAberta.tipo,
                       id: missaoAberta.id,
-                      titulo: missaoAberta.titulo,
-                      descricao: missaoAberta.descricao,
                       prazo: missaoAberta.prazo
                     }}
                     clienteSugerido={

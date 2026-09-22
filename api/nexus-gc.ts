@@ -39,6 +39,13 @@ const RECURSOS: {
     exige?: string[];
     /** Parâmetros de consulta repassados. Fora desta lista, nada passa. */
     params?: string[];
+    /**
+     * O que o POST leva no corpo: nada, JSON, ou os bytes como vieram.
+     *
+     * "cru" é o do arquivo: reencodar um multipart aqui quebraria a fronteira
+     * que separa as partes, e o Nexu-GC receberia um corpo que não abre.
+     */
+    corpo?: "json" | "cru";
   };
 } = {
   raiz: { metodo: "GET", caminho: () => "" },
@@ -73,10 +80,53 @@ const RECURSOS: {
     exige: ["missao"],
   },
   criar: { metodo: "POST", caminho: () => "/missoes" },
+  publicar: {
+    metodo: "POST",
+    caminho: (q) => `/missoes/${q.missao}/publicar`,
+    exige: ["missao"],
+    corpo: "json",
+  },
   cancelar: {
     metodo: "POST",
     caminho: (q) => `/missoes/${q.missao}/cancelar`,
     exige: ["missao"],
+  },
+
+  /* ------------------------------------------------ material de apoio --- */
+  materiais: {
+    metodo: "GET",
+    caminho: (q) => `/missoes/${q.missao}/materiais`,
+    exige: ["missao"],
+  },
+  /** Pede a URL assinada: é ela que a tela usa para mandar o arquivo. */
+  "material-url": {
+    metodo: "POST",
+    caminho: (q) => `/missoes/${q.missao}/materiais/upload`,
+    exige: ["missao"],
+    corpo: "json",
+  },
+  /** Registra na missão o arquivo que já subiu pelo caminho assinado. */
+  "material-registrar": {
+    metodo: "POST",
+    caminho: (q) => `/missoes/${q.missao}/materiais`,
+    exige: ["missao"],
+    corpo: "json",
+  },
+  /**
+   * O arquivo passando por aqui — o caminho reserva.
+   *
+   * O normal é a tela mandar o arquivo DIRETO para o Storage, com a URL
+   * assinada: não passa por esta função, não gasta a nossa banda e não esbarra
+   * no teto de corpo da hospedagem. Mas o envio direto depende do Storage
+   * aceitar a chamada vinda do navegador, e quando ele não aceita a alternativa
+   * não pode ser "não dá para anexar". Então este caminho existe para arquivos
+   * pequenos: o corpo chega cru e é repassado como veio.
+   */
+  "material-arquivo": {
+    metodo: "POST",
+    caminho: (q) => `/missoes/${q.missao}/materiais`,
+    exige: ["missao"],
+    corpo: "cru",
   },
 };
 
@@ -193,26 +243,52 @@ export default async function handler(req: any, res: any) {
       signal: AbortSignal.timeout(TEMPO_LIMITE),
     };
 
-    if (recurso.metodo === "POST") {
-      /*
-       * "cancelar" não leva corpo; "criar" leva o da missão. Repassamos o que
-       * a tela mandou sem reescrever campo nenhum: a validação de verdade é a
-       * do Nexu-GC, e duplicá-la aqui só criaria duas regras para divergirem.
-       */
-      if (nome === "criar") {
-        const corpo = await lerCorpo(req);
-        if (!corpo || typeof corpo !== "object") {
-          falhar(
-            res,
-            400,
-            "validation_error",
-            "Envie os dados da missão no corpo da requisição.",
-          );
-          return;
-        }
-        opcoes.headers["Content-Type"] = "application/json";
-        opcoes.body = JSON.stringify(corpo);
+    /*
+     * O corpo é repassado sem reescrever campo nenhum: a validação de verdade
+     * é a do Nexu-GC, e duplicá-la aqui só criaria duas regras para divergirem.
+     * "cancelar" não leva corpo nenhum.
+     */
+    const tipoDeCorpo = nome === "criar" ? "json" : recurso.corpo;
+    if (recurso.metodo === "POST" && tipoDeCorpo === "json") {
+      const corpo = await lerCorpo(req);
+      if (!corpo || typeof corpo !== "object") {
+        falhar(
+          res,
+          400,
+          "validation_error",
+          "Envie os dados no corpo da requisição.",
+        );
+        return;
       }
+      opcoes.headers["Content-Type"] = "application/json";
+      opcoes.body = JSON.stringify(corpo);
+    }
+
+    if (recurso.metodo === "POST" && tipoDeCorpo === "cru") {
+      /*
+       * A hospedagem às vezes já consumiu o fluxo e deixou os bytes em
+       * `req.body`. Ler o fluxo de novo nesse caso devolveria vazio — e a
+       * tela veria "nenhum arquivo chegou" com o arquivo inteiro em mãos.
+       */
+      let bytes: Buffer;
+      if (Buffer.isBuffer(req.body)) {
+        bytes = req.body;
+      } else if (typeof req.body === "string") {
+        bytes = Buffer.from(req.body, "binary");
+      } else {
+        const pedacos: Buffer[] = [];
+        for await (const pedaco of req) pedacos.push(pedaco as Buffer);
+        bytes = Buffer.concat(pedacos);
+      }
+      if (bytes.length === 0) {
+        falhar(res, 400, "validation_error", "Nenhum arquivo chegou.", "arquivo");
+        return;
+      }
+      // O `content-type` traz a fronteira do multipart: sem ele, o Nexu-GC não
+      // tem como separar o arquivo do resto do corpo.
+      opcoes.headers["Content-Type"] =
+        req.headers?.["content-type"] || "application/octet-stream";
+      opcoes.body = bytes;
     }
 
     const resposta = await fetch(destino, opcoes);
