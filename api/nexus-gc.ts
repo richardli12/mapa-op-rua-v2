@@ -66,6 +66,7 @@ const RECURSOS: {
     params: [
       "minhas",
       "referencia",
+      "id_externo",
       "cliente_id",
       "time_id",
       "status",

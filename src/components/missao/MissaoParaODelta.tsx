@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
+  Copy,
   Loader2,
   Paperclip,
   RefreshCw,
@@ -18,8 +20,10 @@ import {
   criarMissao,
   lerClientes,
   lerDestinatarios,
+  lerMissaoPorIdExterno,
   lerMissoesPorReferencia,
   lerTimes,
+  novoIdExterno,
   publicarMissao,
   referenciaDaMissao,
   type ClienteDoNexus,
@@ -167,6 +171,18 @@ export default function MissaoParaODelta({
   const [progresso, setProgresso] = useState<{ feito: number; total: number; nome: string } | null>(
     null
   );
+  /**
+   * O id que este sistema deu ao envio em curso.
+   *
+   * Nasce no primeiro toque em "enviar" e só morre quando a missão sai
+   * publicada. Enquanto ele existe, uma segunda tentativa NÃO cria outra
+   * missão: pergunta primeiro ao Nexu-GC se a do id já está lá. É o que
+   * protege do caso em que a missão entrou e a resposta se perdeu na volta —
+   * o único que nem o rascunho guardado aqui consegue enxergar, porque dele
+   * nunca chegou objeto nenhum.
+   */
+  const [idExterno, setIdExterno] = useState<string | null>(null);
+  const [idCopiado, setIdCopiado] = useState<string | null>(null);
 
   const [enviando, setEnviando] = useState(false);
   const [jaEnviadas, setJaEnviadas] = useState<MissaoDoNexus[]>([]);
@@ -320,7 +336,23 @@ export default function MissaoParaODelta({
     const paraQuem = todosDoTime
       ? { todos_do_time: true }
       : { destinatarios: escolhidos };
+    const idDoEnvio = idExterno || novoIdExterno(missao.tipo, missao.id);
+    setIdExterno(idDoEnvio);
+
     try {
+      /*
+       * SEGUNDA TENTATIVA NÃO CRIA OUTRA MISSÃO.
+       *
+       * `idExterno` já existir quer dizer que uma tentativa anterior falhou —
+       * e falha não é o mesmo que "não criou". Antes de qualquer coisa,
+       * perguntamos ao Nexu-GC se a missão deste id está lá; estando, é ela
+       * que segue para os arquivos e para a publicação.
+       */
+      let adotada: MissaoDoNexus | null = null;
+      if (idExterno && !rascunhoPendente) {
+        adotada = await lerMissaoPorIdExterno(idExterno);
+      }
+
       /*
        * COM MATERIAL, A ORDEM MUDA: RASCUNHO → ARQUIVOS → PUBLICAR.
        *
@@ -331,6 +363,7 @@ export default function MissaoParaODelta({
        */
       let criada: MissaoDoNexus =
         rascunhoPendente ||
+        adotada ||
         (
           await criarMissao({
             cliente_id: clienteId,
@@ -349,7 +382,8 @@ export default function MissaoParaODelta({
             prazo_hora: hora || undefined,
             feedback_obrigatorio: feedbackObrigatorio,
             ...(arquivos.length > 0 ? { publicar: false } : paraQuem),
-            referencia
+            referencia,
+            id_externo: idDoEnvio
           })
         ).data;
 
@@ -367,14 +401,18 @@ export default function MissaoParaODelta({
         }
         setProgresso(null);
 
-        criada = (await publicarMissao(criada.id, paraQuem)).data;
+        if (criada.status === 'rascunho') {
+          criada = (await publicarMissao(criada.id, paraQuem)).data;
+        }
         setRascunhoPendente(null);
       }
 
-      setJaEnviadas((atual) => [criada, ...atual]);
+      setJaEnviadas((atual) => [criada, ...atual.filter((m) => m.id !== criada.id)]);
       setArquivos([]);
       setAnexados([]);
       setInsistindo(false);
+      // O envio fechou: o próximo despacho desta ordem ganha um id novo.
+      setIdExterno(null);
     } catch (falha: any) {
       setProgresso(null);
       setErro(falha as ErroDoNexus);
@@ -390,7 +428,8 @@ export default function MissaoParaODelta({
           const conferencia = await lerMissoesPorReferencia(referencia);
           setJaEnviadas(conferencia.data || []);
         } catch {
-          // Sem a conferência, fica o aviso do tempo esgotado.
+          // Sem a conferência, fica o aviso do tempo esgotado — e o `idExterno`
+          // guardado, que faz a próxima tentativa perguntar antes de criar.
         }
       }
     } finally {
@@ -483,6 +522,12 @@ export default function MissaoParaODelta({
                   Campo: {erro.campo}
                 </p>
               )}
+              {idExterno && (
+                <p className="text-[10px] font-bold text-rose-400 mt-1 pl-5 leading-snug">
+                  Id deste envio: <span className="font-mono">{idExterno}</span>. Enviar
+                  de novo pergunta por ele antes de criar — não sai missão repetida.
+                </p>
+              )}
               {erro.destinatariosRecusados && erro.destinatariosRecusados.length > 0 && (
                 <p className="text-[10.5px] font-semibold text-rose-500 mt-1 pl-5 leading-snug">
                   Nada foi criado: {erro.destinatariosRecusados.length} destinatário(s)
@@ -536,6 +581,34 @@ export default function MissaoParaODelta({
                       {ESTADOS[m.status]?.texto || m.status}
                     </span>
                   </div>
+
+                  {/*
+                    O id que demos a este envio.
+
+                    Ele não aparece em tela nenhuma do Nexu-GC — só no banco de
+                    lá e nas respostas da API. Fica aqui porque é o que liga
+                    esta ordem àquela missão quando alguém precisar perguntar
+                    por ela, e é curto o bastante para ser lido em voz alta.
+                  */}
+                  {m.id_externo && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(m.id_externo as string);
+                        setIdCopiado(m.id_externo);
+                        setTimeout(() => setIdCopiado(null), 1800);
+                      }}
+                      title="Copiar o id deste envio"
+                      className="mt-1.5 max-w-full flex items-center gap-1.5 text-[9.5px] font-bold text-slate-400 hover:text-slate-600 cursor-pointer transition-colors"
+                    >
+                      {idCopiado === m.id_externo ? (
+                        <Check className="w-3 h-3 text-emerald-600 shrink-0" />
+                      ) : (
+                        <Copy className="w-3 h-3 shrink-0" />
+                      )}
+                      <span className="truncate font-mono">{m.id_externo}</span>
+                    </button>
+                  )}
 
                   {/* O andamento: quantos dos que receberam já concluíram. */}
                   <div className="mt-2.5 flex items-center gap-2">
