@@ -3,7 +3,9 @@ import {
   Loader2,
   AlertCircle,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  Circle,
   Maximize2,
   Minimize2,
   PanelRightClose
@@ -31,6 +33,7 @@ import {
   CertezaDoRaio
 } from './territorio/GraficosDoTerritorio';
 import PainelDoCenso from './territorio/PainelDoCenso';
+import PainelDoRaio from './territorio/PainelDoRaio';
 
 interface InteligenciaTerritorialProps {
   aberto: boolean;
@@ -109,6 +112,12 @@ const numero = (valor: number | null | undefined) =>
   valor === null || valor === undefined
     ? '—'
     : valor.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+
+/** "500 m", "1,5 km": o raio escrito como se fala. */
+const distancia = (metros: number) =>
+  metros >= 1000
+    ? `${(metros / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km`
+    : `${numero(metros)} m`;
 
 /** Como cada nível de recorte é escrito na ficha do cabeçalho. */
 const NIVEIS: { [nivel: string]: string } = {
@@ -294,6 +303,31 @@ export default function InteligenciaTerritorial({
    * uma medida e não um acaso de enquadramento.
    */
   const [centroFixo, setCentroFixo] = useState<{ lat: number; lng: number } | null>(null);
+  /**
+   * O círculo que esta tela está medindo — `null` é "o recorte do Censo".
+   *
+   * É o que decide a tela inteira: com ele, o painel responde "quem mora
+   * dentro do que acabei de desenhar"; sem ele, "como é este município".
+   * Vive aqui, e não no `circuloExterno` que chega de fora, porque quem
+   * desenhou precisa poder voltar para o município sem que o desenho suma
+   * do mapa.
+   */
+  const [circuloEmFoco, setCirculoEmFoco] = useState<{
+    lat: number;
+    lng: number;
+    raio: number;
+  } | null>(null);
+  /**
+   * De qual círculo é a medida que está na tela.
+   *
+   * Sem esta marca, a medida ficava presa numa corrida: a análise precisa da
+   * UF, a UF chega depois da consulta de cobertura, e o efeito que media
+   * rodava uma vez só — antes da UF existir. Resultado: "Quem mora aqui"
+   * abria o painel no Censo do município e o círculo desenhado era ignorado
+   * em silêncio. Agora o efeito pode rodar de novo quando a UF chegar, e é
+   * esta chave que o impede de medir o mesmo círculo duas vezes.
+   */
+  const [analiseDe, setAnaliseDe] = useState<string | null>(null);
 
   /**
    * A UF do cliente chega depois.
@@ -706,22 +740,73 @@ export default function InteligenciaTerritorial({
     }
   };
 
+  /** A identidade de um círculo: dois círculos iguais não são medidos duas vezes. */
+  const chaveDoCirculo = (circulo: { lat: number; lng: number; raio: number }) =>
+    `${circulo.lat.toFixed(6)},${circulo.lng.toFixed(6)},${circulo.raio}`;
+
   /**
    * Chegou um círculo de fora: é ele que manda.
    *
-   * A aba do raio passa à frente, o tamanho vira o que foi desenhado — mesmo
-   * que não seja nenhum dos quatro da régua — e a medida sai sozinha. Abrir o
-   * painel e ainda pedir um toque em "analisar" seria guardar a resposta atrás
-   * de uma porta que a pessoa já abriu.
+   * Quem tocou em "Quem mora aqui" já disse onde e já disse quanto. O painel
+   * passa a responder sobre ESSA área — o tamanho vira o que foi desenhado,
+   * mesmo que não seja nenhum dos quatro da régua.
+   *
+   * Aqui só se anota o alvo. Medir é o efeito de baixo, porque a medida
+   * depende da UF e a UF chega depois.
    */
   useEffect(() => {
     if (!circuloExterno || !aberto) return;
     setAba('raio');
     setRaio(circuloExterno.raio);
     setCentroFixo({ lat: circuloExterno.lat, lng: circuloExterno.lng });
-    analisar({ lat: circuloExterno.lat, lng: circuloExterno.lng }, circuloExterno.raio);
+    setCirculoEmFoco({
+      lat: circuloExterno.lat,
+      lng: circuloExterno.lng,
+      raio: circuloExterno.raio
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [circuloExterno?.lat, circuloExterno?.lng, circuloExterno?.raio, aberto]);
+  }, [circuloExterno, aberto]);
+
+  /**
+   * A medida sai assim que houver UF — e uma vez só por círculo.
+   *
+   * A UF vem do cadastro do cliente ou da consulta de cobertura, e as duas
+   * chegam depois da montagem. Medir num efeito que roda uma vez só, no
+   * instante em que o círculo chega, era medir com a UF ainda vazia: a
+   * chamada era abortada na porta e nada aparecia na tela.
+   *
+   * `analiseDe` é marcado ANTES do `await` de propósito. O efeito depende de
+   * `analisando`, e sem a marca a volta ao `false` — inclusive a volta por
+   * erro — dispararia a medida de novo, para sempre.
+   */
+  useEffect(() => {
+    if (!aberto || !circuloEmFoco || !uf || analisando) return;
+    const chave = chaveDoCirculo(circuloEmFoco);
+    if (analiseDe === chave) return;
+    setAnaliseDe(chave);
+    analisar(
+      { lat: circuloEmFoco.lat, lng: circuloEmFoco.lng },
+      circuloEmFoco.raio
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto, uf, circuloEmFoco, analiseDe, analisando]);
+
+  /** Sai do círculo e volta para o recorte do Censo, sem perder o desenho. */
+  const voltarParaORecorte = () => {
+    setCirculoEmFoco(null);
+    setAnalise(null);
+    setAnaliseDe(null);
+    setCentroFixo(null);
+    setErro(null);
+    onCirculoAnalisado(null);
+  };
+
+  /** Mede de novo o mesmo círculo — o botão que a falha deixa na tela. */
+  const medirDeNovo = () => {
+    if (!circuloEmFoco) return;
+    setErro(null);
+    setAnaliseDe(null);
+  };
 
   /**
    * O que o mapa desenha, e com que cores.
@@ -1000,7 +1085,9 @@ export default function InteligenciaTerritorial({
           </span>
           <div className="min-w-0">
             <p className="text-[16px] font-bold text-[#0F172B] leading-tight truncate">
-              {recorte?.nome || municipio?.nome || 'Escolha um município'}
+              {circuloEmFoco
+                ? 'Área desenhada'
+                : recorte?.nome || municipio?.nome || 'Escolha um município'}
             </p>
             {/*
               A UF e o ano só entram quando o Censo já respondeu: antes disso
@@ -1009,23 +1096,64 @@ export default function InteligenciaTerritorial({
               ano que pode não valer aqui.
             */}
             <p className="text-[11px] text-[#62748E] truncate">
-              {recorte
+              {circuloEmFoco
                 ? [
-                    NIVEIS[recorte.nivel] || recorte.nivel,
+                    `Raio de ${distancia(circuloEmFoco.raio)}`,
                     uf || null,
-                    censo?.fonte?.anoReferencia
-                      ? `Censo Demográfico ${censo.fonte.anoReferencia}`
+                    analise
+                      ? `${analise.areaKm2.toLocaleString('pt-BR', {
+                          maximumFractionDigits: 2
+                        })} km²`
                       : null
                   ]
                     .filter(Boolean)
                     .join(' · ')
-                : 'População e Censo do território'}
+                : recorte
+                  ? [
+                      NIVEIS[recorte.nivel] || recorte.nivel,
+                      uf || null,
+                      censo?.fonte?.anoReferencia
+                        ? `Censo Demográfico ${censo.fonte.anoReferencia}`
+                        : null
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : 'População e Censo do território'}
             </p>
           </div>
         </div>
 
         {/* -------------------------------------------------- trilha --- */}
-        {municipio && (
+        {circuloEmFoco ? (
+          <div className="px-3.5 mt-3 flex items-center gap-1.5 text-[12px] min-w-0">
+            <button
+              type="button"
+              onClick={() => setSeletorAberto(true)}
+              title="Trocar de UF ou de município"
+              className="shrink-0 text-[#2563EB] hover:underline cursor-pointer"
+            >
+              {ufs.find((u) => u.sigla === uf)?.nome || uf || 'Território'}
+            </button>
+            {municipio && (
+              <>
+                <ChevronRight className="w-3 h-3 text-slate-300 shrink-0" />
+                <button
+                  type="button"
+                  onClick={voltarParaORecorte}
+                  title="Voltar para o Censo do município"
+                  className="min-w-0 text-[#2563EB] hover:underline cursor-pointer truncate"
+                >
+                  {municipio.nome}
+                </button>
+              </>
+            )}
+            <ChevronRight className="w-3 h-3 text-slate-300 shrink-0" />
+            <span className="shrink-0 font-semibold text-[#0F172B] flex items-center gap-1">
+              <Circle className="w-3 h-3 text-[#2563EB]" />
+              Raio de {distancia(circuloEmFoco.raio)}
+            </span>
+          </div>
+        ) : municipio ? (
           <div className="px-3.5 mt-3 flex items-center gap-1.5 text-[12px] min-w-0">
             <button
               type="button"
@@ -1054,7 +1182,7 @@ export default function InteligenciaTerritorial({
               <span className="font-semibold text-[#0F172B] truncate">{municipio.nome}</span>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* ------------------------------------------- seletor de recorte --- */}
         <div className="px-3.5 mt-3.5 pb-4 border-b border-slate-200">
@@ -1067,7 +1195,23 @@ export default function InteligenciaTerritorial({
             duas caixas voltam — é a única situação em que alguém precisa mexer
             nelas.
           */}
-          {municipio && !seletorAberto ? (
+          {circuloEmFoco ? (
+            /*
+              Com um círculo na tela, a caixa de bairro não tem o que fazer:
+              ela troca o recorte do Censo, e o recorte agora é o desenho.
+              O lugar é o da saída — e ela diz para onde leva.
+            */
+            <button
+              type="button"
+              onClick={voltarParaORecorte}
+              className="w-full h-8 px-3 rounded-[10px] border border-slate-100 bg-white text-[12px] text-[#45556C] hover:bg-slate-50 cursor-pointer flex items-center gap-2 transition-colors"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span className="truncate">
+                {municipio ? `Voltar para ${municipio.nome}` : 'Voltar para o território'}
+              </span>
+            </button>
+          ) : municipio && !seletorAberto ? (
             <div className="relative">
               <select
                 value={recorte?.nivel === 'bairro' ? recorte.codigo : ''}
@@ -1109,6 +1253,8 @@ export default function InteligenciaTerritorial({
                   setBairrosDoSeletor([]);
                   setCenso(null);
                   setAnalise(null);
+                  setCirculoEmFoco(null);
+                  setAnaliseDe(null);
                   onCirculoAnalisado(null);
                 }}
                 className="h-8 px-2.5 bg-white border border-slate-200 rounded-[10px] text-[12px] font-semibold text-[#0F172B] cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-[#BEDBFF]"
@@ -1128,6 +1274,13 @@ export default function InteligenciaTerritorial({
                 onChange={(e) => {
                   const alvo = municipios.find((m) => m.codigo === e.target.value);
                   if (alvo) {
+                    /*
+                      Sair do círculo aqui, e não dentro de `escolherMunicipio`:
+                      o município do cliente é escolhido sozinho quando o painel
+                      abre, e limpar lá apagaria o círculo que acabou de chegar
+                      pelo "Quem mora aqui".
+                    */
+                    voltarParaORecorte();
                     escolherMunicipio(alvo);
                     setSeletorAberto(false);
                   }
@@ -1205,8 +1358,42 @@ export default function InteligenciaTerritorial({
           </div>
         )}
 
-        {/* ----------------------------------------------------- CENSO --- */}
-        {!recorte ? (
+        {/* ------------------------------------------------------ RAIO --- */}
+        {circuloEmFoco ? (
+          !uf ? (
+            <p className="px-4 py-10 text-center text-[12.5px] text-slate-400 leading-snug">
+              Escolha a UF acima para medir esta área. A malha de setores é
+              carregada por estado, e a medida precisa saber em qual procurar.
+            </p>
+          ) : analisando ? (
+            <p className="py-10 text-center text-[12.5px] text-slate-500 flex items-center justify-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Medindo a área desenhada...
+            </p>
+          ) : analise ? (
+            <PainelDoRaio
+              analise={analise}
+              raio={circuloEmFoco.raio}
+              instituto={censo?.fonte?.instituto || 'IBGE'}
+            />
+          ) : (
+            /*
+              Sem medida e sem espera: a chamada falhou. O aviso do erro já
+              está acima; o que falta aqui é o caminho de volta — tentar de
+              novo sem ter de redesenhar o círculo no mapa.
+            */
+            <div className="px-4 py-8 flex justify-center">
+              <button
+                type="button"
+                onClick={medirDeNovo}
+                className="h-10 px-4 bg-[#1447E6] hover:bg-[#0F3BC4] text-white text-[12.5px] font-semibold rounded-xl cursor-pointer"
+              >
+                Medir esta área de novo
+              </button>
+            </div>
+          )
+        ) : /* ------------------------------------------------- CENSO --- */
+        !recorte ? (
           <p className="py-10 text-center text-[12.5px] text-slate-400">
             Escolha um município para ver quem mora nele.
           </p>

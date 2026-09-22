@@ -1,7 +1,16 @@
 import { useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
-import { BarChart3, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { BarChart3, ChevronDown, ChevronRight } from 'lucide-react';
 import type { GrupoDeIndicadores, IndicadorDoCenso, IndicadoresDoRecorte } from '../../services/territorio';
+import {
+  Cartao,
+  CartaoDeNumero,
+  Selo,
+  TituloDeCartao,
+  numero,
+  porcento,
+  semAcento,
+  valorComUnidade
+} from './pecas';
 
 /**
  * A visão geral do Censo: o painel de indicadores.
@@ -35,33 +44,6 @@ import type { GrupoDeIndicadores, IndicadorDoCenso, IndicadoresDoRecorte } from 
  * São confiabilidades diferentes, e quem decide alguma coisa olhando para
  * eles precisa saber qual está olhando.
  */
-
-/* ---------------------------------------------------------------- utils --- */
-
-const semAcento = (texto: string) =>
-  texto
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim();
-
-const numero = (valor: number | null | undefined) =>
-  valor === null || valor === undefined
-    ? '—'
-    : valor.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-
-/** O jeito de escrever um valor de indicador: uma casa, e o '%' colado. */
-const valorComUnidade = (valor: number, unidade: string) => {
-  const escrito = valor.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
-  if (!unidade) return escrito;
-  return unidade === '%' ? `${escrito}%` : `${escrito} ${unidade}`;
-};
-
-const porcento = (fracao: number, casas = 1) =>
-  `${(fracao * 100).toLocaleString('pt-BR', {
-    minimumFractionDigits: casas,
-    maximumFractionDigits: casas
-  })}%`;
 
 type IndicadorComGrupo = IndicadorDoCenso & { grupoId: string; grupoTitulo: string };
 
@@ -289,85 +271,6 @@ function lerSaneamento(lista: IndicadorComGrupo[]): ItemDeSaneamento[] {
     });
   });
   return itens;
-}
-
-/* ------------------------------------------------------------------ peças --- */
-
-const DICA_DERIVADO =
-  'Derivado: não vem publicado assim. É calculado aqui a partir dos números do Censo deste recorte.';
-
-/**
- * O selo de origem do número.
- *
- * Verde e curto para o que o instituto publicou; azul e com o "i" para o que
- * foi calculado. É a diferença entre "está escrito lá" e "a conta é nossa".
- */
-function Selo({ origem, instituto }: { origem: 'direto' | 'derivado'; instituto: string }) {
-  if (origem === 'derivado') {
-    return (
-      <span
-        title={DICA_DERIVADO}
-        className="shrink-0 inline-flex items-center gap-1 px-[5px] py-[3px] rounded-[5px] bg-[#F0F9FF] text-[#1575B0] text-[8px] font-bold leading-none"
-      >
-        derivado
-        <Info className="w-[10px] h-[10px]" strokeWidth={2.5} />
-      </span>
-    );
-  }
-  return (
-    <span
-      title={`Publicado pelo ${instituto} para este recorte.`}
-      className="shrink-0 inline-flex items-center px-[5px] py-[3px] rounded-[5px] bg-[#ECFDF5] text-[#188765] text-[8px] font-bold leading-none"
-    >
-      {instituto}
-    </span>
-  );
-}
-
-/** Cartão branco: a moldura de toda seção da visão geral. */
-function Cartao({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return (
-    <div
-      className={`rounded-[14px] bg-white border border-slate-100 shadow-[0_1px_2px_rgba(15,23,43,0.04)] ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
-
-function TituloDeCartao({ children }: { children: ReactNode }) {
-  return <p className="text-[12.5px] font-bold text-[#0F172B]">{children}</p>;
-}
-
-/** Um cartão de número, para a grade de "visão geral". */
-function CartaoDeNumero({
-  rotulo,
-  valor,
-  origem,
-  instituto
-}: {
-  rotulo: string;
-  valor: string;
-  origem: 'direto' | 'derivado';
-  instituto: string;
-}) {
-  return (
-    <Cartao className="p-3.5">
-      {/*
-        Rótulo e selo no mesmo fluxo, de propósito: em "População" o selo cabe
-        na linha do rótulo, em "Alfabetização (15+)" ele desce sozinho. É a
-        quebra natural do texto fazendo o trabalho que uma grade fixa faria
-        pior num painel que muda de largura.
-      */}
-      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-        <p className="text-[11px] text-[#62748E] leading-tight">{rotulo}</p>
-        <Selo origem={origem} instituto={instituto} />
-      </div>
-      <p className="mt-1.5 text-[20px] font-bold text-[#0F172B] leading-none tracking-tight">
-        {valor}
-      </p>
-    </Cartao>
-  );
 }
 
 /** Uma linha de indicador: rótulo, aviso de soma parcial, valor e selo. */
