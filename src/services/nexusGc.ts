@@ -62,6 +62,8 @@ export interface MissaoDoNexus {
   criada_em: string;
   publicada_em: string | null;
   cancelada_em: string | null;
+  /** Na listagem vem só o total; no detalhe, a lista inteira. */
+  materiais?: { total: number; itens?: unknown[] };
   destinatarios: {
     total: number;
     concluidos: number;
@@ -211,6 +213,8 @@ export interface NovaMissaoDoNexus {
   feedback_obrigatorio?: boolean;
   destinatarios?: string[];
   todos_do_time?: boolean;
+  /** `false` cria rascunho — e aí destinatários são proibidos aqui. */
+  publicar?: boolean;
   referencia?: string;
 }
 
@@ -219,3 +223,146 @@ export const criarMissao = (missao: NovaMissaoDoNexus) =>
 
 export const cancelarMissao = (missao: string) =>
   chamar<{ data: MissaoDoNexus }>("cancelar", { params: { missao }, corpo: {} });
+
+/* ====================================================== material de apoio === */
+
+/**
+ * O material de apoio não vai no corpo da criação.
+ *
+ * A missão nasce primeiro e o arquivo é anexado a ela pelo id — e a ordem que
+ * o manual do Nexu-GC recomenda é rascunho → material → publicar, para que
+ * ninguém abra a missão antes do arquivo que ela exige estar lá.
+ */
+export interface MaterialDoNexus {
+  id: string;
+  /** O que o membro vê na tela ("PDF 1"), e não o nome do arquivo enviado. */
+  rotulo: string;
+  tipo: string;
+  formato: string;
+  tamanho_bytes: number;
+  tamanho: string;
+  criado_em: string;
+  /** Temporária, de 10 minutos: serve para conferir, não como link fixo. */
+  url: string | null;
+}
+
+/** Formatos que o Nexu-GC aceita, no formato do atributo `accept`. */
+export const FORMATOS_DE_MATERIAL =
+  'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
+
+/** Teto do produto: 200 MB por arquivo. */
+export const TAMANHO_MAXIMO_DE_MATERIAL = 200 * 1024 * 1024;
+
+/**
+ * O caminho por dentro da nossa função só vale para arquivo pequeno.
+ *
+ * A hospedagem recusa corpo acima de ~4 MB, e essa recusa acontece antes do
+ * nosso código rodar. Por isso o envio direto ao Storage é o caminho normal, e
+ * este é a reserva.
+ */
+const TETO_DO_CAMINHO_RESERVA = 4 * 1024 * 1024;
+
+interface UrlAssinada {
+  url_envio: string;
+  metodo: string;
+  cabecalhos: { [chave: string]: string };
+  caminho: string;
+  expira_em_minutos: number;
+}
+
+/**
+ * Anexa um arquivo à missão.
+ *
+ * O CAMINHO NORMAL NÃO PASSA PELO NOSSO SERVIDOR. Pedimos ao Nexu-GC uma URL
+ * assinada, o navegador manda o arquivo direto para o Storage e depois só
+ * registramos o caminho. Assim o arquivo não atravessa a nossa função — que
+ * tem teto de corpo — e o limite volta a ser o do produto, 200 MB.
+ *
+ * A URL assinada não é a nossa chave: ela vale para um caminho só, por duas
+ * horas. Mandá-la ao navegador não expõe nada além daquele envio.
+ *
+ * Quando o envio direto não acontece — o Storage pode recusar a chamada vinda
+ * do navegador —, o arquivo pequeno ainda vai pela nossa função. "Não deu para
+ * anexar" não pode ser a resposta enquanto existir um caminho que funciona.
+ */
+export async function anexarMaterial(
+  missao: string,
+  arquivo: File,
+): Promise<MaterialDoNexus> {
+  const assinatura = await chamar<{ data: UrlAssinada }>("material-url", {
+    params: { missao },
+    corpo: { nome_arquivo: arquivo.name },
+  });
+
+  const envio = assinatura.data;
+  let subiu = false;
+  try {
+    const resposta = await fetch(envio.url_envio, {
+      method: envio.metodo || "PUT",
+      headers: envio.cabecalhos || undefined,
+      body: arquivo,
+    });
+    subiu = resposta.ok;
+  } catch {
+    // Storage inalcançável do navegador: cai na reserva logo abaixo.
+  }
+
+  if (subiu) {
+    const registro = await chamar<{ data: MaterialDoNexus }>("material-registrar", {
+      params: { missao },
+      corpo: { caminho: envio.caminho, nome_arquivo: arquivo.name },
+    });
+    return registro.data;
+  }
+
+  if (arquivo.size > TETO_DO_CAMINHO_RESERVA) {
+    const erro: ErroDoNexus = {
+      code: "upload_failed",
+      message: `Não deu para enviar "${arquivo.name}" direto para o Nexu-GC, e ele é grande demais para o caminho alternativo (acima de 4 MB).`,
+      campo: "arquivo",
+    };
+    throw erro;
+  }
+
+  const pacote = new FormData();
+  pacote.append("arquivo", arquivo, arquivo.name);
+  pacote.append("nome_arquivo", arquivo.name);
+
+  const url = new URL("/api/nexus-gc", window.location.origin);
+  url.searchParams.set("recurso", "material-arquivo");
+  url.searchParams.set("missao", missao);
+
+  // Sem `Content-Type` à mão de propósito: o navegador escreve a fronteira do
+  // multipart nele, e uma fronteira escrita por nós não bateria com o corpo.
+  const resposta = await fetch(url, { method: "POST", body: pacote });
+  const bruto = await resposta.text();
+  let corpo: any = null;
+  try {
+    corpo = bruto ? JSON.parse(bruto) : null;
+  } catch {
+    // Resposta que não é JSON só acontece quando algo quebrou no caminho.
+  }
+  if (!resposta.ok) {
+    const erro: ErroDoNexus = {
+      code: corpo?.error?.code || "internal_error",
+      message:
+        corpo?.error?.message ||
+        `Não deu para anexar "${arquivo.name}" ao Nexu-GC.`,
+      campo: corpo?.error?.campo ?? null,
+    };
+    throw erro;
+  }
+  return corpo.data as MaterialDoNexus;
+}
+
+/** Publica um rascunho, escolhendo quem recebe. */
+export const publicarMissao = (
+  missao: string,
+  para: { destinatarios?: string[]; todos_do_time?: boolean },
+) => chamar<{ data: MissaoDoNexus }>("publicar", { params: { missao }, corpo: para });
+
+/** O que já está anexado a uma missão, com URL temporária para conferir. */
+export const lerMateriais = (missao: string) =>
+  chamar<{ data: MaterialDoNexus[]; meta?: { total: number } }>("materiais", {
+    params: { missao },
+  });

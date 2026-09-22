@@ -2,22 +2,25 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   AlertTriangle,
-  Check,
-  CheckCircle2,
   ChevronDown,
   Loader2,
+  Paperclip,
   RefreshCw,
   Send,
   Users,
   X
 } from 'lucide-react';
 import {
+  FORMATOS_DE_MATERIAL,
+  TAMANHO_MAXIMO_DE_MATERIAL,
+  anexarMaterial,
   cancelarMissao,
   criarMissao,
   lerClientes,
   lerDestinatarios,
   lerMissoesPorReferencia,
   lerTimes,
+  publicarMissao,
   referenciaDaMissao,
   type ClienteDoNexus,
   type DestinatarioDoNexus,
@@ -79,6 +82,14 @@ const semAcento = (texto: string) =>
     .toLowerCase()
     .trim();
 
+/** Nome e tamanho identificam um arquivo bem o bastante para esta lista. */
+const chaveDoArquivo = (arquivo: File) => `${arquivo.name}:${arquivo.size}`;
+
+const tamanhoLegivel = (bytes: number) =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
 /** "2026-09-30T18:00" no horário de Maceió vira o instante certo. */
 const instanteEmMaceio = (data: string, hora: string) =>
   new Date(`${data}T${(hora || '23:59').slice(0, 5)}:00-03:00`);
@@ -101,8 +112,15 @@ export default function MissaoParaODelta({
   clienteSugerido,
   prioridadeSugerida = 'normal'
 }: {
-  /** A ordem que está aberta: é dela que sai o conteúdo da missão. */
-  missao: { tipo: string; id: string; titulo: string; descricao?: string; prazo?: string };
+  /**
+   * A ordem que está aberta.
+   *
+   * Dela sai só o que é fato — o prazo e a identidade, que vira a referência
+   * do envio. Título e descrição são escritos aqui: o que se manda para outra
+   * equipe quase nunca é o mesmo texto que a ordem interna usa, e um campo já
+   * preenchido convida a mandar sem reler.
+   */
+  missao: { tipo: string; id: string; prazo?: string };
   /** O cliente em foco no mapa, para achar o mesmo no Nexu-GC. */
   clienteSugerido?: string | null;
   prioridadeSugerida?: PrioridadeDoNexus;
@@ -124,8 +142,8 @@ export default function MissaoParaODelta({
   const [todosDoTime, setTodosDoTime] = useState(true);
   const [escolhidos, setEscolhidos] = useState<string[]>([]);
 
-  const [titulo, setTitulo] = useState(missao.titulo || '');
-  const [descricao, setDescricao] = useState(missao.descricao || '');
+  const [titulo, setTitulo] = useState('');
+  const [descricao, setDescricao] = useState('');
   const [prioridade, setPrioridade] = useState<PrioridadeDoNexus>(prioridadeSugerida);
   const [pontos, setPontos] = useState(10);
   const [data, setData] = useState(
@@ -133,6 +151,22 @@ export default function MissaoParaODelta({
   );
   const [hora, setHora] = useState('18:00');
   const [feedbackObrigatorio, setFeedbackObrigatorio] = useState(true);
+
+  const [arquivos, setArquivos] = useState<File[]>([]);
+  /** Quais arquivos já subiram: uma retomada não anexa o mesmo duas vezes. */
+  const [anexados, setAnexados] = useState<string[]>([]);
+  /**
+   * O rascunho que ficou no meio do caminho.
+   *
+   * Com material, a missão nasce como rascunho, recebe os arquivos e só então
+   * é publicada. Se algo falhar entre um passo e outro, existe um rascunho no
+   * Nexu-GC que ninguém vê — e criar outro do zero deixaria o primeiro lá,
+   * invisível, para sempre. Guardado aqui, o botão retoma de onde parou.
+   */
+  const [rascunhoPendente, setRascunhoPendente] = useState<MissaoDoNexus | null>(null);
+  const [progresso, setProgresso] = useState<{ feito: number; total: number; nome: string } | null>(
+    null
+  );
 
   const [enviando, setEnviando] = useState(false);
   const [jaEnviadas, setJaEnviadas] = useState<MissaoDoNexus[]>([]);
@@ -265,6 +299,8 @@ export default function MissaoParaODelta({
     const quando = instanteEmMaceio(data, hora);
     if (Number.isNaN(quando.getTime())) return 'Esta data não existe no calendário.';
     if (quando.getTime() <= Date.now()) return 'O prazo precisa estar no futuro.';
+    const grande = arquivos.find((a) => a.size > TAMANHO_MAXIMO_DE_MATERIAL);
+    if (grande) return `"${grande.name}" passa de 200 MB, que é o teto do Nexu-GC.`;
     return null;
   };
 
@@ -281,29 +317,66 @@ export default function MissaoParaODelta({
 
     setEnviando(true);
     setErro(null);
+    const paraQuem = todosDoTime
+      ? { todos_do_time: true }
+      : { destinatarios: escolhidos };
     try {
-      const resposta = await criarMissao({
-        cliente_id: clienteId,
-        time_id: timeId,
-        titulo: titulo.trim(),
-        descricao: descricao.trim(),
-        prioridade,
-        pontos,
-        /*
-         * Data e hora separadas, como o manual manda.
-         *
-         * "prazo" com hora dentro E "prazo_hora" juntos é erro no Nexu-GC —
-         * de propósito, para não haver dúvida sobre qual dos dois vale.
-         */
-        prazo: data,
-        prazo_hora: hora || undefined,
-        feedback_obrigatorio: feedbackObrigatorio,
-        ...(todosDoTime ? { todos_do_time: true } : { destinatarios: escolhidos }),
-        referencia
-      });
-      setJaEnviadas((atual) => [resposta.data, ...atual]);
+      /*
+       * COM MATERIAL, A ORDEM MUDA: RASCUNHO → ARQUIVOS → PUBLICAR.
+       *
+       * É a ordem que o manual recomenda, e a razão é de quem executa: anexar
+       * depois de publicada funciona, mas abre a janela em que alguém abre a
+       * missão e o arquivo que ela exige ainda não está lá. Sem material, a
+       * missão nasce publicada de uma vez — não há o que esperar.
+       */
+      let criada: MissaoDoNexus =
+        rascunhoPendente ||
+        (
+          await criarMissao({
+            cliente_id: clienteId,
+            time_id: timeId,
+            titulo: titulo.trim(),
+            descricao: descricao.trim(),
+            prioridade,
+            pontos,
+            /*
+             * Data e hora separadas, como o manual manda.
+             *
+             * "prazo" com hora dentro E "prazo_hora" juntos é erro no Nexu-GC
+             * — de propósito, para não haver dúvida sobre qual dos dois vale.
+             */
+            prazo: data,
+            prazo_hora: hora || undefined,
+            feedback_obrigatorio: feedbackObrigatorio,
+            ...(arquivos.length > 0 ? { publicar: false } : paraQuem),
+            referencia
+          })
+        ).data;
+
+      if (arquivos.length > 0) {
+        // Guardado antes do primeiro arquivo: se o próximo passo falhar, o
+        // botão retoma este rascunho em vez de criar outro.
+        setRascunhoPendente(criada);
+
+        const faltando = arquivos.filter((a) => !anexados.includes(chaveDoArquivo(a)));
+        for (let i = 0; i < faltando.length; i += 1) {
+          const arquivo = faltando[i];
+          setProgresso({ feito: i, total: faltando.length, nome: arquivo.name });
+          await anexarMaterial(criada.id, arquivo);
+          setAnexados((atual) => [...atual, chaveDoArquivo(arquivo)]);
+        }
+        setProgresso(null);
+
+        criada = (await publicarMissao(criada.id, paraQuem)).data;
+        setRascunhoPendente(null);
+      }
+
+      setJaEnviadas((atual) => [criada, ...atual]);
+      setArquivos([]);
+      setAnexados([]);
       setInsistindo(false);
     } catch (falha: any) {
+      setProgresso(null);
       setErro(falha as ErroDoNexus);
       /*
        * Tempo esgotado não é "não criou".
@@ -395,7 +468,7 @@ export default function MissaoParaODelta({
           {carregando && jaEnviadas.length === 0 && clientes.length === 0 && (
             <p className="py-6 text-center text-[11.5px] font-bold text-slate-400 flex items-center justify-center gap-2">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Falando com o Nexu-GC...
+              Carregando...
             </p>
           )}
 
@@ -447,6 +520,11 @@ export default function MissaoParaODelta({
                       </p>
                       <p className="text-[10.5px] font-semibold text-slate-400 mt-0.5">
                         {m.time?.nome} · prazo {dataCurta(m.prazo)} · {m.pontos} pontos
+                        {m.materiais && m.materiais.total > 0
+                          ? ` · ${m.materiais.total} ${
+                              m.materiais.total === 1 ? 'material' : 'materiais'
+                            }`
+                          : ''}
                       </p>
                     </div>
                     <span
@@ -622,7 +700,8 @@ export default function MissaoParaODelta({
                   value={titulo}
                   onChange={(e) => setTitulo(e.target.value)}
                   maxLength={160}
-                  className="w-full h-10 px-3 bg-white border border-slate-200 rounded-xl text-[12px] font-semibold text-slate-700 focus:outline-hidden focus:border-slate-300"
+                  placeholder="O que a equipe Delta vê na lista dela"
+                  className="w-full h-10 px-3 bg-white border border-slate-200 rounded-xl text-[12px] font-semibold text-slate-700 placeholder:text-slate-300 focus:outline-hidden focus:border-slate-300"
                 />
               </Campo>
 
@@ -632,10 +711,104 @@ export default function MissaoParaODelta({
                   onChange={(e) => setDescricao(e.target.value)}
                   rows={4}
                   maxLength={8000}
-                  placeholder="A instrução que a equipe Delta vai ler. Material de apoio (foto, PDF) não vai por aqui — anexe no painel do Nexu-GC depois."
+                  placeholder="A instrução que a equipe Delta vai ler: o que fazer, onde, e o que precisa voltar."
                   className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-[12px] font-semibold text-slate-700 placeholder:text-slate-300 leading-relaxed resize-y focus:outline-hidden focus:border-slate-300"
                 />
               </Campo>
+
+              {/* ------------------------------ material de apoio --- */}
+              {/*
+                O arquivo não vai no corpo da criação — a missão nasce primeiro
+                e o material é anexado a ela pelo id. Por isso, com arquivo, a
+                missão nasce como RASCUNHO: assim ninguém abre a missão antes
+                do material que ela exige estar lá.
+              */}
+              <div className="rounded-xl border border-slate-200 p-3">
+                <div className="flex items-center gap-2">
+                  <p className="text-[9.5px] font-black uppercase tracking-wider text-slate-400">
+                    Material de apoio
+                  </p>
+                  <label className="ml-auto px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 transition-colors">
+                    <Paperclip className="w-3 h-3" />
+                    Anexar arquivo
+                    <input
+                      type="file"
+                      multiple
+                      accept={FORMATOS_DE_MATERIAL}
+                      onChange={(e) => {
+                        const novos: File[] = Array.from(e.target.files || []);
+                        setArquivos((atual) => {
+                          const chaves = new Set(atual.map(chaveDoArquivo));
+                          return [
+                            ...atual,
+                            ...novos.filter((a) => !chaves.has(chaveDoArquivo(a)))
+                          ];
+                        });
+                        // Sem isto, escolher o mesmo arquivo de novo depois de
+                        // tirá-lo da lista não dispara evento nenhum.
+                        e.target.value = '';
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {arquivos.length === 0 ? (
+                  <p className="mt-2 text-[10.5px] font-semibold text-slate-400 leading-snug">
+                    Foto, vídeo, PDF, Word, Excel ou PowerPoint, até 200 MB cada.
+                    O arquivo fica no Nexu-GC, e o membro abre pela tela de lá.
+                  </p>
+                ) : (
+                  <div className="mt-2 space-y-1.5">
+                    {arquivos.map((arquivo) => {
+                      const jaSubiu = anexados.includes(chaveDoArquivo(arquivo));
+                      return (
+                        <div
+                          key={chaveDoArquivo(arquivo)}
+                          className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5"
+                        >
+                          <Paperclip className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[11.5px] font-bold text-slate-700 truncate leading-tight">
+                              {arquivo.name}
+                            </span>
+                            <span className="block text-[9.5px] font-semibold text-slate-400">
+                              {tamanhoLegivel(arquivo.size)}
+                              {jaSubiu && ' · já anexado'}
+                            </span>
+                          </span>
+                          {/*
+                            Arquivo que já subiu não sai daqui: ele está na
+                            missão do Nexu-GC, e o manual só permite removê-lo
+                            enquanto ela é rascunho — pela tela de lá.
+                          */}
+                          {!jaSubiu && (
+                            <button
+                              type="button"
+                              title="Tirar da lista"
+                              onClick={() =>
+                                setArquivos((atual) =>
+                                  atual.filter(
+                                    (a) => chaveDoArquivo(a) !== chaveDoArquivo(arquivo)
+                                  )
+                                )
+                              }
+                              className="w-6 h-6 rounded-md text-slate-300 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer transition-colors shrink-0"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <p className="text-[9.5px] font-semibold text-slate-400 leading-snug pt-0.5">
+                      Com material, a missão é criada, recebe os arquivos e só
+                      então é publicada — ninguém abre a missão antes do anexo
+                      estar lá.
+                    </p>
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <Campo rotulo="Prioridade">
@@ -732,6 +905,31 @@ export default function MissaoParaODelta({
                 </div>
               )}
 
+              {progresso && (
+                <p className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Anexando {progresso.feito + 1} de {progresso.total}: {progresso.nome}
+                </p>
+              )}
+
+              {/*
+                O rascunho que ficou no caminho.
+
+                Existe no Nexu-GC e ninguém o vê — nem a equipe, nem quem
+                mandou. Dizer isso é o mínimo; o botão que retoma de onde parou
+                é o que evita um segundo rascunho invisível ao lado do
+                primeiro.
+              */}
+              {rascunhoPendente && !enviando && (
+                <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5">
+                  <p className="text-[11.5px] font-bold text-amber-800 leading-snug">
+                    A missão foi criada no Nexu-GC como rascunho, mas o envio
+                    parou antes de publicar — ninguém recebeu nada ainda.
+                    Enviar retoma daqui, sem criar outra.
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-center gap-2.5">
                 <button
                   type="button"
@@ -746,7 +944,11 @@ export default function MissaoParaODelta({
                   ) : (
                     <Send className="w-3.5 h-3.5" />
                   )}
-                  {enviando ? 'Enviando...' : 'Enviar para o Delta'}
+                  {enviando
+                    ? 'Enviando...'
+                    : rascunhoPendente
+                      ? 'Retomar o envio'
+                      : 'Enviar para o Delta'}
                 </button>
 
                 {problemaAgora ? (
