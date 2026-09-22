@@ -55,6 +55,20 @@ export function novoIdExterno(tipo: string, id: string): string {
   return `MOR-${tipo.toUpperCase()}-${id}-${sufixo}`.slice(0, 200);
 }
 
+/**
+ * Esta missão do Nexu-GC saiu DESTA ordem?
+ *
+ * A pergunta é respondida pelo id do envio, não pelo rótulo de agrupamento: o
+ * id carrega a ordem de origem por inteiro, e é ele que amarra uma coisa à
+ * outra. Missão sem id nosso não é desta ordem — pode ser de qualquer outra
+ * origem que use a mesma chave.
+ */
+export const ehDaOrdem = (
+  idExterno: string | null | undefined,
+  tipo: string,
+  id: string,
+) => Boolean(idExterno) && idExterno!.startsWith(`MOR-${tipo.toUpperCase()}-${id}-`);
+
 export type PrioridadeDoNexus = "baixa" | "normal" | "alta" | "critica";
 
 /**
@@ -115,18 +129,63 @@ export interface MissaoDoNexus {
   cancelada_em: string | null;
   /** Na listagem vem só o total; no detalhe, a lista inteira. */
   materiais?: { total: number; itens?: unknown[] };
+  /**
+   * Calculado NA LEITURA, contra o instante da chamada.
+   *
+   * Não existe coluna "atrasada" esperando alguém virar uma chave: um minuto
+   * depois do prazo, a resposta já diz `true`.
+   */
+  atrasada?: boolean;
+  prazo_restante_segundos?: number | null;
+  progresso?: {
+    total: number;
+    visualizados: number;
+    iniciados: number;
+    concluidos: number;
+    percentual: number;
+  };
   destinatarios: {
     total: number;
+    visualizados?: number;
+    iniciados?: number;
     concluidos: number;
-    itens: {
-      id: string;
-      nome: string;
-      foto_url?: FotoDoNexus;
-      status: "pendente" | "em_andamento" | "concluida" | "cancelada";
-      concluida_em: string | null;
-      pontos_creditados: number;
-    }[];
+    itens: DestinatarioDaMissao[];
   };
+}
+
+/**
+ * O andamento de UMA pessoa na missão.
+ *
+ * A missão tem o estado dela e cada pessoa tem o seu: uma concluir não conclui
+ * a das outras. O que existe é quantas concluíram.
+ *
+ * Os booleanos vêm junto com os carimbos de propósito — para ninguém precisar
+ * deduzir "já viu?" comparando datas com nulo.
+ */
+export interface DestinatarioDaMissao {
+  id: string;
+  /** Id deste vínculo pessoa+missão. */
+  atribuicao_id?: string;
+  nome: string;
+  telefone?: string | null;
+  foto_url?: FotoDoNexus;
+  status: "pendente" | "em_andamento" | "concluida" | "cancelada";
+  recebida_em?: string | null;
+  visualizada?: boolean;
+  vista_em?: string | null;
+  iniciada?: boolean;
+  iniciada_em?: string | null;
+  concluida?: boolean;
+  concluida_em: string | null;
+  concluida_com_atraso?: boolean;
+  /**
+   * O que a pessoa ESCREVEU ao concluir.
+   *
+   * É o que responde "o que ela entregou?". Com `feedback_obrigatorio`, nunca
+   * vem vazio numa conclusão: sem o texto, o membro não consegue concluir.
+   */
+  resultado?: string | null;
+  pontos_creditados: number;
 }
 
 /** O erro do Nexu-GC, já no formato que a tela mostra. */
@@ -158,6 +217,8 @@ async function chamar<T>(
   opcoes: {
     params?: { [chave: string]: string | number | boolean | undefined };
     corpo?: any;
+    /** Só quando não for o par GET/POST que o corpo já decide. */
+    metodo?: "PUT";
   } = {},
 ): Promise<T> {
   const url = new URL("/api/nexus-gc", window.location.origin);
@@ -171,7 +232,7 @@ async function chamar<T>(
   let resposta: Response;
   try {
     resposta = await fetch(url, {
-      method: opcoes.corpo !== undefined ? "POST" : "GET",
+      method: opcoes.metodo || (opcoes.corpo !== undefined ? "POST" : "GET"),
       headers: opcoes.corpo !== undefined ? { "Content-Type": "application/json" } : undefined,
       body: opcoes.corpo !== undefined ? JSON.stringify(opcoes.corpo) : undefined,
       signal: AbortSignal.timeout(45_000),
@@ -289,6 +350,35 @@ export interface NovaMissaoDoNexus {
 
 export const criarMissao = (missao: NovaMissaoDoNexus) =>
   chamar<{ data: MissaoDoNexus }>("criar", { corpo: missao });
+
+/**
+ * Muda o que já foi mandado — só o que vier no corpo.
+ *
+ * A edição do Nexu-GC é PARCIAL, e isso é uma proteção: corrigir o prazo não
+ * exige reenviar título e descrição, e mandar o objeto inteiro "para garantir"
+ * é justamente o que apaga conteúdo sem intenção. Então aqui só entra o campo
+ * que mudou.
+ *
+ * Duas regras de lá que valem lembrar: prazo novo precisa estar no futuro (para
+ * encerrar existe o cancelar), e mexer nos pontos não tira o que já foi
+ * creditado a quem concluiu — o valor novo vale para as conclusões seguintes.
+ */
+export const editarMissao = (missao: string, mudancas: MudancasDaMissao) =>
+  chamar<{ data: MissaoDoNexus }>("editar", {
+    params: { missao },
+    corpo: mudancas,
+    metodo: "PUT",
+  });
+
+export interface MudancasDaMissao {
+  titulo?: string;
+  descricao?: string;
+  prioridade?: PrioridadeDoNexus;
+  pontos?: number;
+  prazo?: string;
+  prazo_hora?: string;
+  feedback_obrigatorio?: boolean;
+}
 
 export const cancelarMissao = (missao: string) =>
   chamar<{ data: MissaoDoNexus }>("cancelar", { params: { missao }, corpo: {} });
