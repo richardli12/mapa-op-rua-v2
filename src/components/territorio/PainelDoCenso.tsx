@@ -87,42 +87,118 @@ interface FaixaEtaria {
   chave: string;
   rotulo: string;
   inicio: number;
+  /** `null` é faixa aberta no topo: "70 anos ou mais". */
+  fim: number | null;
   homens: number | null;
   mulheres: number | null;
 }
 
 /**
+ * Palavras que denunciam um indicador que NÃO é contagem de faixa etária.
+ *
+ * "Taxa de alfabetização de mulheres de 15 anos ou mais" tem sexo e tem
+ * idade, e entraria na pirâmide como se fosse gente contada. Não é: é uma
+ * taxa sobre um recorte de gente. A lista abaixo é o que separa os dois.
+ */
+const NAO_E_FAIXA_ETARIA =
+  /(taxa|indice|percentual|propor[cç]|raz[aã]o|media|densidade|alfabetiz|instru[cç]|estud|escolar|renda|rendiment|salario|trabalh|ocupa|respons|chefe|domicil)/;
+
+/**
  * Lê a pirâmide etária de dentro da lista de indicadores.
  *
- * O padrão de rótulo é o do próprio Censo: "Homens de 0 a 9 anos", "Mulheres
- * com 80 anos ou mais". A largura das faixas (dez em dez anos, cinco em cinco)
- * é a que a fonte publicou — não fixamos nenhuma, para não desenhar uma faixa
- * que o dado não tem.
+ * TOLERANTE DE PROPÓSITO, E COM FREIO.
+ *
+ * O rótulo da faixa etária é escrito de um jeito diferente em cada carga:
+ * "Homens de 0 a 4 anos", "Homens 0 a 4 anos", "População masculina de 0 a 4
+ * anos", "Mulheres com 70 anos ou mais", "Mulheres de 70 anos e mais". Um
+ * padrão que exigisse a frase inteira exata — e era o que existia aqui —
+ * acerta numa carga e faz a seção sumir inteira na seguinte, sem dizer por
+ * quê. Então a leitura é por partes: um lado (homem/mulher), uma faixa de
+ * idade, e a exigência de que o rótulo fale de "anos".
+ *
+ * O freio é o que impede a tolerância de virar lixo no gráfico:
+ *
+ * - indicador em '%' e rótulo com cara de taxa ficam de fora;
+ * - faixa que contém outra é resumo ("0 a 14" ao lado de "0 a 4", "5 a 9" e
+ *   "10 a 14") e sairia contando a mesma gente duas vezes;
+ * - entre as faixas abertas vale a que começa mais tarde, e ela some se já
+ *   existe faixa fechada cobrindo aquele topo;
+ * - menos de três faixas não é perfil etário, é número solto.
  *
  * A ordem na tela é a da pirâmide impressa: os mais velhos em cima.
  */
 function lerPiramide(lista: IndicadorComGrupo[]): FaixaEtaria[] {
-  const PADRAO = /^(homens|mulheres)\s+(?:de\s+(\d+)\s+a\s+(\d+)\s+anos?|com\s+(\d+)\s+anos?\s+ou\s+mais)$/;
   const porFaixa = new Map<string, FaixaEtaria>();
 
   lista.forEach((indicador) => {
-    const m = PADRAO.exec(semAcento(indicador.rotulo));
-    if (!m || indicador.valor === null) return;
-    const sexo = m[1];
-    const inicio = Number(m[2] ?? m[4]);
-    const fim = m[3] ?? null;
-    const chave = fim ? `${inicio}-${fim}` : `${inicio}+`;
-    const rotulo = fim ? `${inicio} a ${fim}` : `${inicio} ou +`;
+    if (indicador.valor === null || indicador.unidade === '%') return;
+    const texto = semAcento(indicador.rotulo);
+    if (!/\banos?\b/.test(texto) && !/\d\s*\+/.test(texto)) return;
+    if (NAO_E_FAIXA_ETARIA.test(texto)) return;
 
-    const atual = porFaixa.get(chave) || { chave, rotulo, inicio, homens: null, mulheres: null };
-    if (sexo === 'homens') atual.homens = indicador.valor;
+    const ehHomem = /(homens?|masculin)/.test(texto);
+    const ehMulher = /(mulheres?|feminin)/.test(texto);
+    // Nenhum dos dois, ou os dois na mesma frase: não dá para pôr num lado.
+    if (ehHomem === ehMulher) return;
+
+    let inicio: number;
+    let fim: number | null = null;
+    const intervalo =
+      /(\d{1,3})\s*(?:a|ate|-|\u2013|\u2014)\s*(\d{1,3})\s*anos?/.exec(texto) ||
+      /(\d{1,3})\s*(?:a|-|\u2013|\u2014)\s*(\d{1,3})\b/.exec(texto);
+    if (intervalo) {
+      inicio = Number(intervalo[1]);
+      fim = Number(intervalo[2]);
+      if (fim < inicio) return;
+    } else {
+      const aberta =
+        /(\d{1,3})\s*(?:anos?\s*)?(?:ou|e)\s+mais/.exec(texto) || /(\d{1,3})\s*\+/.exec(texto);
+      if (!aberta) return;
+      inicio = Number(aberta[1]);
+    }
+
+    const chave = fim === null ? `${inicio}+` : `${inicio}-${fim}`;
+    const atual =
+      porFaixa.get(chave) ||
+      {
+        chave,
+        rotulo: fim === null ? `${inicio} ou +` : `${inicio} a ${fim}`,
+        inicio,
+        fim,
+        homens: null,
+        mulheres: null
+      };
+    if (ehHomem) atual.homens = indicador.valor;
     else atual.mulheres = indicador.valor;
     porFaixa.set(chave, atual);
   });
 
-  return Array.from(porFaixa.values())
-    .filter((f) => f.homens !== null || f.mulheres !== null)
-    .sort((a, b) => b.inicio - a.inicio);
+  let faixas = Array.from(porFaixa.values()).filter(
+    (f) => f.homens !== null || f.mulheres !== null
+  );
+
+  // Fora os resumos: faixa fechada que contém outra faixa.
+  const fechadas = faixas.filter((f) => f.fim !== null);
+  faixas = faixas.filter((f) => {
+    if (f.fim === null) return true;
+    return !fechadas.some(
+      (outra) =>
+        outra !== f && outra.inicio >= f.inicio && (outra.fim as number) <= (f.fim as number)
+    );
+  });
+
+  // Uma faixa aberta só, e apenas se nenhuma fechada já cobrir aquele topo.
+  const abertas = faixas.filter((f) => f.fim === null);
+  if (abertas.length > 0) {
+    const ultima = abertas.reduce((a, b) => (b.inicio > a.inicio ? b : a));
+    faixas = faixas.filter((f) => f.fim !== null || f === ultima);
+    if (faixas.some((f) => f.fim !== null && f.inicio >= ultima.inicio)) {
+      faixas = faixas.filter((f) => f !== ultima);
+    }
+  }
+
+  if (faixas.length < 3) return [];
+  return faixas.sort((a, b) => b.inicio - a.inicio);
 }
 
 /* ------------------------------------------------------------ cor ou raça --- */
@@ -373,10 +449,13 @@ function SecaoDeIndicadores({
  */
 function GraficoDoGrupo({
   titulo,
-  itens
+  itens,
+  nota
 }: {
   titulo?: string;
   itens: IndicadorDoCenso[];
+  /** Uma linha abaixo do gráfico, para explicar de onde ele veio. */
+  nota?: string;
   key?: string;
 }) {
   const comValor = itens
@@ -412,8 +491,10 @@ function GraficoDoGrupo({
           </div>
         ))}
       </div>
-      {mesmaUnidade && comValor[0].unidade && (
-        <p className="mt-3 text-[11px] text-slate-400">Valores em {comValor[0].unidade}.</p>
+      {(nota || (mesmaUnidade && comValor[0].unidade)) && (
+        <p className="mt-3 text-[11px] text-slate-400 leading-snug">
+          {nota || `Valores em ${comValor[0].unidade}.`}
+        </p>
       )}
     </Cartao>
   );
@@ -490,17 +571,45 @@ export default function PainelDoCenso({
   const percentualMulheres = percentualPorSexo(mulheres);
 
   /* ---------------------------------------------------------- categorias --- */
+  /*
+   * A ABA "VISÃO GERAL" É UMA SÓ.
+   *
+   * A fonte manda um grupo chamado "Visão geral" junto com os outros. Somado
+   * à aba que esta tela cria por conta própria, davam duas abas com o mesmo
+   * nome — e a segunda abria a lista crua do grupo, sem cartão, sem pirâmide,
+   * sem nada do que a primeira mostra. Quem tocasse na errada concluía, com
+   * razão, que a visão geral tinha sumido.
+   *
+   * O grupo da fonte não é jogado fora: ele vira a primeira seção de
+   * "explorar todos os indicadores", que é onde a lista crua faz sentido.
+   */
+  const grupoDaFonteVisaoGeral =
+    censo.grupos.find((g) => semAcento(g.titulo) === 'visao geral') || null;
+  const gruposComAbaPropria = censo.grupos.filter((g) => g !== grupoDaFonteVisaoGeral);
+
   const categorias = [
     { id: 'geral', rotulo: 'Visão geral' },
-    ...censo.grupos.map((g) => ({ id: g.id, rotulo: g.titulo }))
+    ...gruposComAbaPropria.map((g) => ({ id: g.id, rotulo: g.titulo }))
   ];
+
+  /**
+   * O grupo de idade e sexo, quando a pirâmide não pôde ser lida.
+   *
+   * Uma seção que some sem dizer nada é a pior resposta possível para "cadê
+   * o perfil etário": não há o que clicar, e nada na tela explica a ausência.
+   * Com o grupo em mãos, o cartão continua existindo — mostrando os números
+   * de idade e sexo com o rótulo que a fonte usou, que é também a pista de
+   * por que o pareamento falhou.
+   */
+  const grupoDeIdadeESexo =
+    censo.grupos.find((g) => /(idade|sexo|etari|faixa)/.test(semAcento(g.titulo))) || null;
 
   const maiorFaixa = Math.max(
     1,
     ...piramide.map((f) => Math.max(f.homens || 0, f.mulheres || 0))
   );
 
-  const grupoSelecionado = censo.grupos.find((g) => g.id === categoria);
+  const grupoSelecionado = gruposComAbaPropria.find((g) => g.id === categoria);
 
   /*
    * A seção "Visão geral" da lista completa.
@@ -512,6 +621,9 @@ export default function PainelDoCenso({
    * ver.
    */
   const indicadoresDaVisaoGeral = useMemo(() => {
+    if (grupoDaFonteVisaoGeral) {
+      return [...grupoDaFonteVisaoGeral.principais, ...grupoDaFonteVisaoGeral.detalhes];
+    }
     const escolhidos = [
       populacaoIndicador,
       domiciliosIndicador,
@@ -522,7 +634,14 @@ export default function PainelDoCenso({
     const vistos = new Set<string>();
     return escolhidos.filter((i) => (vistos.has(i.id) ? false : (vistos.add(i.id), true)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [populacaoIndicador?.id, domiciliosIndicador?.id, envelhecimento?.id, alfabetizacao?.id, saneamento]);
+  }, [
+    grupoDaFonteVisaoGeral,
+    populacaoIndicador?.id,
+    domiciliosIndicador?.id,
+    envelhecimento?.id,
+    alfabetizacao?.id,
+    saneamento
+  ]);
 
   /** O rodapé de contagem de setores, igual nas duas visões. */
   const rodape = censo.totalSetores !== null && (
@@ -664,6 +783,25 @@ export default function PainelDoCenso({
               </Cartao>
             )}
 
+            {/*
+              A pirâmide não pôde ser lida, mas o cartão fica.
+
+              Parear "Homens de 0 a 4 anos" com "Mulheres de 0 a 4 anos"
+              depende de reconhecer o rótulo que ESTA carga usou, e nenhum
+              padrão acerta todas. Quando o pareamento falha, sumir com a
+              seção é a pior saída: não sobra nada na tela para explicar a
+              ausência nem para conferir. Então o cartão continua, com os
+              números de idade e sexo do jeito que vieram — e os rótulos à
+              vista são a própria pista do que não bateu.
+            */}
+            {piramide.length === 0 && grupoDeIdadeESexo && (
+              <GraficoDoGrupo
+                titulo="Perfil etário"
+                itens={[...grupoDeIdadeESexo.principais, ...grupoDeIdadeESexo.detalhes]}
+                nota={`Faixas de homens e mulheres não puderam ser pareadas com os rótulos de "${grupoDeIdadeESexo.titulo}" desta carga — abaixo, os indicadores como a fonte os enviou.`}
+              />
+            )}
+
             {/* ------------------------------------------------ cor/raça --- */}
             {raca.length > 0 &&
               (() => {
@@ -760,13 +898,16 @@ export default function PainelDoCenso({
             */}
             {piramide.length === 0 && raca.length === 0 && saneamento.length === 0 && (
               <>
-                {censo.grupos.slice(0, 2).map((grupo) => (
-                  <GraficoDoGrupo
-                    key={grupo.id}
-                    titulo={grupo.titulo}
-                    itens={[...grupo.principais, ...grupo.detalhes]}
-                  />
-                ))}
+                {censo.grupos
+                  .filter((g) => g !== grupoDeIdadeESexo && g !== grupoDaFonteVisaoGeral)
+                  .slice(0, 2)
+                  .map((grupo) => (
+                    <GraficoDoGrupo
+                      key={grupo.id}
+                      titulo={grupo.titulo}
+                      itens={[...grupo.principais, ...grupo.detalhes]}
+                    />
+                  ))}
               </>
             )}
 
@@ -794,7 +935,7 @@ export default function PainelDoCenso({
                   itens={indicadoresDaVisaoGeral}
                   instituto={instituto}
                 />
-                {censo.grupos.map((grupo) => (
+                {gruposComAbaPropria.map((grupo) => (
                   <SecaoDeIndicadores
                     key={grupo.id}
                     titulo={grupo.titulo}
