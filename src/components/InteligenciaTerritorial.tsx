@@ -175,7 +175,17 @@ export default function InteligenciaTerritorial({
    * devolveu nada" com três bairros já pintados.
    */
   const [desenhados, setDesenhados] = useState(0);
-  const [aba, setAba] = useState<Aba>('raio');
+  /*
+   * A tela abre nos bairros, e não no raio.
+   *
+   * "Raio" é a aba que só sabe perguntar: uma régua de distâncias e um botão
+   * "analisar esta área". Quem abria a inteligência territorial encontrava um
+   * painel sem um número sequer e tinha de decidir alguma coisa antes de ver
+   * qualquer coisa. Bairros já tem o que mostrar -- a lista do município, com
+   * população -- e chega sozinha. O raio continua a um toque, e volta a ser a
+   * primeira aba sozinho quando alguém desenha um círculo no mapa.
+   */
+  const [aba, setAba] = useState<Aba>('bairros');
   /**
    * Meia tela ou tela cheia.
    *
@@ -516,6 +526,20 @@ export default function InteligenciaTerritorial({
   }, [camadaLigada, nivelDaCamada, municipio?.codigo, bairros.length]);
 
   /**
+   * Abriu a tela nos bairros: a lista vem sozinha.
+   *
+   * O toque na aba já carregava, mas agora a aba vem escolhida de fábrica e
+   * esse toque não acontece -- sem isto, a tela abriria na lista vazia, que é
+   * exatamente o que ela deixou de fazer.
+   */
+  useEffect(() => {
+    if (!aberto || aba !== 'bairros' || !municipio) return;
+    if (bairros.length > 0 || carregandoBairros) return;
+    carregarBairros();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto, aba, municipio?.codigo, bairros.length]);
+
+  /**
    * Entrou na aba: a malha carrega sozinha.
    *
    * A aba de setores sem setores é uma tela que só sabe pedir. Se a malha já
@@ -807,16 +831,21 @@ export default function InteligenciaTerritorial({
      * rolando sem fim. Uma tela de análise territorial precisa de largura
      * para ser lida — é disso que ela trata.
      *
-     * Agora ela entra no fluxo da página, como o Mapa Mental: metade da tela
-     * para ela, metade para o mapa, os dois visíveis ao mesmo tempo. Empurrar
+     * Agora ela entra no fluxo da página, como o Mapa Mental: uma faixa de 30%
+     * para ela, o resto para o mapa, os dois visíveis ao mesmo tempo. Empurrar
      * o mapa em vez de cobri-lo é o que deixa clicar num bairro da lista e
-     * ver onde ele fica, sem fechar nada.
+     * ver onde ele fica, sem fechar nada -- e é o mapa que precisa da folga,
+     * porque é nele que a resposta aparece.
+     *
+     * O piso de 380px continua: abaixo disso os nomes de aba voltam a quebrar,
+     * e numa tela de 1280 os 30% dariam menos que isso.
+     * Para a leitura detalhada existe a tela cheia, no botão do cabeçalho.
      */
     <div
       className={
         telaCheia
           ? 'fixed inset-0 z-[3200] bg-white flex flex-col font-sans animate-in fade-in duration-150'
-          : 'order-3 h-full w-1/2 min-w-[380px] shrink-0 z-[1002] bg-white border-l border-slate-200 shadow-2xl flex flex-col font-sans animate-in fade-in slide-in-from-right-4 duration-200'
+          : 'order-3 h-full w-[30%] min-w-[380px] shrink-0 z-[1002] bg-white border-l border-slate-200 shadow-2xl flex flex-col font-sans animate-in fade-in slide-in-from-right-4 duration-200'
       }
     >
       {/* CABEÇALHO */}
