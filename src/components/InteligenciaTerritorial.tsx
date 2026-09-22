@@ -2,17 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import {
   X,
   Layers3,
-  Users,
-  Home,
   Loader2,
   AlertCircle,
-  Target,
-  Search,
-  Info,
-  ChevronRight,
   Maximize2,
-  Minimize2,
-  Map as MapIcon
+  Minimize2
 } from 'lucide-react';
 import {
   lerUfs,
@@ -357,8 +350,14 @@ export default function InteligenciaTerritorial({
     setBairroDosSetores(null);
     setFalhaDeSetores(false);
     cargaDeSetores.current = null;
-    setRecorte({ nivel: 'municipio', codigo: alvo.codigo, nome: alvo.nome });
-    setCenso(null);
+    /*
+     * O Censo do município escolhido vem sozinho.
+     *
+     * Não existe mais um botão "Carregar" nem uma aba para trocar: a pergunta
+     * que este painel responde é "quem mora aqui", e ela já tem resposta no
+     * instante em que o município é escolhido.
+     */
+    carregarCenso('municipio', alvo.codigo, alvo.nome);
     try {
       // A ficha do município traz setoresSemBairro, que é o que explica a
       // soma dos bairros não fechar com o total.
@@ -841,13 +840,6 @@ export default function InteligenciaTerritorial({
       return (b.populacao ?? -1) - (a.populacao ?? -1);
     });
 
-  const abas: { id: Aba; rotulo: string }[] = [
-    { id: 'raio', rotulo: 'Raio' },
-    { id: 'bairros', rotulo: 'Bairros' },
-    { id: 'setores', rotulo: 'Setores' },
-    { id: 'censo', rotulo: 'Censo' }
-  ];
-
   return (
     /*
      * PAINEL DE MEIA TELA, NÃO CARTÃO FLUTUANTE.
@@ -859,13 +851,21 @@ export default function InteligenciaTerritorial({
      * para ser lida — é disso que ela trata.
      *
      * Agora ela entra no fluxo da página, como o Mapa Mental: uma faixa de 30%
-     * para ela, o resto para o mapa, os dois visíveis ao mesmo tempo. Empurrar
-     * o mapa em vez de cobri-lo é o que deixa clicar num bairro da lista e
-     * ver onde ele fica, sem fechar nada -- e é o mapa que precisa da folga,
-     * porque é nele que a resposta aparece.
+     * para ela, o resto para o mapa, os dois visíveis ao mesmo tempo -- e é o
+     * mapa que precisa da folga, porque é nele que a resposta aparece quando
+     * este painel devolve uma coordenada.
      *
-     * O piso de 380px continua: abaixo disso os nomes de aba voltam a quebrar,
-     * e numa tela de 1280 os 30% dariam menos que isso.
+     * SÓ UMA PERGUNTA, SEM ABA PARA ESCOLHER.
+     *
+     * Isto tinha quatro abas -- Raio, Bairros, Setores, Censo -- e cada uma
+     * era outra pergunta ("quanta gente num raio", "qual bairro tem mais
+     * gente", "o que tem neste setor"). Na prática só uma delas era a que se
+     * abria o painel para responder: quem mora aqui. As outras três viraram
+     * cliques a mais entre abrir o painel e ver um número. Agora, escolhido o
+     * município, o Censo aparece sozinho -- sem aba, sem botão "Carregar".
+     *
+     * O piso de 380px continua: abaixo disso os nomes das categorias do Censo
+     * voltam a quebrar, e numa tela de 1280 os 30% dariam menos que isso.
      * Para a leitura detalhada existe a tela cheia, no botão do cabeçalho.
      */
     <div
@@ -975,8 +975,8 @@ export default function InteligenciaTerritorial({
         )}
         {!semMalha && semIndicadores && (
           <p className="mt-2 text-[10.5px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug">
-            {uf} tem o território, mas ainda não os indicadores do Censo — a aba
-            Censo vai vir vazia.
+            {uf} tem o território, mas ainda não os indicadores do Censo — o
+            painel vai vir vazio.
           </p>
         )}
 
@@ -987,36 +987,6 @@ export default function InteligenciaTerritorial({
           </p>
         )}
 
-        {/* ABAS */}
-        <div className="mt-3 flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-          {abas.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                setAba(item.id);
-                if (item.id === 'bairros' && bairros.length === 0) carregarBairros();
-                /*
-                  A aba também é o recorte do desenho.
-
-                  Com a camada ligada na barra, quem escolhe aqui e vê o mapa
-                  continuar em bairros acha que a tela travou — são o mesmo
-                  controle em dois lugares, e precisam contar a mesma coisa.
-                */
-                if (item.id === 'bairros' || item.id === 'setores') {
-                  onNivelDaCamada?.(item.id);
-                }
-              }}
-              className={`flex-1 h-7 rounded-lg text-[11px] font-black uppercase tracking-wider cursor-pointer transition-all ${
-                aba === item.id
-                  ? 'bg-white text-[#0D233A] shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              {item.rotulo}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* CORPO */}
@@ -1045,632 +1015,11 @@ export default function InteligenciaTerritorial({
           </div>
         )}
 
-        {/* ------------------------------------------------------ RAIO --- */}
-        {aba === 'raio' && (
-          <div>
-            <p className="text-[11.5px] font-semibold text-slate-500 leading-snug">
-              {centroFixo ? (
-                <>
-                  Quantas pessoas moram dentro do raio que você marcou no mapa.
-                  O mapa pode rolar: a medida continua sendo daquele lugar.
-                </>
-              ) : (
-                <>
-                  Quantas pessoas moram em volta do centro do mapa. Mova o mapa
-                  até o ponto, escolha o raio e analise.
-                </>
-              )}
-            </p>
-
-            {/*
-              O CENTRO MARCADO FICA ESCRITO, E TEM COMO SAIR.
-
-              Uma medida presa a um ponto que não é o que está na tela precisa
-              dizer isso em voz alta — senão a pessoa rola o mapa, vê outro
-              bairro e acredita que o número é daquele. E precisa ter a porta de
-              volta, no mesmo lugar em que conta a história.
-            */}
-            {centroFixo && (
-              <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-2.5 py-1.5">
-                <Target className="w-3.5 h-3.5 shrink-0 text-emerald-700" />
-                <p className="flex-1 text-[10.5px] font-bold text-emerald-900 leading-snug">
-                  Medindo o círculo que você desenhou no mapa.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCentroFixo(null);
-                    const vista = centroDoMapa();
-                    if (vista) analisar({ lat: vista.lat, lng: vista.lng });
-                  }}
-                  className="shrink-0 text-[10px] font-black uppercase tracking-wider text-emerald-700 hover:underline cursor-pointer"
-                >
-                  usar o centro do mapa
-                </button>
-              </div>
-            )}
-
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {/*
-                O raio desenhado quase nunca é um dos quatro da régua. Ele entra
-                na fila como mais um botão, aceso: esconder o valor que está
-                valendo faria a régua mostrar um tamanho e a conta usar outro.
-              */}
-              {(RAIOS.includes(raio) ? RAIOS : [raio, ...RAIOS].sort((a, b) => a - b)).map((metros) => (
-                <button
-                  key={metros}
-                  type="button"
-                  onClick={() => {
-                    setRaio(metros);
-                    // Raio novo no mesmo lugar: a medida sai na hora, porque o
-                    // ponto já está decidido e não há mais nada a perguntar.
-                    if (centroFixo) analisar(centroFixo, metros);
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all border ${
-                    raio === metros
-                      ? 'bg-emerald-600 border-emerald-600 text-white'
-                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  {metros >= 1000 ? `${metros / 1000} km` : `${metros} m`}
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => analisar()}
-              disabled={!uf || analisando || !!semMalha}
-              className="mt-3 w-full h-10 bg-emerald-600 hover:bg-emerald-700 text-white text-[11.5px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {analisando ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Analisando...
-                </>
-              ) : (
-                <>
-                  <Target className="w-4 h-4" />
-                  Analisar esta área
-                </>
-              )}
-            </button>
-
-            {analise && (
-              <div className="mt-4 space-y-3">
-                {/* foraDaCobertura separa "não toca dado" de "zero gente". */}
-                {analise.foraDaCobertura ? (
-                  <p className="text-[11.5px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-snug">
-                    Esta área não toca nenhum setor com dado carregado. Não é
-                    "zero habitantes" — é ausência de dado aqui.
-                  </p>
-                ) : (
-                  <>
-                    {/*
-                      O gráfico vem antes dos cartões de propósito: ele é a
-                      leitura, e os cartões são a conferência. Quem só passa o
-                      olho leva a conclusão certa — inclusive o quanto dela é
-                      chute de borda.
-                    */}
-                    <CertezaDoRaio
-                      exato={analise.exato.populacao}
-                      estimado={analise.estimativa.populacao}
-                      setoresInteiros={analise.setores.inteiros}
-                      setoresParciais={analise.setores.parciais}
-                    />
-
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3">
-                      <p className="text-[10px] uppercase tracking-widest font-black text-emerald-700">
-                        Estimativa
-                      </p>
-                      <div className="flex items-end gap-4 mt-1">
-                        <div>
-                          <p className="text-[22px] font-black text-[#0D233A] leading-none">
-                            {numero(analise.estimativa.populacao)}
-                          </p>
-                          <p className="text-[10px] font-bold text-slate-500 mt-0.5 flex items-center gap-1">
-                            <Users className="w-3 h-3" /> moradores
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[16px] font-black text-[#0D233A] leading-none">
-                            {numero(analise.estimativa.domicilios)}
-                          </p>
-                          <p className="text-[10px] font-bold text-slate-500 mt-0.5 flex items-center gap-1">
-                            <Home className="w-3 h-3" /> domicílios
-                          </p>
-                        </div>
-                      </div>
-                      <p className="text-[10px] font-semibold text-emerald-800/70 mt-2 leading-snug">
-                        Setores parciais entram pela fração de área. É
-                        aproximação, não contagem.
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 p-3">
-                      <p className="text-[10px] uppercase tracking-widest font-black text-slate-400">
-                        Piso exato
-                      </p>
-                      <div className="flex items-end gap-4 mt-1">
-                        <p className="text-[18px] font-black text-[#0D233A] leading-none">
-                          {numero(analise.exato.populacao)}
-                        </p>
-                        <p className="text-[13px] font-black text-slate-600 leading-none">
-                          {numero(analise.exato.domicilios)} dom.
-                        </p>
-                      </div>
-                      <p className="text-[10px] font-semibold text-slate-400 mt-1.5 leading-snug">
-                        Só os setores inteiramente dentro do círculo. Isto é
-                        contagem: use quando a decisão não aceita aproximação.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      {[
-                        { r: 'Setores', v: analise.setores.tocados },
-                        { r: 'Inteiros', v: analise.setores.inteiros },
-                        { r: 'Parciais', v: analise.setores.parciais }
-                      ].map((item) => (
-                        <div
-                          key={item.r}
-                          className="rounded-xl border border-slate-100 py-2"
-                        >
-                          <p className="text-[15px] font-black text-[#0D233A] leading-none">
-                            {item.v}
-                          </p>
-                          <p className="text-[9.5px] font-bold text-slate-400 mt-0.5">
-                            {item.r}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <p className="text-[10.5px] font-semibold text-slate-400">
-                      Área medida: {analise.areaKm2.toFixed(2)} km² ·{' '}
-                      {numero(Math.round(analise.estimativa.densidade))} hab/km²
-                      {analise.parcialmenteForaDaCobertura &&
-                        ' · parte da área está fora da cobertura'}
-                    </p>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* --------------------------------------------------- BAIRROS --- */}
-        {aba === 'bairros' && (
-          <div>
-            {!municipio ? (
-              <p className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
-                Escolha o município acima
-              </p>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <div className="relative flex items-center bg-white border border-slate-200 rounded-xl h-9 px-2.5 flex-1 focus-within:ring-2 focus-within:ring-blue-500/20">
-                    <Search className="w-3.5 h-3.5 text-slate-400 mr-2 shrink-0" />
-                    <input
-                      type="text"
-                      value={buscaBairro}
-                      onChange={(e) => setBuscaBairro(e.target.value)}
-                      placeholder="Buscar bairro..."
-                      className="bg-transparent border-none w-full text-[11.5px] font-semibold text-slate-700 placeholder-slate-400 focus:outline-hidden"
-                    />
-                  </div>
-                  <select
-                    value={ordem}
-                    onChange={(e) => setOrdem(e.target.value as any)}
-                    className="h-9 px-2 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 cursor-pointer focus:outline-hidden"
-                  >
-                    <option value="populacao">População</option>
-                    <option value="densidade">Densidade</option>
-                    <option value="nome">Nome</option>
-                  </select>
-                </div>
-
-                {/* Desenho no mapa: a mancha é o que a lista não mostra. */}
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const ligando = !desenharNoMapa;
-                      setDesenharNoMapa(ligando);
-                      // Ligar depois de carregar sem polígono exige recarregar:
-                      // a geometria não vem por padrão, e não dá para inventá-la.
-                      if (ligando && bairros.length > 0 && !bairros[0].geometria) {
-                        carregarBairros(true);
-                      }
-                    }}
-                    className={`h-8 px-2.5 rounded-lg border text-[10.5px] font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
-                      desenharNoMapa
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                    }`}
-                    title="Pintar os bairros no mapa pela métrica escolhida"
-                  >
-                    <MapIcon className="w-3.5 h-3.5" />
-                    No mapa
-                  </button>
-
-                  <select
-                    value={metrica}
-                    onChange={(e) => setMetrica(e.target.value as any)}
-                    disabled={!desenharNoMapa}
-                    className="h-8 px-2 bg-white border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden disabled:opacity-50"
-                  >
-                    <option value="populacao">Pintar por população</option>
-                    <option value="densidade">Pintar por densidade</option>
-                    <option value="domicilios">Pintar por domicílios</option>
-                  </select>
-
-                  {carregandoDesenho && (
-                    <Loader2 className="w-3.5 h-3.5 text-emerald-600 animate-spin shrink-0" />
-                  )}
-                </div>
-
-                {bairroDosSetores && (
-                  <p className="mt-2 text-[10.5px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5 leading-snug flex items-center justify-between gap-2">
-                    <span>
-                      Mostrando {numero(setoresNaTela.length)} setores de{' '}
-                      {bairroDosSetores.nome}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setBairroDosSetores(null)}
-                      className="text-[10px] font-black uppercase tracking-wider text-emerald-700 hover:underline cursor-pointer shrink-0"
-                    >
-                      Ver a cidade
-                    </button>
-                  </p>
-                )}
-
-                {/* Somar bairros não dá o município, e a tela diz por quê. */}
-                {municipio.setoresSemBairro !== undefined &&
-                  municipio.setoresSemBairro > 0 && (
-                    <p className="mt-2 text-[10px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug flex items-start gap-1.5">
-                      <Info className="w-3 h-3 shrink-0 mt-0.5" />
-                      {municipio.setoresSemBairro} setores de{' '}
-                      {municipio.nome} ficam fora da divisão por bairros. Somar
-                      a lista não dá o total do município.
-                    </p>
-                  )}
-
-                {/*
-                  O GRÁFICO ANTES DA LISTA.
-
-                  A lista responde "quanto tem em cada um" e é ótima nisso. Ela
-                  não responde "quantos bairros eu preciso cobrir para falar com
-                  metade da cidade" — para isso o olho teria de somar barra por
-                  barra até chegar na metade, e ninguém faz isso. A soma é feita
-                  no gráfico, o corte fica desenhado, e a lista continua logo
-                  abaixo para conferir número por número.
-
-                  Ele usa TODOS os bairros carregados, e não a lista filtrada:
-                  concentração calculada em cima de uma busca por texto seria um
-                  número errado com cara de certo.
-                */}
-                {!carregandoBairros && bairros.length > 0 && (
-                  <div className="mt-3">
-                    <ConcentracaoDeBairros
-                      bairros={bairros.map((b) => ({
-                        codigo: b.codigo,
-                        nome: b.nome,
-                        populacao: b.populacao,
-                        domicilios: b.domicilios,
-                        areaKm2: b.areaKm2
-                      }))}
-                      emFoco={recorteEmFoco}
-                      onFocar={(codigo) => onRecorteEmFoco?.(codigo)}
-                      onAbrir={(bairro) =>
-                        carregarCenso('bairro', bairro.codigo, bairro.nome)
-                      }
-                    />
-
-                    {/*
-                      A segunda pergunta, logo abaixo da primeira: onde a gente
-                      está junta. Panfletagem não se mede em moradores, se mede
-                      em moradores por hora de caminhada.
-                    */}
-                    <div className="mt-2">
-                      <GenteJunta
-                        bairros={bairros.map((b) => ({
-                          codigo: b.codigo,
-                          nome: b.nome,
-                          populacao: b.populacao,
-                          domicilios: b.domicilios,
-                          areaKm2: b.areaKm2
-                        }))}
-                        emFoco={recorteEmFoco}
-                        onFocar={(codigo) => onRecorteEmFoco?.(codigo)}
-                        onAbrir={(bairro) =>
-                          carregarCenso('bairro', bairro.codigo, bairro.nome)
-                        }
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {carregandoBairros ? (
-                  <p className="py-8 text-center text-[11px] font-bold text-slate-400 flex items-center justify-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Carregando bairros...
-                  </p>
-                ) : (
-                  <div className="mt-2 grid grid-cols-1 @2xl:grid-cols-2 @5xl:grid-cols-3 gap-1.5">
-                    {bairrosNaTela.map((bairro, posicao) => {
-                      const densidade =
-                        bairro.areaKm2 && bairro.populacao
-                          ? Math.round(bairro.populacao / bairro.areaKm2)
-                          : null;
-                      return (
-                        <div
-                          key={bairro.codigo}
-                          onMouseEnter={() => onRecorteEmFoco?.(bairro.codigo)}
-                          onMouseLeave={() => onRecorteEmFoco?.(null)}
-                          className={`w-full p-2.5 rounded-xl border cursor-pointer transition-all flex items-center gap-2.5 ${
-                            recorteEmFoco === bairro.codigo
-                              ? 'border-[#015FC9]/40 bg-[#EFF4FB]'
-                              : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50/60'
-                          }`}
-                          onClick={() =>
-                            carregarCenso('bairro', bairro.codigo, bairro.nome)
-                          }
-                        >
-                          <span className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10.5px] font-black flex items-center justify-center shrink-0">
-                            {posicao + 1}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[12.5px] font-black text-slate-800 truncate leading-tight">
-                              {bairro.nome}
-                            </span>
-                            <span className="block text-[10.5px] font-semibold text-slate-400 mt-0.5">
-                              {numero(bairro.populacao)} hab ·{' '}
-                              {numero(bairro.domicilios)} dom
-                              {densidade !== null && ` · ${numero(densidade)} hab/km²`}
-                            </span>
-                          </span>
-                          {/* Descer ao setor é outra pergunta, então é outro
-                              botão: clicar no bairro abre o Censo dele. */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              abrirSetores(bairro);
-                            }}
-                            title={
-                              bairroDosSetores?.codigo === bairro.codigo
-                                ? 'Esconder os setores deste bairro'
-                                : 'Ver os setores censitários deste bairro'
-                            }
-                            className={`h-7 px-2 rounded-lg border text-[9.5px] font-black uppercase tracking-wider cursor-pointer transition-all shrink-0 ${
-                              bairroDosSetores?.codigo === bairro.codigo
-                                ? 'bg-emerald-600 border-emerald-600 text-white'
-                                : 'bg-white border-slate-200 text-slate-500 hover:border-emerald-400 hover:text-emerald-700'
-                            }`}
-                          >
-                            Setores
-                          </button>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                        </div>
-                      );
-                    })}
-                    {bairrosNaTela.length === 0 && (
-                      <p className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
-                        Nenhum bairro encontrado
-                      </p>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {/* --------------------------------------------------- SETORES --- */}
-        {aba === 'setores' && (
-          <div>
-            {setoresNaTela.length === 0 && carregandoDesenho ? (
-              /*
-                A ESPERA É A TELA, e ela diz de quanto é.
-                A malha vem em páginas; uma barra parada sem número faz parecer
-                travado justamente quando está funcionando.
-              */
-              <div className="py-10 text-center">
-                <Loader2 className="w-5 h-5 animate-spin mx-auto text-[#015FC9]" />
-                <p className="mt-2 text-[12px] font-black text-[#0D233A]">
-                  Carregando a malha de setores
-                </p>
-                {progressoSetores && progressoSetores.total > 0 && (
-                  <>
-                    <p className="mt-0.5 text-[11px] font-bold text-slate-400 tabular-nums">
-                      {numero(progressoSetores.lidos)} de{' '}
-                      {numero(progressoSetores.total)}
-                    </p>
-                    <span className="mt-2 mx-auto block w-40 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                      <span
-                        className="block h-full rounded-full bg-[#015FC9] transition-[width] duration-300"
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            (progressoSetores.lidos / progressoSetores.total) * 100
-                          )}%`
-                        }}
-                      />
-                    </span>
-                  </>
-                )}
-                <p className="mt-2 text-[10.5px] font-semibold text-slate-400 leading-snug px-4">
-                  O setor é a menor peça do Censo — algumas centenas de
-                  domicílios. São muitos, e o desenho de cada um vem junto.
-                </p>
-              </div>
-            ) : setoresNaTela.length === 0 ? (
-              /*
-                TELA VAZIA TEM TRÊS MOTIVOS, E CADA UM PEDE OUTRA COISA.
-
-                Carga que quebrou pede um botão. Filtro de bairro sem setor
-                pede que se tire o filtro. Só o terceiro caso é mesmo ausência
-                de dado — e confundir os três fazia a tela mandar desistir de
-                uma malha que estava lá o tempo todo.
-              */
-              <div className="py-8 text-center">
-                {falhaDeSetores ? (
-                  <>
-                    <p className="text-[11.5px] font-semibold text-slate-500 leading-snug px-2">
-                      A malha de setores não chegou inteira — a consulta falhou
-                      no caminho. O dado existe; foi o carregamento que parou.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={carregarSetoresDaCidade}
-                      className="mt-3 h-8 px-3.5 bg-[#015FC9] hover:bg-[#0150ab] text-white text-[10.5px] font-black uppercase tracking-wider rounded-lg cursor-pointer"
-                    >
-                      Tentar de novo
-                    </button>
-                  </>
-                ) : (
-                  <p className="text-[11.5px] font-semibold text-slate-500 leading-snug px-2">
-                    {!municipio
-                      ? 'Escolha um município para ver a malha de setores.'
-                      : bairroDosSetores
-                        ? `Nenhum setor deste bairro está na malha carregada. Tire o filtro para ver a cidade inteira.`
-                        : 'Este município ainda não tem a malha de setores publicada.'}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-[12.5px] font-black text-[#0D233A] truncate">
-                      {bairroDosSetores ? bairroDosSetores.nome : municipio?.nome}
-                    </p>
-                    <p className="text-[10.5px] font-semibold text-slate-400">
-                      {numero(setoresNaTela.length)}{' '}
-                      {setoresNaTela.length === 1 ? 'setor' : 'setores'} ·{' '}
-                      {numero(
-                        setoresNaTela.reduce(
-                          // null é ausência: entra fora da soma, não como zero.
-                          (soma, s) => soma + (s.populacao ?? 0),
-                          0,
-                        ),
-                      )}{' '}
-                      hab somados
-                      {carregandoDesenho && progressoSetores && (
-                        <span className="text-[#015FC9]">
-                          {' '}· carregando {numero(progressoSetores.lidos)} de{' '}
-                          {numero(progressoSetores.total)}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  {/*
-                    O bairro aqui é filtro, não porta de entrada: sair dele
-                    devolve a cidade inteira, e não uma tela vazia pedindo que
-                    se escolha outro.
-                  */}
-                  {bairroDosSetores && (
-                    <button
-                      type="button"
-                      onClick={() => setBairroDosSetores(null)}
-                      className="h-8 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 text-[10px] font-black uppercase tracking-wider cursor-pointer shrink-0"
-                    >
-                      Ver a cidade
-                    </button>
-                  )}
-                </div>
-
-                {/* Setor com dado faltando na lista: avisar é melhor que somar. */}
-                {setoresNaTela.some((s) => s.populacao === null) && (
-                  <p className="mt-2 text-[10px] font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 leading-snug flex items-start gap-1.5">
-                    <Info className="w-3 h-3 shrink-0 mt-0.5" />
-                    {setoresNaTela.filter((s) => s.populacao === null).length} setor(es)
-                    sem dado divulgado. A soma acima é parcial — ausência não é
-                    zero.
-                  </p>
-                )}
-
-                {/*
-                  A LISTA MOSTRA O COMEÇO, O MAPA MOSTRA TUDO.
-
-                  Dois mil setores em linhas seria meio segundo de tela travada
-                  a cada rolagem, para uma lista que ninguém lê até o fim —
-                  código de setor não se procura lendo. Quem quer um recorte usa
-                  o filtro de bairro; quem quer o conjunto olha o mapa, que é
-                  onde ele significa alguma coisa.
-                */}
-                <div className="mt-2 grid grid-cols-1 @2xl:grid-cols-2 @5xl:grid-cols-3 gap-1.5">
-                  {setoresNaTela.slice(0, 120).map((setor) => {
-                    const densidade =
-                      setor.areaKm2 && setor.populacao !== null
-                        ? Math.round(setor.populacao / setor.areaKm2)
-                        : null;
-                    // Acima de 10%, boa parte do setor foi estimada pelo
-                    // instituto: o número existe, mas é menos firme.
-                    const muitoImputado =
-                      setor.percentualDomiciliosImputados !== null &&
-                      setor.percentualDomiciliosImputados >= 10;
-                    return (
-                      <div
-                        key={setor.codigo}
-                        onMouseEnter={() => onRecorteEmFoco?.(setor.codigo)}
-                        onMouseLeave={() => onRecorteEmFoco?.(null)}
-                        onClick={() =>
-                          carregarCenso(
-                            'setor',
-                            setor.codigo,
-                            `Setor ${setor.codigo.slice(-6)}`,
-                          )
-                        }
-                        title={setor.codigo}
-                        className={`w-full p-2.5 rounded-xl border cursor-pointer transition-all flex items-center gap-2.5 ${
-                          recorteEmFoco === setor.codigo
-                            ? 'border-[#015FC9]/40 bg-[#EFF4FB]'
-                            : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50/60'
-                        }`}
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-[12px] font-black text-slate-800 truncate leading-tight font-mono">
-                            …{setor.codigo.slice(-6)}
-                          </span>
-                          <span className="block text-[10.5px] font-semibold text-slate-400 mt-0.5">
-                            {numero(setor.populacao)} hab ·{' '}
-                            {numero(setor.domicilios)} dom
-                            {densidade !== null &&
-                              ` · ${numero(densidade)} hab/km²`}
-                          </span>
-                          {muitoImputado && (
-                            <span className="block text-[9.5px] font-black uppercase tracking-wider text-amber-600 mt-0.5">
-                              {setor.percentualDomiciliosImputados!.toFixed(1)}%
-                              estimado pelo instituto
-                            </span>
-                          )}
-                        </span>
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {setoresNaTela.length > 120 && (
-                  <p className="mt-2 text-[10.5px] font-semibold text-slate-400 leading-snug text-center">
-                    Mostrando 120 de {numero(setoresNaTela.length)} setores na
-                    lista. Todos estão desenhados no mapa — filtre por bairro
-                    para encurtar.
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
         {/* ----------------------------------------------------- CENSO --- */}
-        {aba === 'censo' && (
           <div>
             {!recorte ? (
               <p className="py-8 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
-                Escolha um município ou bairro
+                Escolha um município
               </p>
             ) : (
               <>
@@ -1721,27 +1070,23 @@ export default function InteligenciaTerritorial({
 
                 {censo?.status === 'ok' && (
                   <div className="mt-3">
+                    {/*
+                      Sem onVerSetores: a lista de setores não tem mais tela
+                      própria neste painel. Um botão "ver setores" sem lugar
+                      para ir seria pior do que não existir — o PainelDoCenso
+                      já sabe virar a linha em texto simples quando isto vem
+                      vazio.
+                    */}
                     <PainelDoCenso
                       censo={censo}
                       populacaoDoRecorte={populacaoDoRecorteAtual}
                       domiciliosDoRecorte={domiciliosDoRecorteAtual}
-                      onVerSetores={
-                        recorte?.nivel === 'bairro'
-                          ? () => {
-                              const alvo = bairros.find((b) => b.codigo === recorte.codigo);
-                              if (alvo) abrirSetores(alvo);
-                            }
-                          : recorte?.nivel === 'municipio'
-                            ? () => setAba('setores')
-                            : undefined
-                      }
                     />
                   </div>
                 )}
               </>
             )}
           </div>
-        )}
       </div>
     </div>
   );
