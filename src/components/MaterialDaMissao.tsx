@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { DatabaseService } from '../databaseClient';
 import { MaterialDeApoio } from '../types';
+import BotaoDeBaixar from './BotaoDeBaixar';
 
 /**
  * Material de apoio da missão: o que o comitê manda junto com a ordem.
@@ -651,8 +652,12 @@ export function VisorDoMaterial({
   aoProximo?: () => void;
   posicao?: { atual: number; total: number };
 }) {
-  const nome = rotulo || rotuloDoMaterial(item);
-  const paraBaixar = nomeParaBaixar(item);
+  // Numerado quando o visor passeia por vários: baixar três fotos seguidas
+  // não pode dar três arquivos chamados "Foto".
+  const ordem = posicao && posicao.total > 1 ? posicao.atual : undefined;
+  const nome = rotulo || rotuloDoMaterial(item, ordem);
+  const formato = formatoDoMaterial(item).toLowerCase();
+  const paraBaixar = rotulo ? (formato ? `${rotulo}.${formato}` : rotulo) : nomeParaBaixar(item, ordem);
 
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
@@ -718,14 +723,7 @@ export function VisorDoMaterial({
           Este formato não abre aqui dentro. Baixe para ver no aplicativo do
           seu aparelho — a tela continua aberta atrás.
         </p>
-        <a
-          href={item.url}
-          download={paraBaixar}
-          className="inline-flex items-center justify-center gap-1.5 w-full px-3 py-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider"
-        >
-          <Download className="w-3.5 h-3.5" />
-          Baixar arquivo
-        </a>
+        <BotaoDeBaixar url={item.url} nome={paraBaixar} variante="bloco" rotulo="Baixar arquivo" />
       </div>
     );
 
@@ -743,16 +741,7 @@ export function VisorDoMaterial({
             {posicao.atual}/{posicao.total}
           </span>
         )}
-        <a
-          href={item.url}
-          download={paraBaixar}
-          onClick={e => e.stopPropagation()}
-          aria-label="Baixar"
-          title="Baixar"
-          className="w-9 h-9 rounded-full bg-white/15 text-white flex items-center justify-center shrink-0"
-        >
-          <Download className="w-4 h-4" />
-        </a>
+        <BotaoDeBaixar url={item.url} nome={paraBaixar} />
         <button
           type="button"
           onClick={aoFechar}

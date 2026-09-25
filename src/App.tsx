@@ -33,6 +33,8 @@ import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import FichaDoRecorteNoMapa from "./components/FichaDoRecorteNoMapa";
 import CarregandoOperacional from "./components/CarregandoOperacional";
 import TelaDeLogin from "./components/TelaDeLogin";
+import FiltroDeFavoritos from "./components/FiltroDeFavoritos";
+import Contador from "./components/Contador";
 import PainelDeltaOperacional from "./components/operacional/PainelDeltaOperacional";
 import CadastroDeltaOperacional from "./components/operacional/CadastroDeltaOperacional";
 import AbaDeltaOperacional from "./components/operacional/AbaDeltaOperacional";
@@ -46,6 +48,7 @@ import CheckInChat, { MissaoDoCampo } from "./components/CheckInChat";
 import {
   EditorDeMaterial,
   ItemMaterial,
+  VisorDoMaterial,
 } from "./components/MaterialDaMissao";
 import {
   EtiquetaDePrioridade,
@@ -973,6 +976,60 @@ export default function App() {
           },
         ];
   });
+
+  /**
+   * Foto ou vídeo de evidência aberto no visor do sistema.
+   *
+   * As miniaturas abriam o arquivo numa aba nova, e quem estava conferindo os
+   * check-ins saía do painel para ver uma foto. Agora abre por cima, com as
+   * setas para as outras evidências e o botão que baixa de verdade.
+   */
+  const [visorDeEvidencias, setVisorDeEvidencias] = useState<{
+    origem: "ficha" | "painel";
+    itens: MaterialDeApoio[];
+    indice: number;
+  } | null>(null);
+  const abrirEvidencias = (
+    origem: "ficha" | "painel",
+    midias: any[],
+    indice: number,
+  ) =>
+    setVisorDeEvidencias({
+      origem,
+      indice,
+      itens: midias.map((m: any, i: number) => {
+        const video = m.kind === "video" || m.type === "video";
+        return {
+          id: m.id || `evidencia-${i}`,
+          tipo: video ? ("video" as const) : ("imagem" as const),
+          url: m.url,
+          nome: `${video ? "Vídeo" : "Foto"} ${i + 1} do check-in`,
+        };
+      }),
+    });
+  const visorDe = (origem: "ficha" | "painel") =>
+    visorDeEvidencias && visorDeEvidencias.origem === origem ? (
+      <VisorDoMaterial
+        item={visorDeEvidencias.itens[visorDeEvidencias.indice]}
+        aoFechar={() => setVisorDeEvidencias(null)}
+        posicao={{
+          atual: visorDeEvidencias.indice + 1,
+          total: visorDeEvidencias.itens.length,
+        }}
+        aoAnterior={() =>
+          setVisorDeEvidencias((v) =>
+            v
+              ? { ...v, indice: (v.indice - 1 + v.itens.length) % v.itens.length }
+              : v,
+          )
+        }
+        aoProximo={() =>
+          setVisorDeEvidencias((v) =>
+            v ? { ...v, indice: (v.indice + 1) % v.itens.length } : v,
+          )
+        }
+      />
+    ) : null;
 
   /** Qual caminho de cadastro de integrante está aberto. */
   const [teamModal, setTeamModal] = useState<
@@ -5149,6 +5206,7 @@ export default function App() {
     checkInsTotal: checkInsDoMapa.length,
     missoesVisiveis: filteredPins.length + filteredAreas.length,
     missoesTotal: missoesNoFoco,
+    favoritos: filteredCheckIns.filter((c: any) => c.favorite).length,
   };
 
   /**
@@ -5167,6 +5225,7 @@ export default function App() {
     ate: filtroAte,
     verCheckIns,
     verMissoes,
+    soFavoritos: mapFilter === "favoritos",
     prazos: filtroPrazos,
   };
 
@@ -5174,13 +5233,27 @@ export default function App() {
     setFiltroDe(novo.de);
     setFiltroAte(novo.ate);
     setFiltroPrazos(novo.prazos);
-    if (novo.verCheckIns && novo.verMissoes) setMapFilter("all");
-    else if (novo.verCheckIns)
-      // Quem estava vendo só os favoritos continua nos favoritos: desligar
-      // as missões não é pedir para rever o resto dos check-ins.
-      setMapFilter(mapFilter === "favoritos" ? "favoritos" : "checkins");
+    if (novo.verCheckIns && novo.soFavoritos) setMapFilter("favoritos");
+    else if (novo.verCheckIns && novo.verMissoes) setMapFilter("all");
+    else if (novo.verCheckIns) setMapFilter("checkins");
     else if (novo.verMissoes) setMapFilter("markers");
     else setMapFilter("nada");
+  };
+
+  /*
+   * O botão de favoritos da barra lembra de onde veio: desligar volta ao que
+   * o mapa mostrava antes (tudo, só check-ins...), e não a um "tudo" que
+   * desfaria o recorte que a pessoa tinha montado.
+   */
+  const filtroAntesDosFavoritos = React.useRef<typeof mapFilter>("all");
+  const alternarFavoritos = () => {
+    if (mapFilter === "favoritos") {
+      setMapFilter(filtroAntesDosFavoritos.current || "all");
+      return;
+    }
+    filtroAntesDosFavoritos.current =
+      mapFilter === "nada" || mapFilter === "markers" ? "all" : mapFilter;
+    setMapFilter("favoritos");
   };
 
   /** O nível de prioridade que a missão guarda, quando ele ainda existe. */
@@ -8323,13 +8396,14 @@ export default function App() {
                     Evidências ({checkInCompleto.midias.length})
                   </p>
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                    {checkInCompleto.midias.map((midia: any) => (
-                      <a
+                    {checkInCompleto.midias.map((midia: any, i: number) => (
+                      <button
+                        type="button"
                         key={midia.id || midia.url}
-                        href={midia.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 block"
+                        onClick={() =>
+                          abrirEvidencias("ficha", checkInCompleto.midias, i)
+                        }
+                        className="group relative aspect-square rounded-xl overflow-hidden bg-slate-100 block cursor-zoom-in"
                       >
                         {midia.kind === "video" ? (
                           <>
@@ -8350,9 +8424,10 @@ export default function App() {
                             className="w-full h-full object-cover"
                           />
                         )}
-                      </a>
+                      </button>
                     ))}
                   </div>
+                  {visorDe("ficha")}
                 </div>
               )}
 
@@ -8936,20 +9011,24 @@ export default function App() {
 
         {/* CONFIGURAÇÕES DO SISTEMA */}
         {telaAdm === "configuracoes" && (
+          <div className="anim-tela flex flex-col flex-1">
           <ConfiguracoesAdmin
             padraoRedirecionamento={REDIRECIONAMENTO_PADRAO}
             dominiosDeAcesso={DOMINIOS_DE_ACESSO}
             notify={triggerNotification}
             onTurnosMudarem={setTurnosDaCampanha}
           />
+          </div>
         )}
 
         {/* RELATÓRIOS GUARDADOS DO NEO */}
         {telaAdm === "relatorios" && (
+          <div className="anim-tela flex flex-col flex-1">
           <RelatoriosSalvos
             notify={triggerNotification}
             askConfirmation={askConfirmation}
           />
+          </div>
         )}
 
         {/* QUADROS DE NÚMEROS DO SISTEMA — só na lista, a ficha tem os seus */}
@@ -8988,10 +9067,11 @@ export default function App() {
                 texto: "text-purple-600",
                 icone: <MapPin className="w-5 h-5" />,
               },
-            ].map((cartao) => (
+            ].map((cartao, i) => (
               <div
                 key={cartao.rotulo}
-                className="relative bg-white border border-[#E1E8ED] rounded-3xl p-5 shadow-xs overflow-hidden"
+                className="anim-cascata card-eleva relative bg-white border border-[#E1E8ED] rounded-3xl p-5 shadow-xs overflow-hidden"
+                style={{ "--i": i } as React.CSSProperties}
               >
                 {/* Faixa da cor do cartão, como no desenho */}
                 <span
@@ -9011,7 +9091,7 @@ export default function App() {
                         {cartao.rotulo}
                       </p>
                       <p className="text-2xl font-black text-slate-800 mt-0.5 leading-none">
-                        {cartao.valor}
+                        <Contador valor={cartao.valor} />
                       </p>
                     </div>
                   </div>
@@ -9020,11 +9100,13 @@ export default function App() {
                       leitor de tela — ela não diz nada que o número já não diga. */}
                   <svg
                     viewBox="0 0 90 32"
-                    className="w-[90px] h-8 shrink-0 hidden sm:block"
+                    className="anim-traco w-[90px] h-8 shrink-0 hidden sm:block"
+                    style={{ "--i": i } as React.CSSProperties}
                     fill="none"
                     aria-hidden="true"
                   >
                     <path
+                      pathLength={1}
                       d="M2 26 L18 18 L32 22 L48 10 L62 14 L76 5 L88 8"
                       stroke={cartao.cor}
                       strokeWidth="2"
@@ -9620,7 +9702,7 @@ export default function App() {
 
 
             return (
-          <div className="flex flex-col flex-1 gap-5 font-sans">
+          <div key={inspectedCandidate.id} className="anim-tela flex flex-col flex-1 gap-5 font-sans">
             {/* CABEÇALHO DO CLIENTE */}
             <div className="bg-white border border-slate-200 rounded-3xl px-6 py-5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div className="flex items-center gap-4 min-w-0">
@@ -9713,7 +9795,7 @@ export default function App() {
 
             {/* VISÃO GERAL */}
             {abaCliente === "geral" && (
-              <div className="grid grid-cols-1 xl:grid-cols-[1.62fr_1fr] gap-4 items-start">
+              <div className="anim-tela grid grid-cols-1 xl:grid-cols-[1.62fr_1fr] gap-4 items-start">
                 {/* ================= COLUNA DA ESQUERDA ================= */}
                 <div className="flex flex-col gap-4 min-w-0">
                   {/* MAPA OPERACIONAL */}
@@ -10204,14 +10286,17 @@ export default function App() {
 
             {/* EQUIPE */}
             {abaCliente === "operacional" && (
+              <div className="anim-tela">
               <AbaDeltaOperacional
                 client={inspectedCandidate}
                 notify={triggerNotification}
                 askConfirmation={askConfirmation}
               />
+              </div>
             )}
 
             {abaCliente === "metas" && (
+              <div className="anim-tela">
               <PainelDeMetas
                 candidateId={inspectedCandidate.id}
                 equipe={equipeDoCliente}
@@ -10220,9 +10305,10 @@ export default function App() {
                 notificar={triggerNotification}
                 bancoLigado={isDatabaseConfigured}
               />
+              </div>
             )}
 
-            {abaCliente === "equipe" && (() => {
+            {abaCliente === "equipe" && <div key="aba-equipe" className="anim-tela">{(() => {
               const agora = new Date();
               const inicioDeHoje = new Date(
                 agora.getFullYear(),
@@ -10460,7 +10546,7 @@ export default function App() {
                           Total de membros
                         </p>
                         <p className="text-3xl font-black text-[#0D233A] leading-tight">
-                          {equipeDoCliente.length}
+                          <Contador valor={equipeDoCliente.length} />
                         </p>
                       </div>
                     </div>
@@ -10473,7 +10559,7 @@ export default function App() {
                           Em campo agora
                         </p>
                         <p className="text-3xl font-black text-[#0D233A] leading-tight flex items-baseline gap-2">
-                          {emCampoAgora}
+                          <Contador valor={emCampoAgora} />
                           <span className="text-[12px] font-bold text-emerald-600">
                             {emCampoAgora === 1 ? "Ativo" : "Ativos"}
                           </span>
@@ -10767,9 +10853,9 @@ export default function App() {
                   </div>
                 </div>
               );
-            })()}
+            })()}</div>}
 
-            {abaCliente === "tipos" && (() => {
+            {abaCliente === "tipos" && <div key="aba-tipos" className="anim-tela">{(() => {
               const agora = new Date();
               const inicioDoPeriodo =
                 periodoTipos === "semana"
@@ -11212,10 +11298,10 @@ export default function App() {
                   </div>
                 </div>
               );
-            })()}
+            })()}</div>}
 
             {/* CHECK-INS */}
-            {abaCliente === "checkins" && (() => {
+            {abaCliente === "checkins" && <div key="aba-checkins" className="anim-tela">{(() => {
               const agora = new Date();
               const inicioDeHoje = new Date(
                 agora.getFullYear(),
@@ -11923,13 +12009,14 @@ export default function App() {
                                 Evidências
                               </p>
                               <div className="grid grid-cols-4 gap-1.5">
-                                {midiasDoPainel.slice(0, 4).map((midia: any) => (
-                                  <a
+                                {midiasDoPainel.slice(0, 4).map((midia: any, i: number) => (
+                                  <button
+                                    type="button"
                                     key={midia.id || midia.url}
-                                    href={midia.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 block"
+                                    onClick={() =>
+                                      abrirEvidencias("painel", midiasDoPainel, i)
+                                    }
+                                    className="group relative aspect-square rounded-xl overflow-hidden bg-slate-100 block cursor-zoom-in"
                                   >
                                     {midia.kind === "video" ? (
                                       <>
@@ -11950,9 +12037,10 @@ export default function App() {
                                         className="w-full h-full object-cover"
                                       />
                                     )}
-                                  </a>
+                                  </button>
                                 ))}
                               </div>
+                  {visorDe("painel")}
                             </div>
                           )}
 
@@ -12150,7 +12238,7 @@ export default function App() {
                   </div>
                 </div>
               );
-            })()}
+            })()}</div>}
           </div>
             );
           })()
@@ -12194,7 +12282,7 @@ export default function App() {
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {filteredClients.map((client) => {
+                {filteredClients.map((client, indiceDoCliente) => {
                   const teamCount = supporters.filter(
                     (s: any) =>
                       s.candidate_id === client.id || s.candidateId === client.id,
@@ -12208,7 +12296,10 @@ export default function App() {
                   return (
                     <div
                       key={client.id}
-                      className="bg-white border border-slate-200 rounded-3xl shadow-xs hover:shadow-lg transition-all overflow-hidden flex flex-col group"
+                      className="anim-cascata card-eleva bg-white border border-slate-200 rounded-3xl shadow-xs hover:shadow-lg transition-all overflow-hidden flex flex-col group"
+                      style={
+                        { "--i": Math.min(indiceDoCliente, 8) + 2 } as React.CSSProperties
+                      }
                     >
                       {/* CAPA ESCURA COM A FOTO DO CLIENTE */}
                       <div className="relative h-[92px] bg-[#0D233A] overflow-hidden">
@@ -12274,7 +12365,7 @@ export default function App() {
                               Equipe
                             </p>
                             <p className="text-xl font-black text-[#0D233A] leading-none mt-0.5">
-                              {teamCount}
+                              <Contador valor={teamCount} />
                             </p>
                             <p className="text-[10px] text-slate-400 font-semibold truncate">
                               membros vinculados
@@ -12291,7 +12382,7 @@ export default function App() {
                               Check-ins
                             </p>
                             <p className="text-xl font-black text-[#0D233A] leading-none mt-0.5">
-                              {checkInCount}
+                              <Contador valor={checkInCount} />
                             </p>
                             <p className="text-[10px] text-slate-400 font-semibold truncate">
                               registros realizados
@@ -15095,6 +15186,11 @@ export default function App() {
                   valor={estadoDoPeriodo}
                   onMudar={mudarPeriodo}
                   contagem={contagemDoPeriodo}
+                />
+                <FiltroDeFavoritos
+                  ligado={mapFilter === "favoritos"}
+                  quantos={contagemDoPeriodo.favoritos}
+                  onAlternar={alternarFavoritos}
                 />
                 {/*
                   As camadas do território ficam ao lado do recorte de data:

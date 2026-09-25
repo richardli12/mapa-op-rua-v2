@@ -784,6 +784,8 @@ export default function MapContainer({
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
+  /** Check-ins desenhados da última vez: só quem não estava surge animado. */
+  const idsDeCheckInNoMapaRef = useRef<Set<string>>(new Set());
 
   // Ficha nova, seletor fechado: abrir o próximo check-in já com a lista de
   // missões aberta seria oferecer uma escolha que ninguém pediu.
@@ -2110,6 +2112,8 @@ export default function MapContainer({
     checkInsGroup.clearLayers();
 
     if (mapFilter === 'markers' || mapFilter === 'nada') {
+      // Camada desligada: quando voltar, todos surgem de novo.
+      idsDeCheckInNoMapaRef.current = new Set();
       return;
     }
 
@@ -2118,7 +2122,23 @@ export default function MapContainer({
     const visiveis =
       mapFilter === 'favoritos' ? checkIns.filter(c => c.favorite) : checkIns;
 
+    /*
+     * QUEM ACABOU DE APARECER, SURGE.
+     *
+     * Só o marcador que não estava no mapa no desenho anterior entra com a
+     * animação — em cascata, um atrás do outro. Trocar o filtro ou o período
+     * faz os novos brotarem; um check-in que chega da rua surge sozinho; e o
+     * resto do mapa não pisca a cada atualização.
+     */
+    const anteriores = idsDeCheckInNoMapaRef.current;
+    const agora = new Set<string>();
+    let novos = 0;
+
     visiveis.forEach(checkIn => {
+      agora.add(checkIn.id);
+      const surge = !anteriores.has(checkIn.id);
+      const atraso = surge ? Math.min(novos++ * 22, 600) : 0;
+      const brilha = mapFilter === 'favoritos' && checkIn.favorite;
       // Check-in por missão usa o bonequinho verde de sempre. O check-in livre
       // vira um alerta pintado com a cor do grau de prioridade informado.
       const isFree = checkIn.mode === 'livre';
@@ -2166,9 +2186,9 @@ export default function MapContainer({
         : '';
 
       const checkInIcon = L.divIcon({
-        className: 'custom-div-icon drop-shadow-md',
+        className: `custom-div-icon drop-shadow-md${surge ? ' ck-marcador-entra' : ''}${brilha ? ' ck-fav-brilho' : ''}`,
         html: `
-          <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;">
+          <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; --atraso: ${atraso}ms;">
             ${avatarHtml}
             ${estrelaHtml}
           </div>
@@ -2237,6 +2257,7 @@ export default function MapContainer({
 
       checkInsGroup.addLayer(marker);
     });
+    idsDeCheckInNoMapaRef.current = agora;
   }, [checkIns, mapFilter]);
 
   /**
@@ -3375,6 +3396,34 @@ export default function MapContainer({
 
       {/* Map Element */}
       <div id="campaign-primary-map" ref={containerRef} className="w-full h-full bg-slate-100" />
+
+      {/*
+        SÓ FAVORITOS, E NENHUM FAVORITO.
+
+        Mapa vazio sem explicação faz alguém achar que quebrou — ou, pior,
+        que a equipe não trabalhou. Aqui o vazio diz por que está vazio e
+        oferece a saída.
+      */}
+      {mapFilter === 'favoritos' && (checkIns || []).filter(c => c.favorite).length === 0 && (
+        <div className="absolute inset-x-0 bottom-24 z-[1000] flex justify-center pointer-events-none px-4">
+          <div className="pointer-events-auto anim-sobe flex items-center gap-3 pl-3 pr-2 py-2 rounded-2xl bg-white/95 backdrop-blur border border-amber-200 shadow-2xl max-w-md">
+            <span className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+              <Star className="w-4.5 h-4.5 text-amber-500" />
+            </span>
+            <p className="text-[12px] font-semibold text-slate-600 leading-snug">
+              <strong className="text-slate-800">Nenhum check-in favorito aqui.</strong> Marque a
+              estrela na ficha do check-in para ele aparecer neste filtro.
+            </p>
+            <button
+              type="button"
+              onClick={() => setMapFilter('all')}
+              className="shrink-0 h-9 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black cursor-pointer"
+            >
+              Ver tudo
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* PESQUISA DE LUGARES (Google Maps, via SerpApi) */}
       {/* Ao lado do botão Voltar, que ocupa o canto esquerdo do topo. */}
