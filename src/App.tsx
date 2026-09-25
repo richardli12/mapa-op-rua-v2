@@ -1016,6 +1016,14 @@ export default function App() {
   >([]);
   const [recorteEmFoco, setRecorteEmFoco] = useState<string | null>(null);
   /**
+   * O recorte que o clique fixou.
+   *
+   * Separado do que está sob o cursor, de propósito: o cursor passeia, a
+   * ficha fixada fica. Sem essa separação, ler o Censo de um setor era
+   * equilibrar o mouse em cima dele — e qualquer tremida trocava a ficha.
+   */
+  const [recorteFixado, setRecorteFixado] = useState<string | null>(null);
+  /**
    * A gaveta de camadas da barra de cima.
    *
    * Ela é a dona do que o mapa pinta — métrica, recorte e força da mancha. O
@@ -1046,6 +1054,17 @@ export default function App() {
     desenhados: 0,
     erro: null,
   });
+  /*
+   * O fixado sai quando o desenho deixa de ter ele: trocar de bairros para
+   * setores, mudar de município ou desligar a camada. Ficar com um id que o
+   * mapa não mostra seria uma ficha falando de um lugar que sumiu da tela.
+   */
+  useEffect(() => {
+    if (!recorteFixado) return;
+    if (!recortesTerritoriais.some((r) => r.id === recorteFixado)) {
+      setRecorteFixado(null);
+    }
+  }, [recortesTerritoriais, recorteFixado]);
   const receberRecortes = React.useCallback(
     (lista: any[], escala: { corte: number; cor: string }[]) => {
       setRecortesTerritoriais(lista);
@@ -15134,12 +15153,18 @@ export default function App() {
           recortesTerritoriais={recortesTerritoriais}
           escalaTerritorial={escalaTerritorial}
           recorteEmFoco={recorteEmFoco}
+          recorteFixado={recorteFixado}
           opacidadeDosRecortes={camadas.opacidade}
           onRecorteSobOCursor={setRecorteEmFoco}
           enquadrarRecortes={territorioAberto}
           onRecorteClicado={(id) => {
-            setRecorteEmFoco(id);
-            setTerritorioAberto(true);
+            /*
+             * O clique fixa o setor na ficha do canto, e clicar de novo no
+             * mesmo solta. Não abre mais o painel de meia tela: ele fala do
+             * município inteiro, e quem clicou num setor queria o setor —
+             * o resto do Censo dele está no botão da própria ficha.
+             */
+            setRecorteFixado((atual) => (atual === id ? null : id));
           }}
           onEstabelecimentoSelecionado={(id) => {
             setLojaEmFoco(id);
@@ -15245,15 +15270,23 @@ export default function App() {
         />
 
         {/*
-          FICHA DO SETOR SOB O CURSOR.
+          FICHA DO SETOR: O FIXADO, OU O QUE ESTÁ SOB O CURSOR.
 
           Fica no canto do mapa, não colada no ponteiro: são quinze números do
-          Censo, e caixa que persegue o mouse não se lê.
+          Censo, e caixa que persegue o mouse não se lê. Com um setor fixado
+          pelo clique, ela fala só dele até ser solto.
         */}
         <FichaDoRecorteNoMapa
           recorte={
-            recortesTerritoriais.find((r) => r.id === recorteEmFoco) || null
+            recortesTerritoriais.find(
+              (r) => r.id === (recorteFixado || recorteEmFoco),
+            ) || null
           }
+          fixado={
+            !!recorteFixado &&
+            recortesTerritoriais.some((r) => r.id === recorteFixado)
+          }
+          onSoltar={() => setRecorteFixado(null)}
           uf={
             candidateLocation?.uf ||
             parseCandidateLocation(

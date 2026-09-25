@@ -5,7 +5,7 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, FilePlus, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ArrowLeft, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, FilePlus, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
 import { UnidadeDeSaude } from '../dados/ubs';
@@ -369,6 +369,11 @@ interface MapContainerProps {
   /** Faixas da escala de cor, do mais claro ao mais escuro. */
   escalaTerritorial?: { corte: number; cor: string }[];
   recorteEmFoco?: string | null;
+  /**
+   * O recorte que o clique fixou na ficha do canto. Ele fica marcado no mapa
+   * até ser solto — é o "este aqui" de quem está lendo o Censo de um lugar.
+   */
+  recorteFixado?: string | null;
   /** 0 a 1: quanto da mancha aparece. Quem decide é a gaveta de camadas. */
   opacidadeDosRecortes?: number;
   onRecorteClicado?: (id: string) => void;
@@ -650,6 +655,7 @@ export default function MapContainer({
   recortesTerritoriais,
   escalaTerritorial,
   recorteEmFoco,
+  recorteFixado = null,
   opacidadeDosRecortes = 1,
   onRecorteClicado,
   onRecorteSobOCursor,
@@ -865,6 +871,166 @@ export default function MapContainer({
       vivo = false;
     };
   }, [selectedCheckInForModal?.id]);
+
+  /*
+   * O CAMINHO DE VOLTA PARA A MISSÃO.
+   *
+   * "Ver feedback completo" troca a ficha da missão pela do check-in — dois
+   * modais empilhados escondem qual deles o X fecha. Só que trocar sem deixar
+   * caminho de volta obrigava a fechar tudo, achar o pino de novo no mapa,
+   * reabrir a missão e rolar de novo até o retorno seguinte. Quem está lendo
+   * os retornos de uma missão quer ler OS retornos: um atrás do outro, e
+   * voltar para onde estava.
+   *
+   * Por isso a ficha do check-in lembra de onde veio: qual missão, com que
+   * cor, e em que altura a ficha dela estava rolada. Voltar reabre a missão
+   * nesse mesmo ponto e acende o cartão do retorno que acabou de ser lido.
+   * Enquanto isso, as setas passam de um retorno para o próximo sem sair.
+   */
+  const [voltaParaMissao, setVoltaParaMissao] = useState<{
+    id: string;
+    tipo: 'pin' | 'area';
+    titulo: string;
+    cor: string;
+    rolagem: number;
+  } | null>(null);
+  /** De que lado o retorno seguinte entra: a ficha desliza no sentido da seta. */
+  const [sentidoDoRetorno, setSentidoDoRetorno] = useState<1 | -1 | 0>(0);
+  /** Cartão de retorno que acende quando se volta para a missão. */
+  const [retornoEmDestaque, setRetornoEmDestaque] = useState<string | null>(null);
+  const corpoDaMissaoRef = useRef<HTMLDivElement | null>(null);
+  const corpoDoCheckInRef = useRef<HTMLDivElement | null>(null);
+  /** Rolagem a restaurar assim que a ficha da missão remontar. */
+  const rolagemPendenteRef = useRef<{ topo: number; alvo: string | null } | null>(null);
+
+  /**
+   * Os retornos da missão de onde se veio, lidos da lista de agora.
+   *
+   * Da lista viva, e não de uma cópia tirada no clique: se um retorno for
+   * desvinculado aqui mesmo na ficha, ele sai da contagem na hora, em vez de
+   * continuar sendo "2 de 3" de uma missão que já não é a dele.
+   */
+  const retornosDaVolta = React.useMemo(
+    () =>
+      voltaParaMissao
+        ? (checkIns || []).filter((c: any) => c.missionId === voltaParaMissao.id)
+        : [],
+    [voltaParaMissao, checkIns]
+  );
+  const posicaoNaVolta = selectedCheckInForModal
+    ? retornosDaVolta.findIndex((c: any) => c.id === (selectedCheckInForModal as any).id)
+    : -1;
+
+  /** Da ficha da missão para a ficha de um retorno, lembrando o caminho. */
+  const abrirRetornoDaMissao = (checkIn: CheckIn) => {
+    if (!missaoAberta) return;
+    setVoltaParaMissao({
+      id: missaoAberta.id,
+      tipo: missaoAberta.tipo,
+      titulo: missaoAberta.titulo,
+      cor: missaoAberta.cor,
+      rolagem: corpoDaMissaoRef.current?.scrollTop || 0
+    });
+    setSentidoDoRetorno(0);
+    setMissaoAbertaRef(null);
+    setSelectedCheckInForModal(checkIn);
+  };
+
+  /** Fecha a ficha do check-in de vez: o caminho de volta vai junto. */
+  const fecharFichaDoCheckIn = () => {
+    setSelectedCheckInForModal(null);
+    setVoltaParaMissao(null);
+  };
+
+  /** Reabre a missão onde ela estava, com o retorno lido aceso. */
+  const voltarParaAMissao = () => {
+    const volta = voltaParaMissao;
+    if (!volta) return;
+    const lido = (selectedCheckInForModal as any)?.id || null;
+    rolagemPendenteRef.current = { topo: volta.rolagem, alvo: lido };
+    setSelectedCheckInForModal(null);
+    setVoltaParaMissao(null);
+    setMissaoAbertaRef({ id: volta.id, tipo: volta.tipo });
+  };
+
+  /** Anda entre os retornos da mesma missão sem sair da ficha. */
+  const irParaRetorno = (passo: 1 | -1) => {
+    const total = retornosDaVolta.length;
+    if (total < 2 || posicaoNaVolta < 0) return;
+    const proximo = retornosDaVolta[(posicaoNaVolta + passo + total) % total];
+    if (!proximo) return;
+    setSentidoDoRetorno(passo);
+    setSelectedCheckInForModal(proximo);
+  };
+
+  // Retorno novo, leitura do começo: abrir o seguinte já rolado até o fim
+  // do anterior faria parecer que a ficha nova não tem cabeçalho.
+  useEffect(() => {
+    if (corpoDoCheckInRef.current) corpoDoCheckInRef.current.scrollTop = 0;
+  }, [(selectedCheckInForModal as any)?.id]);
+
+  /*
+   * A ficha da missão remontou depois de um "voltar": devolve a rolagem e
+   * acende o cartão de onde se saiu. Antes da pintura, para a ficha não
+   * nascer no topo e pular para baixo diante de quem olha.
+   */
+  React.useLayoutEffect(() => {
+    const pendente = rolagemPendenteRef.current;
+    const corpo = corpoDaMissaoRef.current;
+    if (!pendente || !missaoAbertaRef || !corpo) return;
+    rolagemPendenteRef.current = null;
+    corpo.scrollTop = pendente.topo;
+    if (!pendente.alvo) return;
+    const cartao = corpo.querySelector<HTMLElement>(
+      `[data-retorno-id="${CSS.escape(pendente.alvo)}"]`
+    );
+    cartao?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    setRetornoEmDestaque(pendente.alvo);
+  }, [missaoAbertaRef]);
+
+  useEffect(() => {
+    if (!retornoEmDestaque) return;
+    const apaga = setTimeout(() => setRetornoEmDestaque(null), 2400);
+    return () => clearTimeout(apaga);
+  }, [retornoEmDestaque]);
+
+  /*
+   * Teclado da ficha do check-in: Esc volta (ou fecha, se não veio de
+   * missão) e as setas andam entre os retornos.
+   *
+   * Com a foto aberta em tela cheia, o teclado é do visor — lá as setas já
+   * trocam de foto e o Esc já fecha, e responder aqui também seria dar dois
+   * passos com uma tecla. Dentro de um campo de texto, a seta é do cursor.
+   */
+  useEffect(() => {
+    if (!selectedCheckInForModal) return;
+    const tecla = (e: KeyboardEvent) => {
+      if (midiaDoCheckInAberta !== null) return;
+      const alvo = e.target as HTMLElement | null;
+      if (
+        alvo &&
+        (alvo.tagName === 'INPUT' ||
+          alvo.tagName === 'TEXTAREA' ||
+          alvo.tagName === 'SELECT' ||
+          alvo.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (voltaParaMissao) voltarParaAMissao();
+        else fecharFichaDoCheckIn();
+      } else if (voltaParaMissao && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        irParaRetorno(-1);
+      } else if (voltaParaMissao && e.key === 'ArrowRight') {
+        e.preventDefault();
+        irParaRetorno(1);
+      }
+    };
+    window.addEventListener('keydown', tecla);
+    return () => window.removeEventListener('keydown', tecla);
+  });
   const [reverseGeocodedAddress, setReverseGeocodedAddress] = useState<string | null>(null);
   const [isReverseGeocoding, setIsReverseGeocoding] = useState<boolean>(false);
 
@@ -2233,8 +2399,9 @@ export default function MapContainer({
    * 2. **O preenchimento é transparente.** A mancha informa, mas o mapa e os
    *    pinos de operação continuam legíveis por baixo: esta camada é contexto,
    *    não substituição.
-   * 3. **Um clique é uma pergunta.** Clicar num bairro abre o Censo dele, que
-   *    é o passo seguinte natural de quem reparou na cor.
+   * 3. **Um clique é uma escolha.** Clicar num setor o fixa na ficha do canto
+   *    e o marca no mapa; clicar de novo no mesmo o solta. Passar o mouse
+   *    por cima dos outros não tira a ficha dele: quem fixou está lendo.
    */
   useEffect(() => {
     const grupo = recortesGroupRef.current;
@@ -2269,25 +2436,51 @@ export default function MapContainer({
 
     const limites: any[] = [];
 
+    /*
+     * O SETOR FIXADO.
+     *
+     * Com um recorte fixado na ficha, ele sai do mapa em âmbar — a única cor
+     * que não existe na escala azul da mancha, então não se confunde com
+     * "mais gente" — e os outros baixam um pouco o tom. Não somem: o vizinho
+     * continua sendo a régua de comparação, só deixa de competir.
+     */
+    const AMBAR = '#F59E0B';
+    const temFixado =
+      !!recorteFixado && recortes.some((r) => r.id === recorteFixado && r.geometria);
+
+    const estiloDe = (recorte: (typeof recortes)[number]) => {
+      const semDado = recorte.valor === null || recorte.valor === undefined;
+      if (recorte.id === recorteFixado) {
+        return {
+          color: AMBAR,
+          weight: 3.5,
+          opacity: 1,
+          fillColor: corDe(recorte.valor),
+          fillOpacity: opacidadeDe(semDado ? 0.45 : 0.85),
+          dashArray: undefined as string | undefined
+        };
+      }
+      const base = semDado ? 0.25 : 0.55;
+      return {
+        color: '#1E293B',
+        weight: recorte.tipo === 'setor' ? 0.6 : 1,
+        opacity: temFixado ? 0.3 : 0.45,
+        fillColor: corDe(recorte.valor),
+        // Transparente de propósito: a mancha é contexto, e o que está
+        // embaixo dela continua sendo o trabalho.
+        fillOpacity: opacidadeDe(temFixado ? base * 0.7 : base),
+        dashArray: semDado ? '4, 4' : undefined
+      };
+    };
+
     recortes.forEach((recorte) => {
       if (!recorte.geometria) return;
       const semDado = recorte.valor === null || recorte.valor === undefined;
-      const emFoco = recorteEmFoco === recorte.id;
+      const fixado = recorte.id === recorteFixado;
 
       const camada = L.geoJSON(
         { type: 'Feature', properties: {}, geometry: recorte.geometria } as any,
-        {
-          style: {
-            color: emFoco ? '#0F172A' : '#1E293B',
-            weight: emFoco ? 2.5 : recorte.tipo === 'setor' ? 0.6 : 1,
-            opacity: emFoco ? 0.9 : 0.45,
-            fillColor: corDe(recorte.valor),
-            // Transparente de propósito: a mancha é contexto, e o que está
-            // embaixo dela continua sendo o trabalho.
-            fillOpacity: opacidadeDe(semDado ? 0.25 : emFoco ? 0.72 : 0.55),
-            dashArray: semDado ? '4, 4' : undefined
-          }
-        }
+        { style: estiloDe(recorte) }
       );
 
       /*
@@ -2296,25 +2489,31 @@ export default function MapContainer({
        * O que o cursor encontra abre na ficha fixa do canto superior esquerdo,
        * que cabe o Censo inteiro do setor. Manter os dois seria dizer a mesma
        * coisa duas vezes, com a cópia menor tapando o mapa.
+       *
+       * O realce do cursor é todo feito aqui, no próprio Leaflet, e não
+       * redesenhando a malha: antes cada setor atravessado pelo mouse
+       * refazia os cem polígonos — e reiniciava o halo do setor fixado.
        */
-
       camada.on('mouseover', () => {
-        // O realce sai na hora, no próprio Leaflet: esperar o React repintar a
-        // malha inteira atrasaria a resposta do gesto mais barato que existe.
-        camada.setStyle({
-          weight: 2.5,
-          opacity: 0.95,
-          fillOpacity: opacidadeDe(semDado ? 0.4 : 0.72)
-        });
-        camada.bringToFront();
+        camada.setStyle(
+          fixado
+            ? { weight: 4.5 }
+            : {
+                weight: 2.5,
+                opacity: 0.95,
+                fillOpacity: opacidadeDe(semDado ? 0.4 : 0.72)
+              }
+        );
+        if (!fixado) {
+          camada.bringToFront();
+          // O fixado fica sempre por cima: passar o mouse no vizinho não
+          // pode esconder a borda âmbar de quem está sendo lido.
+          if (recorteFixado) recortesPorIdRef.current[recorteFixado]?.bringToFront();
+        }
         onRecorteSobOCursor?.(recorte.id);
       });
       camada.on('mouseout', () => {
-        camada.setStyle({
-          weight: emFoco ? 2.5 : recorte.tipo === 'setor' ? 0.6 : 1,
-          opacity: emFoco ? 0.9 : 0.45,
-          fillOpacity: opacidadeDe(semDado ? 0.25 : emFoco ? 0.72 : 0.55)
-        });
+        camada.setStyle(estiloDe(recorte));
         onRecorteSobOCursor?.(null);
       });
       camada.on('click', () => onRecorteClicado?.(recorte.id));
@@ -2323,6 +2522,30 @@ export default function MapContainer({
       recortesPorIdRef.current[recorte.id] = camada;
       limites.push(camada.getBounds());
     });
+
+    // O halo por baixo da borda do fixado, e ele por cima de todos.
+    if (temFixado && recorteFixado) {
+      const fixado = recortes.find((r) => r.id === recorteFixado);
+      if (fixado?.geometria) {
+        const halo = L.geoJSON(
+          { type: 'Feature', properties: {}, geometry: fixado.geometria } as any,
+          {
+            interactive: false,
+            style: {
+              color: AMBAR,
+              weight: 10,
+              opacity: 0.3,
+              fill: false,
+              lineJoin: 'round',
+              className: 'setor-fixado-halo'
+            }
+          }
+        );
+        grupo.addLayer(halo);
+        halo.bringToFront();
+      }
+      recortesPorIdRef.current[recorteFixado]?.bringToFront();
+    }
 
     // O nome do bairro fica no mapa, como num mapa temático de verdade. O do
     // setor não: são códigos de quinze dígitos, e cem deles viram poluição.
@@ -2364,7 +2587,7 @@ export default function MapContainer({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recortesTerritoriais, escalaTerritorial, recorteEmFoco, opacidadeDosRecortes]);
+  }, [recortesTerritoriais, escalaTerritorial, recorteFixado, opacidadeDosRecortes]);
 
   /**
    * Círculo da análise territorial.
@@ -3489,7 +3712,10 @@ export default function MapContainer({
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto space-y-5 text-left font-sans">
+            <div
+              ref={corpoDaMissaoRef}
+              className="p-6 overflow-y-auto space-y-5 text-left font-sans"
+            >
               {/* Etiquetas do topo: o que decide a ordem do dia */}
               <div className="flex flex-wrap items-center gap-2">
                 <span
@@ -3838,7 +4064,11 @@ export default function MapContainer({
                           return (
                             <div
                               key={c.id}
-                              className="border border-slate-200 rounded-xl p-3 bg-white"
+                              data-retorno-id={c.id}
+                              className={`border border-slate-200 rounded-xl p-3 bg-white scroll-my-4 ${
+                                retornoEmDestaque === c.id ? 'retorno-lido' : ''
+                              }`}
+                              style={{ '--cor-da-missao': missaoAberta.cor } as React.CSSProperties}
                             >
                               <div className="flex items-center gap-2.5">
                                 <span className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 overflow-hidden">
@@ -3928,8 +4158,9 @@ export default function MapContainer({
                                 onClick={() => {
                                   // A ficha do check-in toma a tela: dois modais
                                   // empilhados escondem qual deles o X fecha.
-                                  setMissaoAbertaRef(null);
-                                  setSelectedCheckInForModal(c);
+                                  // Ela lembra de onde veio, e o "voltar" dela
+                                  // devolve a missão neste mesmo ponto.
+                                  abrirRetornoDaMissao(c);
                                 }}
                                 className="mt-2.5 w-full h-9 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[11px] font-black uppercase tracking-wider rounded-lg cursor-pointer active:scale-[0.99] flex items-center justify-center gap-1.5"
                               >
@@ -4519,6 +4750,106 @@ export default function MapContainer({
       {selectedCheckInForModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[2000] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
+            {/*
+              A TRILHA DE VOLTA.
+
+              Só existe quando a ficha foi aberta de dentro de uma missão, e
+              vem na cor dela: é o fio que diz "você está lendo um retorno
+              DESTA missão". O botão grande à esquerda devolve a missão no
+              ponto em que ela estava; à direita, a contagem e as setas
+              passam para o retorno seguinte sem precisar sair e voltar.
+            */}
+            {voltaParaMissao && (
+              <div
+                className="trilha-da-missao relative shrink-0 px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3 text-white overflow-hidden"
+                style={{ backgroundColor: voltaParaMissao.cor }}
+              >
+                <button
+                  type="button"
+                  onClick={voltarParaAMissao}
+                  className="group relative min-w-0 flex items-center gap-2.5 pl-1 pr-3 py-1 rounded-xl hover:bg-white/15 active:scale-[0.98] transition-all cursor-pointer text-left"
+                  title="Voltar para a missão (Esc)"
+                  aria-label={`Voltar para a missão ${voltaParaMissao.titulo}`}
+                >
+                  <span className="w-8 h-8 rounded-lg bg-white/20 group-hover:bg-white group-hover:text-slate-900 flex items-center justify-center shrink-0 transition-colors">
+                    <ArrowLeft className="w-4 h-4 stroke-[2.75] transition-transform group-hover:-translate-x-0.5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[9.5px] font-black uppercase tracking-[0.14em] text-white/75 leading-none">
+                      Voltar para a missão
+                    </span>
+                    <span className="block text-[13px] font-extrabold leading-tight mt-1 truncate max-w-[42vw] sm:max-w-[360px]">
+                      {voltaParaMissao.titulo}
+                    </span>
+                  </span>
+                </button>
+
+                {posicaoNaVolta >= 0 && retornosDaVolta.length > 0 && (
+                  <div className="relative ml-auto flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+                    <div className="hidden sm:flex flex-col items-end">
+                      <span className="text-[9.5px] font-black uppercase tracking-[0.14em] text-white/75 leading-none">
+                        Retorno
+                      </span>
+                      <span className="text-[13px] font-extrabold leading-tight mt-1 tabular-nums">
+                        {posicaoNaVolta + 1}
+                        <span className="text-white/60"> de {retornosDaVolta.length}</span>
+                      </span>
+                    </div>
+                    <span className="sm:hidden text-[12px] font-extrabold tabular-nums">
+                      {posicaoNaVolta + 1}/{retornosDaVolta.length}
+                    </span>
+                    {retornosDaVolta.length > 1 && (
+                      <>
+                        {/* Um ponto por retorno: dá para pular direto, e se
+                            vê de relance quanto falta ler. Acima de oito o
+                            colar vira ruído, e fica só o número. */}
+                        {retornosDaVolta.length <= 8 && (
+                          <div className="hidden md:flex items-center gap-1 px-1">
+                            {retornosDaVolta.map((r: any, i: number) => (
+                              <button
+                                key={r.id}
+                                type="button"
+                                onClick={() => {
+                                  if (i === posicaoNaVolta) return;
+                                  setSentidoDoRetorno(i > posicaoNaVolta ? 1 : -1);
+                                  setSelectedCheckInForModal(r);
+                                }}
+                                className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                                  i === posicaoNaVolta
+                                    ? 'w-5 bg-white'
+                                    : 'w-1.5 bg-white/40 hover:bg-white/80'
+                                }`}
+                                title={r.name}
+                                aria-label={`Ver o retorno de ${r.name}`}
+                                aria-current={i === posicaoNaVolta}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => irParaRetorno(-1)}
+                          className="w-8 h-8 rounded-lg bg-white/15 hover:bg-white hover:text-slate-900 flex items-center justify-center transition-colors cursor-pointer active:scale-95"
+                          title="Retorno anterior (←)"
+                          aria-label="Retorno anterior"
+                        >
+                          <ChevronLeft className="w-4 h-4 stroke-[2.75]" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => irParaRetorno(1)}
+                          className="w-8 h-8 rounded-lg bg-white/15 hover:bg-white hover:text-slate-900 flex items-center justify-center transition-colors cursor-pointer active:scale-95"
+                          title="Próximo retorno (→)"
+                          aria-label="Próximo retorno"
+                        >
+                          <ChevronRight className="w-4 h-4 stroke-[2.75]" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {/* Header com tom esmeralda */}
             <div className="bg-emerald-600 px-6 py-4 flex items-center justify-between text-white shadow-md">
               <div className="flex items-center gap-2">
@@ -4565,7 +4896,10 @@ export default function MapContainer({
                     type="button"
                     onClick={() => {
                       const alvo = selectedCheckInForModal;
-                      setSelectedCheckInForModal(null);
+                      // Veio de uma missão: a lixeira devolve para ela, que é
+                      // onde a leitura dos retornos estava acontecendo.
+                      if (voltaParaMissao) voltarParaAMissao();
+                      else fecharFichaDoCheckIn();
                       onDeleteCheckIn(alvo);
                     }}
                     className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
@@ -4577,7 +4911,7 @@ export default function MapContainer({
                 )}
                 <button
                   type="button"
-                  onClick={() => setSelectedCheckInForModal(null)}
+                  onClick={fecharFichaDoCheckIn}
                   className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
                   title="Fechar"
                 >
@@ -4587,7 +4921,17 @@ export default function MapContainer({
             </div>
 
             {/* Conteúdo rolável */}
-            <div className="p-6 overflow-y-auto space-y-5 text-left font-sans">
+            <div
+              key={(selectedCheckInForModal as any).id}
+              ref={corpoDoCheckInRef}
+              className={`p-6 overflow-y-auto space-y-5 text-left font-sans ${
+                sentidoDoRetorno === 1
+                  ? 'ficha-vem-da-direita'
+                  : sentidoDoRetorno === -1
+                    ? 'ficha-vem-da-esquerda'
+                    : ''
+              }`}
+            >
 
               {/*
                 DUAS COLUNAS: QUEM REGISTROU, E O QUE ELE TROUXE.
@@ -5084,10 +5428,34 @@ export default function MapContainer({
             </div>
 
             {/* Footer */}
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+              {voltaParaMissao && (
+                <>
+                  <span className="hidden md:inline text-[10.5px] font-semibold text-slate-400 mr-auto">
+                    <kbd className="px-1.5 py-0.5 rounded-md border border-slate-200 bg-white text-[10px] font-black text-slate-500">Esc</kbd>{' '}
+                    volta para a missão
+                    {retornosDaVolta.length > 1 && (
+                      <>
+                        {' · '}
+                        <kbd className="px-1.5 py-0.5 rounded-md border border-slate-200 bg-white text-[10px] font-black text-slate-500">←</kbd>{' '}
+                        <kbd className="px-1.5 py-0.5 rounded-md border border-slate-200 bg-white text-[10px] font-black text-slate-500">→</kbd>{' '}
+                        passam de retorno
+                      </>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={voltarParaAMissao}
+                    className="px-4 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-extrabold cursor-pointer transition-colors flex items-center gap-1.5"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5 stroke-[2.75]" style={{ color: voltaParaMissao.cor }} />
+                    Voltar para a missão
+                  </button>
+                </>
+              )}
               <button
                 type="button"
-                onClick={() => setSelectedCheckInForModal(null)}
+                onClick={fecharFichaDoCheckIn}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-extrabold cursor-pointer transition-colors"
               >
                 Fechar
