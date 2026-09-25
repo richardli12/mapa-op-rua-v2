@@ -924,3 +924,135 @@
     opacity: 0.5;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * O caminho de volta para a missão
+ *
+ * A trilha no topo da ficha do check-in tem um brilho que passa uma vez ao
+ * abrir: é o que faz o olho notar que ali existe um caminho de volta. Uma vez
+ * só — brilho que não para vira ruído e ensina a ignorar a faixa.
+ *
+ * Ao passar de um retorno para outro, a ficha entra pelo lado da seta que se
+ * apertou: o movimento conta que se andou na lista, e não que se abriu outra
+ * coisa.
+ *
+ * Ao voltar para a missão, o cartão do retorno que acabou de ser lido acende
+ * na cor da missão e apaga devagar — é o "você estava aqui".
+ * ------------------------------------------------------------------------ */
+.trilha-da-missao::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: trilha-brilho 1.1s ease-out 0.15s 1 forwards;
+}
+
+@keyframes trilha-brilho {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes ficha-da-direita {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ficha-da-esquerda {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.ficha-vem-da-direita {
+  animation: ficha-da-direita 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ficha-vem-da-esquerda {
+  animation: ficha-da-esquerda 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes retorno-acende {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cor-da-missao) 55%, transparent);
+    border-color: var(--cor-da-missao);
+  }
+  35% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--cor-da-missao) 22%, transparent);
+    border-color: var(--cor-da-missao);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.retorno-lido {
+  animation: retorno-acende 2.2s ease-out;
+}
+
+/* ---------------------------------------------------------------------------
+ * O setor fixado no mapa
+ *
+ * Um contorno a mais, largo e translúcido, por baixo da borda do setor: é o
+ * halo que "respira" e diz qual dos cem setores parecidos é o que está na
+ * ficha. Respira devagar — pulsar rápido em cima de um mapa é alarme.
+ * ------------------------------------------------------------------------ */
+.setor-fixado-halo {
+  animation: setor-respira 2.4s ease-in-out infinite;
+}
+
+@keyframes setor-respira {
+  0%,
+  100% {
+    stroke-opacity: 0.18;
+    stroke-width: 9px;
+  }
+  50% {
+    stroke-opacity: 0.42;
+    stroke-width: 14px;
+  }
+}
+
+@keyframes ficha-recorte-entra {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.ficha-recorte-entra {
+  animation: ficha-recorte-entra 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trilha-da-missao::after,
+  .ficha-vem-da-direita,
+  .ficha-vem-da-esquerda,
+  .retorno-lido,
+  .setor-fixado-halo,
+  .ficha-recorte-entra {
+    animation: none;
+  }
+}
