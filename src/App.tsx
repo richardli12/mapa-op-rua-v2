@@ -33,6 +33,9 @@ import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import FichaDoRecorteNoMapa from "./components/FichaDoRecorteNoMapa";
 import CarregandoOperacional from "./components/CarregandoOperacional";
 import TelaDeLogin from "./components/TelaDeLogin";
+import PainelDeltaOperacional from "./components/operacional/PainelDeltaOperacional";
+import CadastroDeltaOperacional from "./components/operacional/CadastroDeltaOperacional";
+import AbaDeltaOperacional from "./components/operacional/AbaDeltaOperacional";
 import { UnidadeDeSaude } from "./dados/ubs";
 import CamadasDeInteligencia, {
   EstadoDasCamadas,
@@ -457,7 +460,13 @@ const REDIRECIONAMENTO_PADRAO =
  */
 const ROTA_INICIAL = (() => {
   if (typeof window === "undefined")
-    return { convite: "", equipe: "", semLink: false };
+    return {
+      convite: "",
+      equipe: "",
+      operacional: "",
+      cadastroOperacional: "",
+      semLink: false,
+    };
 
   /**
    * Onde a pessoa está, guardado para o recarregar não a expulsar.
@@ -510,12 +519,22 @@ const ROTA_INICIAL = (() => {
   const doEndereco = {
     convite: fragmento.get("c") || busca.get("convite") || "",
     equipe: fragmento.get("e") || "",
+    // Delta Operacional: o painel dele (#o=) e o cadastro pelo QR (#oc=).
+    operacional: fragmento.get("o") || "",
+    cadastroOperacional: fragmento.get("oc") || "",
   };
 
-  if (doEndereco.convite || doEndereco.equipe) {
+  if (
+    doEndereco.convite ||
+    doEndereco.equipe ||
+    doEndereco.operacional ||
+    doEndereco.cadastroOperacional
+  ) {
     // Link novo manda: o contexto anterior é trocado, não somado.
     guardar("rota_convite", doEndereco.convite);
     guardar("rota_equipe", doEndereco.equipe);
+    guardar("rota_operacional", doEndereco.operacional);
+    guardar("rota_cadastro_operacional", doEndereco.cadastroOperacional);
     try {
       window.history.replaceState(null, "", window.location.pathname);
     } catch {
@@ -525,6 +544,9 @@ const ROTA_INICIAL = (() => {
 
   const convite = doEndereco.convite || guardado("rota_convite");
   let equipe = doEndereco.equipe || guardado("rota_equipe");
+  let operacional = doEndereco.operacional || guardado("rota_operacional");
+  const cadastroOperacional =
+    doEndereco.cadastroOperacional || guardado("rota_cadastro_operacional");
 
   // Última rede: quem já entrou no painel deixou o integrante guardado, e ali
   // está de qual cliente ele é. Com isso a pessoa volta para o painel dela
@@ -538,16 +560,37 @@ const ROTA_INICIAL = (() => {
     }
   }
 
+  // O Delta Operacional que já entrou volta para o painel dele, mesmo que a
+  // memória de rota tenha se perdido: a sessão guarda o link.
+  if (
+    !equipe &&
+    !convite &&
+    !operacional &&
+    !cadastroOperacional &&
+    DOMINIOS_DE_ACESSO.includes(dominio)
+  ) {
+    try {
+      const sessao = JSON.parse(
+        localStorage.getItem("delta_operacional_sessao") || "null",
+      );
+      operacional = sessao?.token || "";
+    } catch {
+      /* dado estragado no navegador: segue sem ele */
+    }
+  }
+
   // Chegou num domínio de acesso sem link nenhum? Não é gente do sistema.
   const caminho = window.location.pathname.replace(/\/+$/, "");
   const semLink =
     !convite &&
     !equipe &&
+    !operacional &&
+    !cadastroOperacional &&
     caminho === "" &&
     busca.toString() === "" &&
     DOMINIOS_DE_ACESSO.includes(window.location.hostname.toLowerCase());
 
-  return { convite, equipe, semLink };
+  return { convite, equipe, operacional, cadastroOperacional, semLink };
 })();
 
 /** Link do painel da equipe para um cliente. Leva o id, nunca o nome. */
@@ -1146,7 +1189,7 @@ export default function App() {
 
   /** Aba aberta dentro da ficha do cliente. */
   const [abaCliente, setAbaCliente] = useState<
-    "geral" | "equipe" | "metas" | "tipos" | "checkins"
+    "geral" | "equipe" | "operacional" | "metas" | "tipos" | "checkins"
   >("geral");
 
   /** Estado da aba Equipe: busca, filtro de status, página e ranking. */
@@ -5508,6 +5551,16 @@ export default function App() {
     return <TeamSignupPage token={inviteToken} />;
   }
 
+  // Delta Operacional: o cadastro pelo QR Code e o painel próprio. Vêm antes
+  // do painel administrativo pelo mesmo motivo do cadastro da equipe: quem
+  // chegou com um desses links está ali para isso.
+  if (ROTA_INICIAL.cadastroOperacional) {
+    return <CadastroDeltaOperacional token={ROTA_INICIAL.cadastroOperacional} />;
+  }
+  if (ROTA_INICIAL.operacional) {
+    return <PainelDeltaOperacional token={ROTA_INICIAL.operacional} />;
+  }
+
   if (currentUrlView === "checkin") {
     if (isCheckInPageInitializing) {
       // A mesma espera do painel: quem está na rua abrindo o check-in está
@@ -9559,6 +9612,7 @@ export default function App() {
             const abas = [
               { id: "geral" as const, rotulo: "Visão geral" },
               { id: "equipe" as const, rotulo: "Equipe" },
+              { id: "operacional" as const, rotulo: "Delta Operacional" },
               { id: "metas" as const, rotulo: "Metas" },
               { id: "tipos" as const, rotulo: "Tipos de operação" },
               { id: "checkins" as const, rotulo: "Check-ins" },
@@ -10149,6 +10203,14 @@ export default function App() {
             )}
 
             {/* EQUIPE */}
+            {abaCliente === "operacional" && (
+              <AbaDeltaOperacional
+                client={inspectedCandidate}
+                notify={triggerNotification}
+                askConfirmation={askConfirmation}
+              />
+            )}
+
             {abaCliente === "metas" && (
               <PainelDeMetas
                 candidateId={inspectedCandidate.id}

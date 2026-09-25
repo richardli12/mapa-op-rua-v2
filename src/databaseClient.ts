@@ -68,6 +68,15 @@ export async function detectTableCasing() {
   }
 }
 
+/**
+ * Nome da coluna do cliente numa tabela do mapa, do jeito que aquele banco a
+ * criou ("candidateId" ou "candidateid"). Para filtrar por cliente no próprio
+ * banco em vez de trazer a tabela inteira.
+ */
+export function colunaDoCliente(tabela: 'campaign_pins' | 'panfletagem_areas' | 'check_ins') {
+  return detectedCasing[tabela] === 'lower' ? 'candidateid' : 'candidateId';
+}
+
 /** Converte as colunas cruas do Postgres para o formato camelCase do app. */
 export function normalizeRecord<T>(obj: any): T {
   return normalizeFields<T>(obj);

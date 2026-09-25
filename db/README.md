@@ -43,6 +43,9 @@ cita o fornecedor de banco em cada comentário.
 | `check_ins` | Registros de campo: missão e livre, com fotos e vídeos |
 | `escolas` | Escolas do município, camada de contexto do mapa |
 | `ubs` | Unidades Básicas de Saúde, camada de contexto do mapa |
+| `operational_deltas` | Delta Operacional: quem planeja as operações, com o link do painel dele |
+| `operational_invites` | QR Code de uso único para o Delta Operacional se cadastrar |
+| `operations` | Operações planejadas: raio, pontos escolhidos, prioridade e plano de ação |
 
 Além das tabelas: o bucket `imagens` de arquivos (fotos e vídeos do check-in),
 o Realtime das tabelas do mapa e as políticas de acesso da chave `anon`.
@@ -112,3 +115,20 @@ Fora `auth_users`, o resto do sistema fala com o banco pela chave `anon`, que
 vai no pacote do navegador: as demais tabelas são legíveis por quem tiver essa
 chave. Fechar isso de vez pede o serviço de autenticação do banco ou leitura
 por função, tabela por tabela.
+
+## Delta Operacional
+
+Num banco que já existia, rode
+[`migrations/2026-09-26-delta-operacional.sql`](./migrations/2026-09-26-delta-operacional.sql).
+Ele cria as três tabelas e as funções de entrada:
+
+- `get_operational_invite` / `claim_operational_invite` — o cadastro pelo QR
+  Code, de uso único, que já devolve o link do painel da pessoa;
+- `enter_operational_panel` — a entrada no painel: o token do link **e** o
+  telefone cadastrado (comparado pelos dígitos finais, com ou sem +55);
+- `peek_operational_panel` — o que a tela de entrada precisa saber antes do
+  telefone: de qual cliente é o painel e se o acesso está liberado.
+
+Gerar um link novo (na aba Delta Operacional do cliente) troca o
+`access_token`, e o link antigo para de funcionar na hora. Pausar o acesso
+(`active = false`) fecha a porta sem apagar ninguém.
