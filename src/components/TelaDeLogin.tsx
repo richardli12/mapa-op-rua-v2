@@ -6,8 +6,7 @@ import {
   EyeOff,
   Info,
   Lock,
-  Mail,
-  ShieldCheck
+  Mail
 } from 'lucide-react';
 import BrandMark from './BrandMark';
 
@@ -377,7 +376,6 @@ export default function TelaDeLogin({
   };
 
   const podeEntrar = !!email.trim() && !!senha.trim() && !verificando;
-  const ano = new Date().getFullYear();
   const registro = REGISTRO[linha];
 
   const lerCaps = (e: React.KeyboardEvent<HTMLInputElement>) =>
@@ -444,15 +442,9 @@ export default function TelaDeLogin({
         {/* O cabeçalho do mapa */}
         <div className="hidden lg:flex absolute top-7 left-8 items-center gap-3 pointer-events-none">
           <BrandMark size={40} rounded={11} />
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-sky-200/70 leading-none">
-              Mapa Operacional
-            </p>
-            <p className="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300/90 leading-none">
-              <span className="op-led !w-1.5 !h-1.5" />
-              Sistema no ar
-            </p>
-          </div>
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-sky-200/70 leading-none">
+            Mapa Operacional
+          </p>
         </div>
 
         {/* A frase, e o registro que passa */}
@@ -501,31 +493,16 @@ export default function TelaDeLogin({
             {/* Marca no celular, onde o mapa é só fundo */}
             <div className="lg:hidden flex items-center gap-2.5 mb-7">
               <BrandMark size={36} rounded={10} />
-              <div>
-                <p className="text-[9.5px] font-black uppercase tracking-[0.28em] text-sky-200/70 leading-none">
-                  Mapa Operacional
-                </p>
-                <p className="mt-1 flex items-center gap-1.5 text-[9.5px] font-bold uppercase tracking-[0.16em] text-emerald-300/90 leading-none">
-                  <span className="op-led !w-1.5 !h-1.5" />
-                  Sistema no ar
-                </p>
-              </div>
+              <p className="text-[9.5px] font-black uppercase tracking-[0.28em] text-sky-200/70 leading-none">
+                Mapa Operacional
+              </p>
             </div>
 
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F58220]/12 border border-[#F58220]/25 text-[#FDBA74] text-[9.5px] font-black uppercase tracking-[0.18em]">
-              <Lock className="w-3 h-3" />
-              Acesso restrito
-            </span>
-
-            <h1 className="mt-4 text-[30px] sm:text-[34px] font-black tracking-tight leading-[1.05]">
+            <h1 className="text-[30px] sm:text-[34px] font-black tracking-tight leading-[1.05]">
               Inteligência
               <br />
               Territorial
             </h1>
-            <p className="mt-3 text-[13.5px] leading-relaxed text-slate-400 font-medium">
-              Entre com o e-mail e a senha da coordenação para abrir a central
-              de comando.
-            </p>
 
             <form onSubmit={onEntrar} className="mt-8 space-y-5" noValidate>
               {/* E-mail */}
@@ -641,14 +618,6 @@ export default function TelaDeLogin({
               </div>
             )}
           </div>
-        </div>
-
-        <div className="relative px-5 sm:px-10 pb-6 flex items-center justify-between gap-4 text-[10.5px] font-semibold text-slate-500">
-          <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400/80" />
-            Acesso exclusivo da coordenação
-          </span>
-          <span className="tabular-nums">© {ano}</span>
         </div>
       </div>
     </div>
