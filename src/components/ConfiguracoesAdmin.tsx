@@ -9,6 +9,7 @@ import {
   RotateCcw,
   Save,
   Brain,
+  LogIn,
   Search,
   ShieldCheck,
   X
@@ -28,6 +29,15 @@ import SecaoMidias from './configuracoes/SecaoMidias';
 import SecaoTurnos from './configuracoes/SecaoTurnos';
 import SecaoPrioridades from './configuracoes/SecaoPrioridades';
 import SecaoNeo from './configuracoes/SecaoNeo';
+import SecaoLogin from './configuracoes/SecaoLogin';
+import {
+  CHAVE_TEXTOS_LOGIN,
+  TEXTOS_LOGIN_PADRAO,
+  TextosDoLogin,
+  gravarTextosDoLogin,
+  iguaisTextosDoLogin,
+  lerTextosDoLogin
+} from '../textosDoLogin';
 import { EstadoDoCartao } from './configuracoes/pecas';
 import { CHAVE_PROMPT_NEO, PROMPT_NEO_PADRAO } from '../neo';
 
@@ -59,6 +69,13 @@ const SECOES = [
     titulo: 'Acesso aos domínios',
     Icone: ShieldCheck,
     termos: 'acesso dominio dominios link redirecionamento saida endereco url porta entrada qr code'
+  },
+  {
+    id: 'login',
+    titulo: 'Tela de login',
+    Icone: LogIn,
+    termos:
+      'login entrada tela acesso textos frases titulo marca nome botao entrar senha email manchete legenda mapa ao vivo'
   },
   {
     id: 'midias',
@@ -130,6 +147,9 @@ export default function ConfiguracoesAdmin({
   const [niveis, setNiveis] = useState<PriorityLevel[]>([]);
   const [promptNeo, setPromptNeo] = useState(PROMPT_NEO_PADRAO);
   const [promptNeoSalvo, setPromptNeoSalvo] = useState(PROMPT_NEO_PADRAO);
+  const [textosLogin, setTextosLogin] = useState<TextosDoLogin>(TEXTOS_LOGIN_PADRAO);
+  const [textosLoginSalvos, setTextosLoginSalvos] =
+    useState<TextosDoLogin>(TEXTOS_LOGIN_PADRAO);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [busca, setBusca] = useState('');
@@ -138,12 +158,13 @@ export default function ConfiguracoesAdmin({
 
   useEffect(() => {
     (async () => {
-      const [saida, midia, janelas, listaDeNiveis, neo] = await Promise.all([
+      const [saida, midia, janelas, listaDeNiveis, neo, login] = await Promise.all([
         DatabaseService.lerConfiguracao(CHAVE_REDIRECIONAMENTO),
         DatabaseService.lerConfiguracao(CHAVE_GALERIA),
         DatabaseService.lerConfiguracao(CHAVE_TURNOS),
         DatabaseService.fetchPriorityLevels(),
-        DatabaseService.lerConfiguracao(CHAVE_PROMPT_NEO)
+        DatabaseService.lerConfiguracao(CHAVE_PROMPT_NEO),
+        DatabaseService.lerConfiguracao(CHAVE_TEXTOS_LOGIN)
       ]);
       setRedirecionamento(saida.value || '');
       setRedirecionamentoSalvo(saida.value || '');
@@ -157,6 +178,9 @@ export default function ConfiguracoesAdmin({
       const instrucoes = neo.value || PROMPT_NEO_PADRAO;
       setPromptNeo(instrucoes);
       setPromptNeoSalvo(instrucoes);
+      const textos = lerTextosDoLogin(login.value);
+      setTextosLogin(textos);
+      setTextosLoginSalvos(textos);
       setCarregando(false);
     })();
   }, []);
@@ -169,6 +193,7 @@ export default function ConfiguracoesAdmin({
   const redirecionamentoPendente = redirecionamento.trim() !== redirecionamentoSalvo.trim();
   const turnosPendentes = JSON.stringify(turnos) !== JSON.stringify(turnosSalvos);
   const promptNeoPendente = promptNeo.trim() !== promptNeoSalvo.trim();
+  const textosLoginPendentes = !iguaisTextosDoLogin(textosLogin, textosLoginSalvos);
 
   const pendencias = useMemo(() => {
     const lista: { id: string; rotulo: string; impedido?: string }[] = [];
@@ -180,6 +205,9 @@ export default function ConfiguracoesAdmin({
           ? 'O endereço precisa começar com http:// ou https://.'
           : undefined
       });
+    }
+    if (textosLoginPendentes) {
+      lista.push({ id: 'login', rotulo: 'Textos da tela de login' });
     }
     if (turnosPendentes) {
       lista.push({
@@ -204,7 +232,8 @@ export default function ConfiguracoesAdmin({
     turnosPendentes,
     conferenciaDeTurnos.erros,
     promptNeoPendente,
-    promptNeo
+    promptNeo,
+    textosLoginPendentes
   ]);
 
   const impedimento = pendencias.find(p => p.impedido)?.impedido;
@@ -245,6 +274,14 @@ export default function ConfiguracoesAdmin({
         )
       );
     }
+    if (textosLoginPendentes) {
+      tarefas.push(
+        DatabaseService.gravarConfiguracao(
+          CHAVE_TEXTOS_LOGIN,
+          gravarTextosDoLogin(textosLogin)
+        ).then(r => !!r.success)
+      );
+    }
     const resultados = await Promise.all(tarefas);
     setSalvando(false);
 
@@ -258,6 +295,13 @@ export default function ConfiguracoesAdmin({
       onTurnosMudarem?.(turnos);
     }
     if (promptNeoPendente) setPromptNeoSalvo(promptNeo.trim());
+    if (textosLoginPendentes) {
+      // O que foi gravado é a versão limpa: é ela que passa a ser "o salvo",
+      // para um espaço sobrando não deixar a seção pendente para sempre.
+      const gravados = lerTextosDoLogin(gravarTextosDoLogin(textosLogin));
+      setTextosLogin(gravados);
+      setTextosLoginSalvos(gravados);
+    }
     notify(
       pendencias.length === 1
         ? `${pendencias[0].rotulo}: salvo!`
@@ -271,6 +315,10 @@ export default function ConfiguracoesAdmin({
     redirecionamentoPendente,
     turnos,
     turnosPendentes,
+    promptNeo,
+    promptNeoPendente,
+    textosLogin,
+    textosLoginPendentes,
     notify,
     onTurnosMudarem
   ]);
@@ -278,6 +326,8 @@ export default function ConfiguracoesAdmin({
   const descartar = () => {
     setRedirecionamento(redirecionamentoSalvo);
     setTurnos(turnosSalvos.map(j => ({ ...j })));
+    setPromptNeo(promptNeoSalvo);
+    setTextosLogin({ ...textosLoginSalvos, registro: [...textosLoginSalvos.registro] });
     notify('Alterações descartadas.', 'info');
   };
 
@@ -553,6 +603,14 @@ export default function ConfiguracoesAdmin({
               padrao={padraoRedirecionamento}
               dominios={dominiosDeAcesso}
               estado={estadoDo(redirecionamentoPendente)}
+            />
+          )}
+
+          {visivel('login') && (
+            <SecaoLogin
+              valor={textosLogin}
+              onMudar={setTextosLogin}
+              estado={estadoDo(textosLoginPendentes)}
             />
           )}
 
