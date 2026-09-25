@@ -29,158 +29,320 @@
   background: rgba(0, 0, 0, 0.3);
 }
 
-/* Custom Uiverse Loader Animation */
-.loader-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* ---------------------------------------------------------------------------
+ * A espera operacional: o radar da central de comando
+ *
+ * Ver CarregandoOperacional.tsx. O feixe dá uma volta a cada --volta, e cada
+ * contato acende com um atraso proporcional ao seu ângulo — é isso que faz o
+ * ponto aparecer exatamente quando o feixe passa por cima, e não piscar solto.
+ * ------------------------------------------------------------------------ */
+.op-carregando {
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(14, 116, 144, 0.28) 0%, transparent 55%),
+    radial-gradient(circle at 50% 50%, #0E2A45 0%, #081727 55%, #040C16 100%);
+  color: #fff;
+  transition: opacity 0.5s ease, transform 0.5s ease;
 }
 
-.loader {
-  width: 8em;
-  height: 8em;
+.op-saindo {
+  opacity: 0;
+  pointer-events: none;
+  /* Um respiro no "Operação pronta" antes de abrir o mapa. */
+  transition-delay: 0.25s;
 }
 
-.loader__eye1,
-.loader__eye2,
-.loader__mouth1,
-.loader__mouth2 {
-  animation: eye1 3s ease-in-out infinite;
+.op-saindo .op-radar {
+  transform: scale(1.06);
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.loader__eye1,
-.loader__eye2 {
-  transform-origin: 64px 64px;
+/* A malha do mapa ao fundo, que some nas bordas. */
+.op-grade {
+  position: absolute;
+  inset: -40px;
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 70%);
+  animation: op-grade-anda 14s linear infinite;
 }
 
-.loader__eye2 {
-  animation-name: eye2;
-}
-
-.loader__mouth1 {
-  animation-name: mouth1;
-}
-
-.loader__mouth2 {
-  animation-name: mouth2;
-  visibility: hidden;
-}
-
-@keyframes eye1 {
-  from {
-    transform: rotate(-260deg) translate(0, -56px);
-  }
-
-  50%,
-  60% {
-    animation-timing-function: cubic-bezier(0.17, 0, 0.58, 1);
-    transform: rotate(-40deg) translate(0, -56px) scale(1);
-  }
-
+@keyframes op-grade-anda {
   to {
-    transform: rotate(225deg) translate(0, -56px) scale(0.35);
+    transform: translate(44px, 44px);
   }
 }
 
-@keyframes eye2 {
-  from {
-    transform: rotate(-260deg) translate(0, -56px);
-  }
+/* Uma faixa de luz que desce a tela, como monitor de sala de controle. */
+.op-linha-de-varredura {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 140px;
+  top: -140px;
+  background: linear-gradient(180deg, transparent, rgba(56, 189, 248, 0.06), transparent);
+  animation: op-desce 4.5s linear infinite;
+  pointer-events: none;
+}
 
-  50% {
-    transform: rotate(40deg) translate(0, -56px) rotate(-40deg) scale(1);
-  }
-
-  52.5% {
-    transform: rotate(40deg) translate(0, -56px) rotate(-40deg) scale(1, 0);
-  }
-
-  55%,
-  70% {
-    animation-timing-function: cubic-bezier(0, 0, 0.28, 1);
-    transform: rotate(40deg) translate(0, -56px) rotate(-40deg) scale(1);
-  }
-
+@keyframes op-desce {
   to {
-    transform: rotate(150deg) translate(0, -56px) scale(0.4);
+    transform: translateY(calc(100vh + 280px));
   }
 }
 
-@keyframes eyeBlink {
-  from,
-  25%,
-  75%,
-  to {
-    transform: scaleY(1);
-  }
-
-  50% {
-    transform: scaleY(0);
-  }
+.op-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #34D399;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+  animation: op-led 1.6s ease-out infinite;
 }
 
-@keyframes mouth1 {
-  from {
-    animation-timing-function: ease-in;
-    stroke-dasharray: 0 351.86;
-    stroke-dashoffset: 0;
-  }
-
-  25% {
-    animation-timing-function: ease-out;
-    stroke-dasharray: 175.93 351.86;
-    stroke-dashoffset: 0;
-  }
-
-  50% {
-    animation-timing-function: steps(1, start);
-    stroke-dasharray: 175.93 351.86;
-    stroke-dashoffset: -175.93;
-    visibility: visible;
-  }
-
-  75%,
-  to {
-    visibility: hidden;
-  }
-}
-
-@keyframes mouth2 {
-  from {
-    animation-timing-function: steps(1, end);
-    visibility: hidden;
-  }
-
-  50% {
-    animation-timing-function: ease-in-out;
-    visibility: visible;
-    stroke-dashoffset: -351.86;
-  }
-
-  to {
-    stroke-dashoffset: -351.86;
-  }
-}
-
-/* Linear progress bar animation */
-@keyframes loading {
+@keyframes op-led {
   0% {
-    left: -40%;
-    width: 30%;
-  }
-  50% {
-    width: 50%;
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
   }
   100% {
-    left: 110%;
-    width: 30%;
+    box-shadow: 0 0 0 8px rgba(52, 211, 153, 0);
   }
 }
 
-/* Fully opaque premium background for candidate loading screen to hide background elements */
-.candidate-map-loader-bg {
-  background: radial-gradient(circle, #F2F6FA 0%, #E5EFF7 45%, #D6E3F0 100%) !important;
-  opacity: 1 !important;
+.op-radar {
+  position: relative;
+  width: min(230px, 62vw);
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  box-shadow:
+    0 0 0 1px rgba(56, 189, 248, 0.12),
+    0 0 60px rgba(14, 165, 233, 0.18),
+    inset 0 0 40px rgba(2, 6, 23, 0.6);
+}
+
+/* Os cantos de mira em volta do radar. */
+.op-canto {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: rgba(125, 211, 252, 0.55);
+  border-style: solid;
+  border-width: 0;
+}
+.op-canto-a { top: -14px; left: -14px; border-top-width: 2px; border-left-width: 2px; }
+.op-canto-b { top: -14px; right: -14px; border-top-width: 2px; border-right-width: 2px; }
+.op-canto-c { bottom: -14px; left: -14px; border-bottom-width: 2px; border-left-width: 2px; }
+.op-canto-d { bottom: -14px; right: -14px; border-bottom-width: 2px; border-right-width: 2px; }
+
+/* O feixe: a borda da frente em cima, o rastro atrás dele. */
+.op-feixe {
+  position: absolute;
+  inset: 2px;
+  border-radius: 9999px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 262deg,
+    rgba(56, 189, 248, 0.04) 290deg,
+    rgba(56, 189, 248, 0.22) 340deg,
+    rgba(125, 211, 252, 0.55) 358deg,
+    rgba(186, 230, 253, 0.95) 360deg
+  );
+  animation-name: op-gira;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes op-gira {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.op-contato {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 9999px;
+  opacity: 0.12;
+  animation-name: op-contato;
+  animation-timing-function: ease-out;
+  animation-iteration-count: infinite;
+}
+
+/* A onda que sai do ponto no instante em que o feixe o encontra. */
+.op-contato::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  border: 1.5px solid currentColor;
+  opacity: 0;
+  animation: op-onda var(--volta) ease-out var(--atraso) infinite;
+}
+
+.op-contato-missao { background: #FBBF24; color: #FBBF24; box-shadow: 0 0 10px #F59E0B; }
+.op-contato-equipe { background: #67E8F9; color: #67E8F9; box-shadow: 0 0 10px #22D3EE; }
+.op-contato-checkin { background: #34D399; color: #34D399; box-shadow: 0 0 10px #10B981; }
+
+@keyframes op-contato {
+  0% {
+    opacity: 1;
+    transform: scale(1.6);
+  }
+  10% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  80%,
+  100% {
+    opacity: 0.12;
+    transform: scale(1);
+  }
+}
+
+@keyframes op-onda {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  35%,
+  100% {
+    opacity: 0;
+    transform: scale(3.2);
+  }
+}
+
+.op-centro {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 9999px;
+  background: #E0F2FE;
+  box-shadow: 0 0 14px #38BDF8, 0 0 0 3px rgba(56, 189, 248, 0.25);
+}
+
+.op-mira {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(56, 189, 248, 0.7);
+  animation: op-mira 2.2s ease-out infinite;
+}
+
+@keyframes op-mira {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.op-rumo {
+  position: absolute;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: rgba(186, 230, 253, 0.55);
+}
+
+.op-status {
+  animation: op-status-entra 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes op-status-entra {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.op-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 12px;
+  margin-left: 4px;
+  vertical-align: -1px;
+  background: #38BDF8;
+  animation: op-pisca 0.9s steps(1) infinite;
+}
+
+@keyframes op-pisca {
+  50% {
+    opacity: 0;
+  }
+}
+
+.op-segmento {
+  width: 11px;
+  height: 4px;
+  border-radius: 1px;
+  background: rgba(56, 189, 248, 0.14);
+  animation: op-segmento 1.6s ease-in-out infinite;
+}
+
+@keyframes op-segmento {
+  0%,
+  100% {
+    background: rgba(56, 189, 248, 0.14);
+    box-shadow: none;
+  }
+  18% {
+    background: #7DD3FC;
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
+  }
+  45% {
+    background: rgba(56, 189, 248, 0.14);
+    box-shadow: none;
+  }
+}
+
+.op-saindo .op-segmento {
+  animation: none;
+  background: #34D399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
+}
+
+.op-saindo .op-contato,
+.op-saindo .op-feixe {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .op-grade,
+  .op-linha-de-varredura,
+  .op-feixe,
+  .op-mira,
+  .op-contato::after,
+  .op-segmento,
+  .op-status,
+  .op-cursor,
+  .op-led {
+    animation: none;
+  }
+  .op-contato {
+    animation: none;
+    opacity: 0.9;
+  }
 }
 
 

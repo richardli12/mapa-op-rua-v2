@@ -16,6 +16,7 @@ import {
 } from './MaterialDaMissao';
 import { EtiquetaDePrioridade, EtiquetaDeTurno } from './TurnoEPrioridade';
 import TempoDaMissao from './TempoDaMissao';
+import CarregandoOperacional from './CarregandoOperacional';
 import RelatorioNeo from './RelatorioNeo';
 import MissaoParaODelta from './missao/MissaoParaODelta';
 import { CHAVE_PROMPT_NEO, PROMPT_NEO_PADRAO, RelatorioDoNeo } from '../neo';
@@ -3365,56 +3366,12 @@ export default function MapContainer({
 
   return (
     <div className="relative w-full h-full font-sans">
-      {/* Loading Overlay with the custom Uiverse animation - Opaque Light Gradient with Progress Bar */}
-      {isMapLoading && (
-        <div className="fixed inset-0 candidate-map-loader-bg flex flex-col items-center justify-center z-[10000] transition-all duration-300">
-          <div className="flex flex-col items-center justify-center">
-            {/* Animating Face */}
-            <div className="loader-wrapper">
-              <svg height="108px" width="108px" viewBox="0 0 128 128" className="loader">
-                <defs>
-                  <clipPath id="loader-eyes">
-                    <circle transform="rotate(-40,64,64) translate(0,-56)" r="8" cy="64" cx="64" className="loader__eye1"></circle>
-                    <circle transform="rotate(40,64,64) translate(0,-56)" r="8" cy="64" cx="64" className="loader__eye2"></circle>
-                  </clipPath>
-                  <linearGradient y2="1" x2="0" y1="0" x1="0" id="loader-grad">
-                    <stop stopColor="#000" offset="0%"></stop>
-                    <stop stopColor="#fff" offset="100%"></stop>
-                  </linearGradient>
-                  <mask id="loader-mask">
-                    <rect fill="url(#loader-grad)" height="128" width="128" y="0" x="0"></rect>
-                  </mask>
-                </defs>
-                <g strokeDasharray="175.93 351.86" strokeWidth="12" strokeLinecap="round">
-                  <g>
-                    <rect clipPath="url(#loader-eyes)" height="64" width="128" fill="hsl(193,90%,50%)"></rect>
-                    <g stroke="hsl(193,90%,50%)" fill="none">
-                      <circle transform="rotate(180,64,64)" r="56" cy="64" cx="64" className="loader__mouth1"></circle>
-                      <circle transform="rotate(0,64,64)" r="56" cy="64" cx="64" className="loader__mouth2"></circle>
-                    </g>
-                  </g>
-                  <g mask="url(#loader-mask)">
-                    <rect clipPath="url(#loader-eyes)" height="64" width="128" fill="hsl(223,90%,50%)"></rect>
-                    <g stroke="hsl(223,90%,50%)" fill="none">
-                      <circle transform="rotate(180,64,64)" r="56" cy="64" cx="64" className="loader__mouth1"></circle>
-                      <circle transform="rotate(0,64,64)" r="56" cy="64" cx="64" className="loader__mouth2"></circle>
-                    </g>
-                  </g>
-                </g>
-              </svg>
-            </div>
-
-            {/* Premium Minimalistic Progress Bar matching the user's screenshot */}
-            <div className="mt-8 w-48 h-[3px] bg-white rounded-full overflow-hidden relative shadow-2xs border border-[#FFF]/10">
-              <div className="absolute top-0 bottom-0 left-0 bg-gradient-to-r from-sky-400 to-indigo-500 rounded-full animate-[loading_2.2s_infinite_ease-in-out]" style={{ width: '40%' }} />
-            </div>
-
-            <p className="mt-4 text-[10px] font-extrabold uppercase tracking-widest text-[#0D233A]/70 font-sans">
-              Carregando...
-            </p>
-          </div>
-        </div>
-      )}
+      {/*
+        A ESPERA DO MAPA: o radar da central de comando, enquanto o mapa
+        enquadra a operação do cliente. Ele cuida da própria saída — trava no
+        alvo e se desfaz — por isso fica montado e só recebe o `ativo`.
+      */}
+      <CarregandoOperacional ativo={isMapLoading} />
 
       {/* Map Element */}
       <div id="campaign-primary-map" ref={containerRef} className="w-full h-full bg-slate-100" />
