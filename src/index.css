@@ -1557,3 +1557,13 @@
     animation-duration: 3s;
   }
 }
+
+/* Primeira visita: os textos da tela esperam o banco, invisíveis, em vez de
+   aparecerem com o texto de fábrica e trocarem diante de quem olha. */
+.lg-texto {
+  transition: opacity 0.35s ease;
+}
+
+.lg-textos-esperando .lg-texto {
+  opacity: 0;
+}

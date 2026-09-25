@@ -9,6 +9,15 @@ import {
   Mail
 } from 'lucide-react';
 import BrandMark from './BrandMark';
+import { DatabaseService } from '../databaseClient';
+import {
+  CACHE_TEXTOS_LOGIN,
+  CHAVE_TEXTOS_LOGIN,
+  TEXTOS_LOGIN_PADRAO,
+  TextosDoLogin,
+  lerTextosDoLogin,
+  textoNaTela
+} from '../textosDoLogin';
 
 /**
  * A porta de entrada do Mapa Operacional.
@@ -287,18 +296,29 @@ const MapaTatico = React.memo(function MapaTatico({ calmo }: { calmo: boolean })
 });
 
 /**
- * O que o mapa conta, em fila, como o registro de uma sala de operações.
+ * As cores do ponto de cada linha do registro "ao vivo", em rodízio.
  *
- * Sem hora e sem nome de gente: são as coisas que o sistema faz, escritas do
- * jeito que elas aparecem quando acontecem — não eventos que aconteceram.
+ * As frases em si são editáveis em Configurações (ver textosDoLogin.ts): sem
+ * hora e sem nome de gente, são as coisas que o sistema faz, escritas do
+ * jeito que elas aparecem quando acontecem.
  */
-const REGISTRO = [
-  { cor: 'bg-orange-400', texto: 'Missão despachada para a equipe Delta' },
-  { cor: 'bg-emerald-400', texto: 'Check-in chegou com foto, áudio e localização' },
-  { cor: 'bg-cyan-300', texto: 'Equipe em deslocamento pela avenida' },
-  { cor: 'bg-amber-400', texto: 'Setor fixado: o Censo inteiro de um quarteirão' },
-  { cor: 'bg-violet-400', texto: 'Relatório do NEO pronto para a coordenação' }
+const CORES_DO_REGISTRO = [
+  'bg-orange-400',
+  'bg-emerald-400',
+  'bg-cyan-300',
+  'bg-amber-400',
+  'bg-violet-400'
 ];
+
+/** A última leitura dos textos, para a tela abrir já com eles. */
+const lerCache = (): TextosDoLogin | null => {
+  try {
+    const guardado = window.localStorage.getItem(CACHE_TEXTOS_LOGIN);
+    return guardado === null ? null : lerTextosDoLogin(guardado);
+  } catch {
+    return null;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // A tela
@@ -313,7 +333,8 @@ export default function TelaDeLogin({
   onEntrar,
   bancoConfigurado,
   onDemonstracao,
-  aviso
+  aviso,
+  previa
 }: {
   email: string;
   onEmail: (valor: string) => void;
@@ -325,7 +346,57 @@ export default function TelaDeLogin({
   onDemonstracao: () => void;
   /** O aviso do sistema: o de erro vira mensagem no próprio formulário. */
   aviso: { text: string; type: 'success' | 'info' | 'error' } | null;
+  /**
+   * Modo prévia, para Configurações: desenha a tela com os textos que estão
+   * sendo digitados, sem ler o banco, sem foco automático e sem responder a
+   * clique — é um retrato vivo, não uma segunda porta de entrada.
+   */
+  previa?: { textos: TextosDoLogin };
 }) {
+  /*
+   * OS TEXTOS.
+   *
+   * Vêm de Configurações, pelo banco. Para a tela não abrir com o texto de
+   * fábrica e trocar diante de quem olha, ela começa com a última leitura
+   * guardada neste navegador e confere o banco em seguida. Na primeira visita,
+   * sem nada guardado, os textos esperam invisíveis até o banco responder —
+   * com um limite: passado 1,5 s, entra o texto de fábrica.
+   */
+  const [textosLidos, setTextosLidos] = useState<TextosDoLogin | null>(() =>
+    previa ? null : lerCache()
+  );
+  useEffect(() => {
+    if (previa) return;
+    let vivo = true;
+    const limite = setTimeout(() => {
+      if (vivo) setTextosLidos((atual) => atual || TEXTOS_LOGIN_PADRAO);
+    }, 1500);
+    DatabaseService.lerConfiguracao(CHAVE_TEXTOS_LOGIN).then((res) => {
+      if (!vivo || !res.success) return;
+      setTextosLidos(lerTextosDoLogin(res.value));
+      try {
+        window.localStorage.setItem(CACHE_TEXTOS_LOGIN, res.value || '');
+      } catch {
+        // Sem armazenamento, a próxima abertura só espera o banco de novo.
+      }
+    });
+    return () => {
+      vivo = false;
+      clearTimeout(limite);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const textos = previa?.textos || textosLidos || TEXTOS_LOGIN_PADRAO;
+  const prontos = !!previa || !!textosLidos;
+  const t = (chave: Exclude<keyof TextosDoLogin, 'registro'>) => textoNaTela(textos, chave);
+  const registroNaTela = textos.registro.map((l) => l.trim()).filter(Boolean);
+  const legendas = [
+    { texto: t('legendaMissoes'), ponto: 'rounded-full bg-[#F58220]' },
+    { texto: t('legendaEquipe'), ponto: 'rounded-full bg-cyan-300' },
+    { texto: t('legendaCheckins'), ponto: 'rounded-full bg-emerald-400' },
+    { texto: t('legendaCenso'), ponto: 'rounded-[2px] bg-blue-500' }
+  ].filter((l) => l.texto);
+
   const [verSenha, setVerSenha] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -353,10 +424,13 @@ export default function TelaDeLogin({
   }, [aviso]);
 
   useEffect(() => {
-    if (calmo) return;
-    const troca = setInterval(() => setLinha((n) => (n + 1) % REGISTRO.length), 3200);
+    if (calmo || registroNaTela.length < 2) return;
+    const troca = setInterval(
+      () => setLinha((n) => (n + 1) % Math.max(1, registroNaTela.length)),
+      3200
+    );
     return () => clearInterval(troca);
-  }, [calmo]);
+  }, [calmo, registroNaTela.length]);
 
   /** A mira: segue o cursor e escreve a coordenada daquele ponto. */
   const moverMira = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -375,16 +449,25 @@ export default function TelaDeLogin({
     }
   };
 
-  const podeEntrar = !!email.trim() && !!senha.trim() && !verificando;
-  const registro = REGISTRO[linha];
+  // Na prévia o botão aparece como fica pronto para o clique: é assim que
+  // ele é visto de verdade, depois de preenchido.
+  const podeEntrar = previa ? true : !!email.trim() && !!senha.trim() && !verificando;
+  const indiceDoRegistro = registroNaTela.length ? linha % registroNaTela.length : 0;
+  const registro = registroNaTela[indiceDoRegistro];
 
   const lerCaps = (e: React.KeyboardEvent<HTMLInputElement>) =>
     setCapsLock(!!e.getModifierState?.('CapsLock'));
 
   return (
-    <div className="lg-tela relative min-h-[100dvh] w-full flex font-sans text-white overflow-hidden selection:bg-orange-500 selection:text-white">
+    <div
+      className={`lg-tela relative ${previa ? 'h-full pointer-events-none select-none' : 'min-h-[100dvh]'} w-full flex font-sans text-white overflow-hidden selection:bg-orange-500 selection:text-white ${
+        prontos ? '' : 'lg-textos-esperando'
+      }`}
+      aria-hidden={previa ? true : undefined}
+      inert={previa ? true : undefined}
+    >
       {/* Aviso que não é erro (o modo demonstração, por exemplo) */}
-      {aviso && aviso.type !== 'error' && (
+      {!previa && aviso && aviso.type !== 'error' && (
         <div
           role="status"
           className="fixed top-4 left-1/2 -translate-x-1/2 z-[3000] max-w-sm px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-sky-400/20 bg-[#0C2A45]/95 backdrop-blur text-white lg-toast"
@@ -397,8 +480,8 @@ export default function TelaDeLogin({
       {/* ------------------------------------------------------------ MAPA */}
       <div
         ref={mapaRef}
-        onMouseMove={moverMira}
-        onMouseEnter={() => setMira(true)}
+        onMouseMove={previa ? undefined : moverMira}
+        onMouseEnter={() => !previa && setMira(true)}
         onMouseLeave={() => setMira(false)}
         className="absolute inset-0 lg:relative lg:inset-auto lg:flex-[1.35] overflow-hidden lg:cursor-crosshair"
       >
@@ -442,40 +525,60 @@ export default function TelaDeLogin({
         {/* O cabeçalho do mapa */}
         <div className="hidden lg:flex absolute top-7 left-8 items-center gap-3 pointer-events-none">
           <BrandMark size={40} rounded={11} />
-          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-sky-200/70 leading-none">
-            Mapa Operacional
-          </p>
+          {t('marca') && (
+            <p className="lg-texto text-[10px] font-black uppercase tracking-[0.3em] text-sky-200/70 leading-none">
+              {t('marca')}
+            </p>
+          )}
         </div>
 
         {/* A frase, e o registro que passa */}
-        <div className="hidden lg:block absolute left-8 bottom-10 right-10 max-w-xl pointer-events-none">
-          <h2 className="text-[40px] xl:text-[46px] font-black leading-[1.02] tracking-tight">
-            Toda a operação,
-            <br />
-            <span className="lg-titulo-destaque">num mapa só.</span>
-          </h2>
-          <p className="mt-4 text-[14px] leading-relaxed text-sky-100/65 max-w-md font-medium">
-            Missões, equipe em campo, check-ins com foto e áudio e o Censo de
-            cada setor — na mesma tela.
-          </p>
+        <div className="lg-texto hidden lg:block absolute left-8 bottom-10 right-10 max-w-xl pointer-events-none">
+          {(t('manchete') || t('mancheteDestaque')) && (
+            <h2 className="text-[40px] xl:text-[46px] font-black leading-[1.02] tracking-tight">
+              {t('manchete')}
+              {t('manchete') && t('mancheteDestaque') && <br />}
+              {t('mancheteDestaque') && (
+                <span className="lg-titulo-destaque">{t('mancheteDestaque')}</span>
+              )}
+            </h2>
+          )}
+          {t('descricao') && (
+            <p className="mt-4 text-[14px] leading-relaxed text-sky-100/65 max-w-md font-medium">
+              {t('descricao')}
+            </p>
+          )}
 
-          <div className="mt-6 flex items-center gap-4 text-[9.5px] font-black uppercase tracking-[0.18em] text-sky-100/55">
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#F58220]" /> Missões</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-cyan-300" /> Equipe</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-400" /> Check-ins</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-[2px] bg-blue-500" /> Censo</span>
-          </div>
+          {legendas.length > 0 && (
+            <div className="mt-6 flex items-center gap-4 text-[9.5px] font-black uppercase tracking-[0.18em] text-sky-100/55">
+              {legendas.map((l) => (
+                <span key={l.ponto} className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 ${l.ponto}`} /> {l.texto}
+                </span>
+              ))}
+            </div>
+          )}
 
-          <div className="mt-5 h-9 inline-flex items-center gap-2.5 pl-3 pr-4 rounded-xl bg-[#06111D]/75 border border-white/10 backdrop-blur-sm">
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-sky-300/70">
-              Ao vivo
-            </span>
-            <span className="w-px h-4 bg-white/10" />
-            <span key={linha} className="lg-registro flex items-center gap-2 text-[12px] font-semibold text-white/85">
-              <span className={`w-1.5 h-1.5 rounded-full ${registro.cor}`} />
-              {registro.texto}
-            </span>
-          </div>
+          {registro && (
+            <div className="mt-5 h-9 inline-flex items-center gap-2.5 pl-3 pr-4 rounded-xl bg-[#06111D]/75 border border-white/10 backdrop-blur-sm">
+              {t('rotuloAoVivo') && (
+                <>
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-sky-300/70">
+                    {t('rotuloAoVivo')}
+                  </span>
+                  <span className="w-px h-4 bg-white/10" />
+                </>
+              )}
+              <span key={`${indiceDoRegistro}-${registro}`} className="lg-registro flex items-center gap-2 text-[12px] font-semibold text-white/85">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    CORES_DO_REGISTRO[indiceDoRegistro % CORES_DO_REGISTRO.length]
+                  }`}
+                />
+                {registro}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -493,22 +596,23 @@ export default function TelaDeLogin({
             {/* Marca no celular, onde o mapa é só fundo */}
             <div className="lg:hidden flex items-center gap-2.5 mb-7">
               <BrandMark size={36} rounded={10} />
-              <p className="text-[9.5px] font-black uppercase tracking-[0.28em] text-sky-200/70 leading-none">
-                Mapa Operacional
-              </p>
+              {t('marca') && (
+                <p className="lg-texto text-[9.5px] font-black uppercase tracking-[0.28em] text-sky-200/70 leading-none">
+                  {t('marca')}
+                </p>
+              )}
             </div>
 
-            <h1 className="text-[30px] sm:text-[34px] font-black tracking-tight leading-[1.05]">
-              Inteligência
-              <br />
-              Territorial
+            {/* Enter no campo de Configurações quebra a linha aqui. */}
+            <h1 className="lg-texto text-[30px] sm:text-[34px] font-black tracking-tight leading-[1.05] whitespace-pre-line break-words">
+              {t('titulo')}
             </h1>
 
             <form onSubmit={onEntrar} className="mt-8 space-y-5" noValidate>
               {/* E-mail */}
               <div>
-                <label htmlFor="lg-email" className="block text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mb-2">
-                  E-mail
+                <label htmlFor="lg-email" className="lg-texto block text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mb-2">
+                  {t('rotuloEmail')}
                 </label>
                 <div className={`lg-campo ${erro ? 'lg-campo-erro' : ''}`}>
                   <Mail className="w-[18px] h-[18px] shrink-0 text-slate-500 lg-campo-icone" />
@@ -519,10 +623,10 @@ export default function TelaDeLogin({
                     autoComplete="username"
                     autoCapitalize="none"
                     spellCheck={false}
-                    autoFocus
+                    autoFocus={!previa}
                     required
                     value={email}
-                    placeholder="voce@coordenacao.com"
+                    placeholder={t('exemploEmail')}
                     onChange={(e) => {
                       onEmail(e.target.value);
                       setErro(null);
@@ -534,8 +638,8 @@ export default function TelaDeLogin({
 
               {/* Senha */}
               <div>
-                <label htmlFor="lg-senha" className="block text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mb-2">
-                  Senha
+                <label htmlFor="lg-senha" className="lg-texto block text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mb-2">
+                  {t('rotuloSenha')}
                 </label>
                 <div className={`lg-campo ${erro ? 'lg-campo-erro' : ''}`}>
                   <Lock className="w-[18px] h-[18px] shrink-0 text-slate-500 lg-campo-icone" />
@@ -570,7 +674,7 @@ export default function TelaDeLogin({
                 {capsLock && (
                   <p className="mt-2 flex items-center gap-1.5 text-[11px] font-bold text-amber-300">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    Caps Lock está ligado
+                    {t('avisoCapsLock') || TEXTOS_LOGIN_PADRAO.avisoCapsLock}
                   </p>
                 )}
               </div>
@@ -590,18 +694,18 @@ export default function TelaDeLogin({
                 {verificando ? (
                   <>
                     <span className="lg-mini-radar" aria-hidden="true" />
-                    Verificando credenciais
+                    {t('botaoVerificando')}
                   </>
                 ) : (
                   <>
-                    Entrar na operação
+                    <span className="lg-texto">{t('botaoEntrar')}</span>
                     <ArrowRight className="w-4 h-4 stroke-[2.75] transition-transform group-enabled:group-hover:translate-x-1" />
                   </>
                 )}
               </button>
             </form>
 
-            {!bancoConfigurado && (
+            {!bancoConfigurado && !previa && (
               <div className="mt-7 pt-6 border-t border-white/[0.07]">
                 <p className="text-[11.5px] leading-relaxed text-slate-400">
                   <strong className="text-amber-300">Integração offline:</strong>{' '}
