@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @import "leaflet/dist/leaflet.css";
 
 /* Leaflet specific overrides for political campaign rendering */
@@ -1891,4 +1892,231 @@
 
 .op-rolagem::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
+}
+
+/* ===========================================================================
+ * ANIMAÇÕES DO SISTEMA
+ *
+ * Uma regra para todas: animação diz o que mudou, de onde veio, e sai da
+ * frente. Nada aqui passa de ~0,6 s, nada fica em loop chamando atenção à
+ * toa (os loops que existem — o halo do favorito, o marcador que respira —
+ * marcam algo que a pessoa escolheu ver) e tudo some para quem pediu menos
+ * movimento no sistema.
+ *
+ * As entradas usam só opacidade e transform, que a placa de vídeo anima sem
+ * refazer o layout da página: a tela continua leve no celular mais simples.
+ * ======================================================================== */
+@keyframes anim-sobe {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes anim-tela {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+/* A tela ou aba que acabou de abrir. */
+.anim-tela {
+  animation: anim-tela 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.anim-sobe {
+  animation: anim-sobe 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Cartões em fila: cada um entra 70 ms depois do anterior (--i é a posição). */
+.anim-cascata {
+  animation: anim-sobe 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+
+/* O cartão levanta sob o cursor. `translate`, e não `transform`, para não
+   brigar com a animação de entrada, que termina segurando o transform. */
+.card-eleva {
+  transition: translate 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s;
+}
+
+@media (hover: hover) {
+  .card-eleva:hover {
+    translate: 0 -3px;
+  }
+}
+
+/* A linha de tendência se desenha da esquerda para a direita. */
+.anim-traco path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: anim-traco 1.1s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+  animation-delay: calc(0.25s + var(--i, 0) * 90ms);
+}
+
+@keyframes anim-traco {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ------------------------------------------------ o mapa ---------------- */
+
+/* O check-in que acabou de aparecer no mapa brota do chão, em cascata.
+   Anima o miolo: o elemento de fora é posicionado pelo Leaflet com transform. */
+.ck-marcador-entra > div {
+  animation: ck-marcador-brota 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: var(--atraso, 0ms);
+}
+
+@keyframes ck-marcador-brota {
+  0% {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.3);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Só favoritos: cada favorito ganha um halo dourado que respira. */
+.ck-fav-brilho > div::before,
+.ck-fav-brilho > div::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 9999px;
+  border: 2px solid #F59E0B;
+  pointer-events: none;
+  animation: ck-fav-onda 2.2s ease-out infinite;
+}
+
+.ck-fav-brilho > div::after {
+  animation-delay: 1.1s;
+}
+
+.ck-fav-brilho > div > div:first-child {
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.45), 0 0 22px rgba(245, 158, 11, 0.65) !important;
+}
+
+@keyframes ck-fav-onda {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------- o botão de favoritos ------- */
+.fav-estrela-acende {
+  animation: fav-estrela 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes fav-estrela {
+  0% {
+    transform: scale(0.4) rotate(-40deg);
+  }
+  60% {
+    transform: scale(1.35) rotate(12deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.fav-faiscas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.fav-faiscas span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px;
+  border-radius: 9999px;
+  background: #FEF3C7;
+  box-shadow: 0 0 6px #FCD34D;
+  transform: rotate(var(--ang)) translateY(0);
+  animation: fav-faisca 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes fav-faisca {
+  0% {
+    opacity: 1;
+    transform: rotate(var(--ang)) translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--ang)) translateY(-17px) scale(0.4);
+  }
+}
+
+/* ------------------------------------------------- o download ---------- */
+.baixar-girando {
+  animation: op-gira 0.9s linear infinite;
+}
+
+.baixar-desce {
+  animation: baixar-desce 0.9s ease-in-out infinite;
+}
+
+@keyframes baixar-desce {
+  0%,
+  100% {
+    transform: translateY(-2px);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+.baixar-visto {
+  animation: fav-estrela 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-tela,
+  .anim-sobe,
+  .anim-cascata,
+  .ck-marcador-entra > div,
+  .fav-estrela-acende,
+  .fav-faiscas span,
+  .baixar-desce,
+  .baixar-visto {
+    animation: none;
+  }
+  .anim-traco path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .ck-fav-brilho > div::before,
+  .ck-fav-brilho > div::after {
+    animation: none;
+    opacity: 0.8;
+  }
+  .card-eleva:hover {
+    translate: none;
+  }
 }

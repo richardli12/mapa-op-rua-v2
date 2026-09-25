@@ -25,6 +25,7 @@ import { Candidate, PriorityLevel } from '../../types';
 import { DatabaseService } from '../../databaseClient';
 import type { ConfirmRequest } from '../ConfirmDialog';
 import MapaDeOperacoes from './MapaDeOperacoes';
+import Contador from '../Contador';
 import DetalheDaOperacao, { dataCurta } from './DetalheDaOperacao';
 import {
   DeltaOperacional,
@@ -339,12 +340,13 @@ export default function AbaDeltaOperacional({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
-          {deltas.map((d) => {
+          {deltas.map((d, indice) => {
             const link = linkDoPainelOperacional(d.access_token);
             return (
               <div
                 key={d.id}
-                className={`bg-white border rounded-3xl shadow-sm p-5 flex flex-col gap-4 transition-opacity ${
+                style={{ '--i': Math.min(indice, 8) } as React.CSSProperties}
+                className={`anim-cascata card-eleva bg-white border rounded-3xl shadow-sm p-5 flex flex-col gap-4 transition-opacity ${
                   d.active ? 'border-slate-200' : 'border-slate-200 opacity-70'
                 }`}
               >
@@ -433,7 +435,9 @@ export default function AbaDeltaOperacional({
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2.5">
                     <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">Operações</p>
-                    <p className="text-[20px] font-black text-[#0D233A] leading-tight tabular-nums">{opsPorDelta[d.id] || 0}</p>
+                    <p className="text-[20px] font-black text-[#0D233A] leading-tight tabular-nums">
+                      <Contador valor={opsPorDelta[d.id] || 0} />
+                    </p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2.5">
                     <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">Acesso</p>

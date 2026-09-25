@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { CalendarDays, ChevronDown, RotateCcw, AlertTriangle, Clock, CalendarClock, CalendarOff, Layers, Check } from 'lucide-react';
+import { CalendarDays, ChevronDown, RotateCcw, AlertTriangle, Clock, CalendarClock, CalendarOff, Layers, Check, Star } from 'lucide-react';
 
 /** Situação do prazo de uma missão, do ponto de vista de hoje. */
 export type SituacaoDePrazo = 'atrasada' | 'hoje' | 'proximos' | 'sem';
@@ -10,6 +10,8 @@ export interface EstadoDoPeriodo {
   /** Camadas ligadas. Desligar uma tira ela do mapa, período ou não. */
   verCheckIns: boolean;
   verMissoes: boolean;
+  /** Só os check-ins com estrela. Liga junto com as missões desligadas. */
+  soFavoritos: boolean;
   prazos: SituacaoDePrazo[];
 }
 
@@ -24,6 +26,8 @@ interface Props {
     checkInsTotal: number;
     missoesVisiveis: number;
     missoesTotal: number;
+    /** Favoritos dentro do recorte de data. */
+    favoritos: number;
   };
 }
 
@@ -105,10 +109,10 @@ export const rotuloDoPeriodo = (de: string, ate: string) => {
  */
 export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, contagem }: Props) {
   const caixa = useRef<HTMLDivElement | null>(null);
-  const { de, ate, verCheckIns, verMissoes, prazos } = valor;
+  const { de, ate, verCheckIns, verMissoes, prazos, soFavoritos } = valor;
 
   const ligado =
-    !!de || !!ate || prazos.length > 0 || !verCheckIns || !verMissoes;
+    !!de || !!ate || prazos.length > 0 || !verCheckIns || !verMissoes || soFavoritos;
 
   useEffect(() => {
     if (!aberto) return;
@@ -141,7 +145,7 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
     });
 
   const limpar = () =>
-    onMudar({ de: '', ate: '', verCheckIns: true, verMissoes: true, prazos: [] });
+    onMudar({ de: '', ate: '', verCheckIns: true, verMissoes: true, soFavoritos: false, prazos: [] });
 
   const escondidos =
     contagem.checkInsTotal -
@@ -168,7 +172,7 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
             <span className="text-[9.5px] font-semibold text-white/75 leading-none mt-1">
               {[
                 verCheckIns &&
-                  `${contagem.checkInsVisiveis} check-in${
+                  `${contagem.checkInsVisiveis} ${soFavoritos ? 'favorito' : 'check-in'}${
                     contagem.checkInsVisiveis === 1 ? '' : 's'
                   }`,
                 verMissoes &&
@@ -284,7 +288,16 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
                   <button
                     key={op.chave}
                     type="button"
-                    onClick={() => onMudar({ ...valor, [op.chave]: !marcado })}
+                    onClick={() =>
+                      onMudar({
+                        ...valor,
+                        [op.chave]: !marcado,
+                        // Missões de volta desfazem o "só favoritos": favorito
+                        // é um corte dos check-ins, não do mapa inteiro.
+                        ...(op.chave === 'verMissoes' && !marcado ? { soFavoritos: false } : {}),
+                        ...(op.chave === 'verCheckIns' && marcado ? { soFavoritos: false } : {})
+                      })
+                    }
                     className={`px-3 py-2 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2 ${
                       marcado
                         ? 'bg-blue-50/70 border-[#015FC9]/40 text-[#0D233A]'
@@ -310,6 +323,42 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
                 );
               })}
             </div>
+            {verCheckIns && (
+              <button
+                type="button"
+                onClick={() =>
+                  onMudar({
+                    ...valor,
+                    soFavoritos: !soFavoritos,
+                    verMissoes: soFavoritos ? valor.verMissoes : false
+                  })
+                }
+                className={`mt-2 w-full px-3 py-2 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                  soFavoritos
+                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                    : 'bg-white border-slate-200 text-slate-500 hover:border-amber-200'
+                }`}
+              >
+                <Star
+                  className="w-4 h-4 shrink-0"
+                  fill={soFavoritos || contagem.favoritos > 0 ? '#FCD34D' : 'none'}
+                  color={soFavoritos || contagem.favoritos > 0 ? '#F59E0B' : '#94A3B8'}
+                />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[11.5px] font-black leading-none">Só os favoritos</span>
+                  <span className="block text-[10px] font-bold mt-1 leading-none opacity-70">
+                    {contagem.favoritos} {contagem.favoritos === 1 ? 'check-in com estrela' : 'check-ins com estrela'}
+                  </span>
+                </span>
+                <span
+                  className={`w-8 h-[18px] rounded-full flex items-center px-0.5 transition-colors ${
+                    soFavoritos ? 'bg-amber-500 justify-end' : 'bg-slate-300 justify-start'
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 bg-white rounded-full block shadow" />
+                </span>
+              </button>
+            )}
             <p className="text-[10px] text-slate-400 font-semibold leading-snug mt-2">
               Desligar uma camada tira ela do mapa. O que fica é cortado pelo
               período: o check-in pela data em que foi registrado, a missão

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import BrandMark from '../BrandMark';
 import CarregandoOperacional from '../CarregandoOperacional';
+import Contador from '../Contador';
 import MapaDeOperacoes, { ModoDoMapa, Raio, chaveDoPonto } from './MapaDeOperacoes';
 import CriarOperacao, { RASCUNHO_VAZIO, RascunhoDaOperacao } from './CriarOperacao';
 import DetalheDaOperacao, { AnelDeProgresso, dataCurta } from './DetalheDaOperacao';
@@ -622,7 +623,7 @@ function CentralDoOperacional({ sessao, onSair }: { sessao: Sessao; onSair: () =
                         }`}
                       >
                         <span className="block text-[18px] font-black tabular-nums leading-none" style={{ color: f.cor }}>
-                          {contagem[f.id] || 0}
+                          <Contador valor={contagem[f.id] || 0} duracao={600} />
                         </span>
                         <span className="block mt-1 text-[9.5px] font-bold text-slate-400 truncate">{f.rotulo}</span>
                       </button>
@@ -663,7 +664,7 @@ function CentralDoOperacional({ sessao, onSair }: { sessao: Sessao; onSair: () =
                     </p>
                   </div>
                 ) : (
-                  listadas.map((op) => {
+                  listadas.map((op, indice) => {
                     const cor = corDaPrioridade(op.priority);
                     const nivel = niveis.find((n) => n.id === op.priority);
                     const st = STATUS_DA_OPERACAO[op.status] || STATUS_DA_OPERACAO.planejada;
@@ -677,7 +678,8 @@ function CentralDoOperacional({ sessao, onSair }: { sessao: Sessao; onSair: () =
                           setVista({ tipo: 'detalhe', id: op.id });
                           setFocar({ lat: op.center.lat, lng: op.center.lng, raio: op.radius, pedido: Date.now() });
                         }}
-                        className="group w-full text-left rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] hover:border-white/[0.12] p-4 transition-colors cursor-pointer relative overflow-hidden"
+                        style={{ '--i': Math.min(indice, 8) } as React.CSSProperties}
+                        className="anim-cascata group w-full text-left rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] hover:border-white/[0.12] p-4 transition-colors cursor-pointer relative overflow-hidden"
                       >
                         <span className="absolute left-0 inset-y-0 w-1" style={{ background: cor }} />
                         <div className="flex items-center justify-between gap-2">
