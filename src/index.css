@@ -1567,3 +1567,328 @@
 .lg-textos-esperando .lg-texto {
   opacity: 0;
 }
+
+/* ---------------------------------------------------------------------------
+ * Delta Operacional: o mapa de planejamento
+ *
+ * Ver MapaDeOperacoes.tsx. O mapa de rua claro vira escuro por filtro, e não
+ * por outro servidor de mapa: é o mesmo desenho que a equipe conhece, só que
+ * com o contraste de uma sala de operações — onde o que brilha é o que foi
+ * marcado, e não a rua.
+ * ------------------------------------------------------------------------ */
+.opm-escuro {
+  background: #0A1826;
+}
+
+.opm-escuro .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(185deg) brightness(0.92) contrast(0.92) saturate(0.55);
+}
+
+.opm-mirando,
+.opm-mirando .leaflet-interactive,
+.opm-mirando .leaflet-grab {
+  cursor: crosshair !important;
+}
+
+.opm-icone {
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.opm-pino {
+  position: relative;
+  width: 26px;
+  height: 34px;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.45));
+  transition: opacity 0.2s, transform 0.2s;
+  cursor: pointer;
+}
+
+.opm-ck {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s, transform 0.2s;
+  cursor: pointer;
+}
+
+.opm-ck-ponto {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: #10B981;
+}
+
+/* Fora do raio: apagado, para o olho ficar dentro do círculo. */
+.opm-fora {
+  opacity: 0.28;
+  filter: grayscale(0.7);
+}
+
+/* Dentro do raio, ainda não escolhido: um anel branco pulsando chama o clique. */
+.opm-dentro::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border-radius: 9999px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  animation: opm-chama 1.6s ease-out infinite;
+  pointer-events: none;
+}
+
+.opm-ck.opm-dentro::after {
+  bottom: -4px;
+  width: 26px;
+  height: 26px;
+  margin-left: -13px;
+}
+
+@keyframes opm-chama {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+.opm-escolhido {
+  transform: scale(1.12);
+}
+
+.opm-visto {
+  display: none;
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #F58220;
+  border: 2px solid #fff;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(245, 130, 32, 0.6);
+}
+
+.opm-escolhido .opm-visto {
+  display: flex;
+}
+
+.opm-alca-centro,
+.opm-alca-borda {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 3px solid #F58220;
+  box-shadow: 0 0 0 4px rgba(245, 130, 32, 0.25), 0 3px 8px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+}
+
+.opm-alca-centro {
+  background: #F58220;
+  border-color: #fff;
+}
+
+.opm-raio-vivo {
+  animation: opm-tracejado 20s linear infinite;
+}
+
+@keyframes opm-tracejado {
+  to {
+    stroke-dashoffset: -300;
+  }
+}
+
+.opm-operacao-foco {
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.35));
+}
+
+.leaflet-tooltip.opm-dica {
+  background: rgba(6, 17, 29, 0.94);
+  color: #E2E8F0;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font: 600 11.5px/1.35 ui-sans-serif, system-ui, sans-serif;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+}
+
+.leaflet-tooltip.opm-dica strong {
+  color: #fff;
+  font-weight: 800;
+}
+
+.leaflet-tooltip.opm-dica span {
+  color: #94A3B8;
+}
+
+.leaflet-tooltip.opm-dica em {
+  color: #FDBA74;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.leaflet-tooltip.opm-dica::before {
+  border-top-color: rgba(6, 17, 29, 0.94) !important;
+}
+
+.leaflet-tooltip.opm-medida {
+  background: #F58220;
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: 800 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  box-shadow: 0 6px 16px rgba(245, 130, 32, 0.45);
+}
+
+.leaflet-tooltip.opm-medida::before {
+  border-right-color: #F58220 !important;
+}
+
+.opm-escuro .leaflet-control-zoom a {
+  background: #0F2236;
+  color: #E2E8F0;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.opm-escuro .leaflet-control-zoom a:hover {
+  background: #163049;
+}
+
+/* A operação que acabou de nascer: o círculo pisca uma vez no mapa. */
+@keyframes op-nasce {
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.op-nasce {
+  animation: op-nasce 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .opm-dentro::after,
+  .opm-raio-vivo,
+  .op-nasce {
+    animation: none;
+  }
+}
+
+/* Delta Operacional: as peças do painel escuro. */
+.op-campo {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.op-campo::placeholder {
+  color: #475569;
+}
+
+.op-campo:focus {
+  outline: none;
+  background: rgba(245, 130, 32, 0.05);
+  border-color: rgba(245, 130, 32, 0.7);
+  box-shadow: 0 0 0 4px rgba(245, 130, 32, 0.14);
+}
+
+.op-campo-erro {
+  border-color: rgba(251, 113, 133, 0.6);
+}
+
+.op-botao-principal {
+  width: 100%;
+  height: 50px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #F58220 0%, #EA580C 100%);
+  box-shadow: 0 10px 26px -12px rgba(245, 130, 32, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform 0.1s, filter 0.2s;
+}
+
+.op-botao-principal:hover:enabled {
+  filter: brightness(1.08);
+}
+
+.op-botao-principal:active:enabled {
+  transform: scale(0.985);
+}
+
+.op-botao-principal:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  color: #64748B;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  cursor: not-allowed;
+}
+
+.op-regua {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.op-regua::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: #F58220;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(245, 130, 32, 0.6);
+  cursor: pointer;
+}
+
+.op-regua::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #F58220;
+  border: 3px solid #fff;
+  cursor: pointer;
+}
+
+.op-rolagem::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
