@@ -32,7 +32,7 @@ hospedagem (e em `.env.local` para rodar local):
 | `NEXUS_GC_BASE_URL` | Opcional: aponta o Nexu-GC para outro ambiente. Sem ela vale a URL de produção. |
 | `CCO_API_KEY` | Território e Censo (CCO). |
 | `SERPAPI_API_KEY` | Busca de estabelecimentos e de endereços no mapa. |
-| `OPENAI_API_KEY` | Relatório do NEO e transcrição de áudio. `OPENAI_MODEL` e `OPENAI_TRANSCRIBE_MODEL` trocam os modelos. |
+| `OPENAI_API_KEY` | Relatório do NEO, transcrição de áudio e o "Gerar ícone com NEO". `OPENAI_MODEL`, `OPENAI_TRANSCRIBE_MODEL` e `OPENAI_ICON_MODEL` (padrão `gpt-5.4-mini`) trocam os modelos. |
 | `DEVICE_IP_HMAC_KEY` | Sal do registro de dispositivo. |
 
 Sem a chave, a rota correspondente responde com um recado dizendo qual

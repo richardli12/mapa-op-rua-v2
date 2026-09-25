@@ -35,6 +35,7 @@ import CarregandoOperacional from "./components/CarregandoOperacional";
 import TelaDeLogin from "./components/TelaDeLogin";
 import FiltroDeFavoritos from "./components/FiltroDeFavoritos";
 import Contador from "./components/Contador";
+import SeletorDeIcone from "./components/SeletorDeIcone";
 import PainelDeltaOperacional from "./components/operacional/PainelDeltaOperacional";
 import CadastroDeltaOperacional from "./components/operacional/CadastroDeltaOperacional";
 import AbaDeltaOperacional from "./components/operacional/AbaDeltaOperacional";
@@ -171,7 +172,6 @@ import {
   FerramentasDoMapa,
   GrupoDeFerramentas,
 } from "./components/FerramentasDoMapa";
-import { OPERATION_ICONS } from "./operationIcons";
 
 /**
  * Os blocos do trilho de ferramentas do mapa.
@@ -8549,23 +8549,13 @@ export default function App() {
                 <label className="block text-[10px] uppercase tracking-widest font-black text-slate-400 mb-1.5">
                   Ícone
                 </label>
-                <div className="grid grid-cols-8 gap-1.5 max-h-36 overflow-y-auto pr-1">
-                  {OPERATION_ICONS.map((icone) => (
-                    <button
-                      key={icone.key}
-                      type="button"
-                      title={icone.label}
-                      onClick={() => setOpTypeIcon(icone.key)}
-                      className={`h-10 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
-                        opTypeIcon === icone.key
-                          ? "border-[#015FC9] bg-[#EFF4FB] text-[#015FC9]"
-                          : "border-slate-200 text-slate-400 hover:bg-slate-50"
-                      }`}
-                    >
-                      <OperationIcon icon={icone.key} size={18} />
-                    </button>
-                  ))}
-                </div>
+                <SeletorDeIcone
+                  valor={opTypeIcon}
+                  onMudar={setOpTypeIcon}
+                  cor={opTypeColor}
+                  nome={opTypeLabel}
+                  descricao={opTypeDescription}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -15343,30 +15333,15 @@ export default function App() {
                   <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">
                     Ícone no mapa
                   </label>
-                  <div className="grid grid-cols-7 sm:grid-cols-10 gap-1.5 bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
-                    {OPERATION_ICONS.map((icon) => {
-                      const isActive = icon.key === opTypeIcon;
-                      return (
-                        <button
-                          type="button"
-                          key={icon.key}
-                          title={icon.label}
-                          onClick={() => setOpTypeIcon(icon.key)}
-                          className={`aspect-square rounded-lg flex items-center justify-center border transition-all cursor-pointer ${
-                            isActive
-                              ? "border-transparent text-white shadow-xs scale-105"
-                              : "border-slate-150 bg-slate-50 text-slate-500 hover:bg-slate-100"
-                          }`}
-                          style={
-                            isActive
-                              ? { backgroundColor: opTypeColor }
-                              : undefined
-                          }
-                        >
-                          <OperationIcon icon={icon.key} size={15} />
-                        </button>
-                      );
-                    })}
+                  <div className="bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
+                    <SeletorDeIcone
+                      valor={opTypeIcon}
+                      onMudar={setOpTypeIcon}
+                      cor={opTypeColor}
+                      nome={opTypeLabel}
+                      descricao={opTypeDescription}
+                      compacto
+                    />
                   </div>
                 </div>
 
