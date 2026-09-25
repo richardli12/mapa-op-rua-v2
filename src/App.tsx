@@ -31,6 +31,7 @@ import PesquisaEstabelecimentos from "./components/PesquisaEstabelecimentos";
 import FichaEstabelecimento from "./components/FichaEstabelecimento";
 import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import FichaDoRecorteNoMapa from "./components/FichaDoRecorteNoMapa";
+import CarregandoOperacional from "./components/CarregandoOperacional";
 import { UnidadeDeSaude } from "./dados/ubs";
 import CamadasDeInteligencia, {
   EstadoDasCamadas,
@@ -5509,48 +5510,17 @@ export default function App() {
 
   if (currentUrlView === "checkin") {
     if (isCheckInPageInitializing) {
+      // A mesma espera do painel: quem está na rua abrindo o check-in está
+      // entrando na mesma operação que a central enxerga.
       return (
-        <div className="min-h-screen w-full bg-[#E9F0F7] text-slate-800 flex flex-col justify-center items-center p-4 select-none font-sans">
-          <div className="flex flex-col items-center justify-center">
-            {/* Round Spinning Accent Arc exactly like the image */}
-            <div className="relative flex items-center justify-center w-28 h-28">
-              <svg
-                className="animate-spin w-24 h-24 text-[#00A5FF]"
-                viewBox="0 0 100 100"
-                style={{ animationDuration: "1s" }}
-              >
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="8"
-                  strokeLinecap="round"
-                  strokeDasharray="95 200"
-                  d="M 50,10 A 40,40 0 0,1 90,50"
-                />
-              </svg>
-            </div>
-
-            {/* Simulated interactive linear progress bar */}
-            <div className="w-56 h-1 bg-white rounded-full overflow-hidden mt-12 relative shadow-2xs">
-              <motion.div
-                className="h-full bg-blue-600 rounded-full"
-                initial={{ width: "12%" }}
-                animate={{ width: ["12%", "35%", "65%", "85%", "100%", "12%"] }}
-                transition={{
-                  duration: 4,
-                  ease: "easeInOut",
-                  repeat: Infinity,
-                  repeatType: "loop",
-                }}
-              />
-            </div>
-
-            {/* Bold text in Portuguese identical to image style */}
-            <span className="text-[11px] font-black tracking-[0.25em] text-[#5A6E85] mt-6.5 uppercase select-none font-sans">
-              Carregando...
-            </span>
-          </div>
-        </div>
+        <CarregandoOperacional
+          fixo={false}
+          etapas={[
+            "Localizando sua posição",
+            "Buscando as suas missões",
+            "Preparando o check-in",
+          ]}
+        />
       );
     }
 
