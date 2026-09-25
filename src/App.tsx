@@ -32,6 +32,7 @@ import FichaEstabelecimento from "./components/FichaEstabelecimento";
 import InteligenciaTerritorial from "./components/InteligenciaTerritorial";
 import FichaDoRecorteNoMapa from "./components/FichaDoRecorteNoMapa";
 import CarregandoOperacional from "./components/CarregandoOperacional";
+import TelaDeLogin from "./components/TelaDeLogin";
 import { UnidadeDeSaude } from "./dados/ubs";
 import CamadasDeInteligencia, {
   EstadoDasCamadas,
@@ -108,7 +109,6 @@ import {
   Edit2,
   ChevronRight,
   Eye,
-  EyeOff,
   Link,
   Sparkles,
   Download,
@@ -7785,186 +7785,27 @@ export default function App() {
     };
 
     return (
-      <div className="min-h-screen w-full bg-[#DBE2E9] text-slate-800 flex flex-col justify-center items-center p-4 selection:bg-indigo-600 selection:text-white font-sans">
-        {/* Toast Notification HUD */}
-        <AnimatePresence>
-          {notification && (
-            <motion.div
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.95 }}
-              className="fixed top-4 left-1/2 -translate-x-1/2 z-[3000] max-w-sm px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border border-indigo-500/20 bg-indigo-650 text-white"
-            >
-              <Check className="w-5 h-5 flex-shrink-0 text-emerald-300" />
-              <span className="text-xs font-semibold">{notification.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Logo & Header */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex flex-col items-center mb-6 text-center select-none"
-        >
-          <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center p-1.5 shadow-lg border border-slate-100 mb-3">
-            <img
-              src={BRAND_LOGO}
-              alt="Logo Inteligência Territorial"
-              className="w-full h-full object-contain rounded-full"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-          <h1 className="font-extrabold text-black text-[32px] tracking-tight leading-none font-sans text-center">
-            Inteligência Territorial
-          </h1>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-[460px] w-full bg-white rounded-[3rem] shadow-2xl p-8 md:p-10 border border-slate-100 flex flex-col gap-6 relative overflow-hidden text-left"
-        >
-          {/* Top Right Decorative Illustration */}
-          <div className="absolute right-0 top-4 w-36 h-36 pointer-events-none hidden xs:block">
-            {/* Smartphone mockup outline */}
-            <div className="absolute right-4 top-4 w-20 h-32 border-[3px] border-[#EBF1F6] rounded-2xl bg-white transform rotate-[15deg] shadow-3xs flex items-center justify-center">
-              <div className="w-16 h-28 bg-[#FAFBFD] border border-slate-50 rounded-lg flex flex-col justify-between p-2">
-                <div className="w-6 h-1.5 bg-[#EBF1F6] rounded-full mx-auto" />
-                <div className="flex-1 flex flex-col justify-center gap-1 opacity-20">
-                  <div className="w-full h-2 bg-[#EBF1F6] rounded-xs" />
-                  <div className="w-5/6 h-2 bg-[#EBF1F6] rounded-xs" />
-                </div>
-              </div>
-            </div>
-            {/* Floating circular bubble with lock icon */}
-            <div className="absolute right-14 top-14 w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-lg border border-slate-100 transform -rotate-12">
-              <div className="w-9 h-9 rounded-full border border-black/15 flex items-center justify-center text-black bg-white">
-                <Lock className="w-4 h-4 text-black" />
-              </div>
-            </div>
-            {/* Halftone dots decoration */}
-            <div className="absolute right-24 top-8 w-10 h-10 opacity-30 flex flex-wrap gap-1 leading-none z-[-1]">
-              {Array.from({ length: 9 }).map((_, i) => (
-                <span
-                  key={i}
-                  className="inline-block w-1.5 h-1.5 bg-slate-300 rounded-full"
-                />
-              ))}
-            </div>
-          </div>
-
-          <form
-            onSubmit={handleAdminLoginSubmit}
-            className="space-y-4 text-left mt-4"
-          >
-            <div className="bg-[#F6F8FA] rounded-[1.8rem] p-6 border border-slate-100/50 space-y-4">
-              {/* Email Input */}
-              <div className="space-y-2">
-                <label className="block text-[11px] font-extrabold uppercase tracking-widest text-black ml-1">
-                  E-mail
-                </label>
-                <div className="relative shadow-md md:shadow-lg rounded-2xl bg-white border border-slate-300 flex items-center px-4 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-600 transition-all">
-                  <span className="text-[#A5B4C2] mr-3">
-                    <Users className="w-5 h-5 text-blue-600/75" />
-                  </span>
-                  <input
-                    type="email"
-                    required
-                    placeholder=""
-                    value={adminEmail}
-                    onChange={(e) =>
-                      setAdminEmail(
-                        e.target.value.toLowerCase().replace(/\s/g, ""),
-                      )
-                    }
-                    className="w-full py-4 bg-transparent border-none text-[15px] font-bold text-[#0D233A] placeholder-[#C2D0DC] focus:outline-hidden"
-                  />
-                </div>
-              </div>
-
-              {/* Password Input */}
-              <div className="space-y-2">
-                <label className="block text-[11px] font-extrabold uppercase tracking-widest text-black ml-1">
-                  Senha
-                </label>
-                <div className="relative shadow-md md:shadow-lg rounded-2xl bg-white border border-slate-300 flex items-center px-4 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-600 transition-all">
-                  <span className="text-[#A5B4C2] mr-3">
-                    <Lock className="w-5 h-5 text-blue-600/75" />
-                  </span>
-                  <input
-                    type={showAdminPassword ? "text" : "password"}
-                    required
-                    placeholder=""
-                    value={adminPassword}
-                    /*
-                     * A senha vai para o banco como foi digitada.
-                     *
-                     * Aqui ela passava por replace(/\s/g, ""), que apagava os
-                     * espaços sem avisar ninguém: quem tem espaço na senha
-                     * digitava a senha certa, o sistema mandava outra e a
-                     * resposta voltava "usuário ou senha inválidos" — sem nada
-                     * na tela que explicasse por quê.
-                     */
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full py-4 bg-transparent border-none text-[15px] font-bold text-[#0D233A] placeholder-[#C2D0DC] focus:outline-hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowAdminPassword(!showAdminPassword)}
-                    className="text-[#98A6B5] hover:text-[#0D233A] transition-colors focus:outline-hidden"
-                  >
-                    {showAdminPassword ? (
-                      <EyeOff className="w-5 h-5" />
-                    ) : (
-                      <Eye className="w-5 h-5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={
-                isVerifyingAdminLogin ||
-                !adminEmail.trim() ||
-                !adminPassword.trim()
-              }
-              className="w-full py-4.5 bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-500/20 disabled:bg-[#C2D0DC] disabled:cursor-not-allowed text-white font-extrabold text-[#FFF] text-xs uppercase tracking-wider rounded-full transition-all shadow-xs active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer mt-4 font-sans"
-            >
-              {isVerifyingAdminLogin ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>Autenticando...</span>
-                </>
-              ) : (
-                <>
-                  <span>Entrar</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
-          </form>
-
-          {!isDatabaseConfigured && (
-            <div className="mt-1 pt-4 border-t border-slate-100/80 space-y-2">
-              <p className="text-[10.5px] text-zinc-500 leading-normal bg-[#FAFAD2]/60 p-3 rounded-2xl border border-[#FAFAD2] text-left font-sans">
-                ⚠️ <strong>Integração Offline:</strong> as credenciais do
-                banco de dados não foram preenchidas. Caso queira testar o
-                fluxo de login de forma simulada, use o botão de demonstração:
-              </p>
-              <button
-                type="button"
-                onClick={handleDemoAdminBypass}
-                className="w-full py-3 bg-[#EBF1F6] hover:bg-[#DDE5EE] text-[#5A6E85] font-bold text-xs rounded-xl transition-all cursor-pointer font-sans"
-              >
-                Demonstração Bypass (Administrador Demo)
-              </button>
-            </div>
-          )}
-        </motion.div>
-      </div>
+      <TelaDeLogin
+        email={adminEmail}
+        onEmail={(valor) =>
+          setAdminEmail(valor.toLowerCase().replace(/\s/g, ""))
+        }
+        senha={adminPassword}
+        /*
+         * A senha vai para o banco como foi digitada.
+         *
+         * Aqui ela passava por replace(/\s/g, ""), que apagava os espaços
+         * sem avisar ninguém: quem tem espaço na senha digitava a senha
+         * certa, o sistema mandava outra e a resposta voltava "usuário ou
+         * senha inválidos" — sem nada na tela que explicasse por quê.
+         */
+        onSenha={setAdminPassword}
+        verificando={isVerifyingAdminLogin}
+        onEntrar={handleAdminLoginSubmit}
+        bancoConfigurado={isDatabaseConfigured}
+        onDemonstracao={handleDemoAdminBypass}
+        aviso={notification}
+      />
     );
   }
 

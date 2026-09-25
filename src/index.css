@@ -1218,3 +1218,342 @@
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * A tela de login: o mapa tático e o acesso restrito
+ *
+ * Ver TelaDeLogin.tsx. Tudo aqui é prefixado com "lg-". O mapa se mexe pouco
+ * e devagar — é fundo, e fundo que chama atenção disputa com o formulário,
+ * que é o motivo de a pessoa estar nesta tela.
+ * ------------------------------------------------------------------------ */
+.lg-tela {
+  background: #040C16;
+}
+
+.lg-paralaxe {
+  transform: translate(var(--px, 0px), var(--py, 0px));
+  transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lg-varredura {
+  position: absolute;
+  inset-block: 0;
+  width: 220px;
+  left: -220px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.07), rgba(125, 211, 252, 0.16) 96%, transparent);
+  animation: lg-varre 9s linear infinite;
+}
+
+@keyframes lg-varre {
+  to {
+    transform: translateX(calc(100vw + 440px));
+  }
+}
+
+.lg-raio-gira {
+  animation: lg-raio 18s linear infinite;
+}
+
+@keyframes lg-raio {
+  to {
+    stroke-dashoffset: -300;
+  }
+}
+
+.lg-pulso {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lg-pulso 2.4s ease-out infinite;
+}
+
+@keyframes lg-pulso {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(3.4);
+    opacity: 0;
+  }
+}
+
+/* O check-in aparece, fica aceso um tempo e apaga — para o próximo acender. */
+.lg-checkin {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lg-checkin 10.8s ease-out infinite;
+}
+
+@keyframes lg-checkin {
+  0% {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  4% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+  8% {
+    transform: scale(1);
+  }
+  55% {
+    opacity: 1;
+  }
+  70%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.lg-checkin-onda {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lg-checkin-onda 10.8s ease-out infinite;
+}
+
+@keyframes lg-checkin-onda {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  3% {
+    opacity: 1;
+  }
+  16%,
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+/* A mira que segue o cursor sobre o mapa */
+.lg-mira-h,
+.lg-mira-v {
+  position: absolute;
+  background: rgba(125, 211, 252, 0.28);
+}
+
+.lg-mira-h {
+  left: 0;
+  right: 0;
+  height: 1px;
+  top: var(--my, -10px);
+}
+
+.lg-mira-v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  left: var(--mx, -10px);
+}
+
+.lg-mira-alvo {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  left: var(--mx, -40px);
+  top: var(--my, -40px);
+  transform: translate(-50%, -50%);
+  border: 1.5px solid rgba(186, 230, 253, 0.85);
+  border-radius: 9999px;
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.45);
+}
+
+.lg-mira-alvo::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: 9999px;
+  background: #E0F2FE;
+}
+
+.lg-mira-leitura {
+  position: absolute;
+  left: calc(var(--mx, -400px) + 18px);
+  top: calc(var(--my, -400px) + 16px);
+  white-space: pre;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(4, 12, 22, 0.82);
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  color: #BAE6FD;
+  font: 700 10.5px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.06em;
+  backdrop-filter: blur(4px);
+}
+
+.lg-regua {
+  position: absolute;
+  font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+  color: rgba(186, 230, 253, 0.35);
+}
+
+.lg-titulo-destaque {
+  background: linear-gradient(90deg, #FDBA74, #F58220 45%, #FBBF24);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lg-registro {
+  animation: op-status-entra 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lg-painel-grade {
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(180deg, #000, transparent 85%);
+  -webkit-mask-image: linear-gradient(180deg, #000, transparent 85%);
+}
+
+.lg-cartao {
+  animation: lg-cartao-entra 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes lg-cartao-entra {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lg-treme {
+  animation: lg-treme 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes lg-treme {
+  10%,
+  90% {
+    transform: translateX(-2px);
+  }
+  20%,
+  80% {
+    transform: translateX(4px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-7px);
+  }
+  40%,
+  60% {
+    transform: translateX(7px);
+  }
+}
+
+.lg-campo {
+  height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.lg-campo:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.lg-campo:focus-within {
+  background: rgba(245, 130, 32, 0.05);
+  border-color: rgba(245, 130, 32, 0.7);
+  box-shadow: 0 0 0 4px rgba(245, 130, 32, 0.14);
+}
+
+.lg-campo:focus-within .lg-campo-icone {
+  color: #FDBA74;
+}
+
+.lg-campo-erro {
+  border-color: rgba(251, 113, 133, 0.55);
+}
+
+/* O preenchimento automático do navegador pinta o campo de amarelo claro;
+   aqui ele respeita o fundo escuro. */
+.lg-campo input:-webkit-autofill {
+  -webkit-text-fill-color: #fff;
+  -webkit-box-shadow: 0 0 0 1000px #0B1B2C inset;
+  caret-color: #fff;
+  transition: background-color 9999s;
+}
+
+.lg-erro {
+  animation: op-status-entra 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lg-entrar {
+  background: linear-gradient(135deg, #F58220 0%, #EA580C 100%);
+  box-shadow: 0 10px 30px -10px rgba(245, 130, 32, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* O brilho que atravessa o botão quando ele está pronto para ser clicado. */
+.lg-entrar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+  transform: translateX(-120%);
+}
+
+.lg-entrar:enabled:hover::before {
+  animation: lg-brilho 0.9s ease-out;
+}
+
+@keyframes lg-brilho {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+.lg-entrar:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(148, 163, 184, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+/* Enquanto verifica, o botão vira um radarzinho — a mesma espera do mapa. */
+.lg-entrar:disabled:has(.lg-mini-radar) {
+  background: linear-gradient(135deg, #C2410C, #9A3412);
+  color: #fff;
+}
+
+.lg-mini-radar {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  background: conic-gradient(from 0deg, transparent 0 270deg, rgba(255, 255, 255, 0.9) 360deg);
+  animation: op-gira 1s linear infinite;
+}
+
+.lg-toast {
+  animation: op-status-entra 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lg-paralaxe,
+  .lg-cartao,
+  .lg-treme,
+  .lg-registro,
+  .lg-erro,
+  .lg-toast {
+    animation: none;
+    transition: none;
+  }
+  .lg-mini-radar {
+    animation-duration: 3s;
+  }
+}
