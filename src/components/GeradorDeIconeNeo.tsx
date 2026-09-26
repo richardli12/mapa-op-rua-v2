@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Check, History, Library, RefreshCw, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, Check, History, Library, RefreshCw, X } from 'lucide-react';
 import { buildOperationIconSvg, getOperationIconDef } from '../operationIcons';
 import { codificarIconeNeo } from '../iconeSvg';
 import {
@@ -169,7 +169,7 @@ export default function GeradorDeIconeNeo({
         <div className="relative px-6 pt-5 pb-4 flex items-start justify-between gap-4 border-b border-white/[0.07]">
           <div className="flex items-center gap-3 min-w-0">
             <span className="neo-selo w-11 h-11 rounded-2xl flex items-center justify-center shrink-0">
-              <Sparkles className="w-5 h-5 text-white" />
+              <span className="text-[11px] font-black tracking-[0.08em] text-white">NEO</span>
             </span>
             <div className="min-w-0">
               <h3 className="text-[18px] font-black tracking-tight leading-tight">Gerar ícone com NEO</h3>
@@ -199,7 +199,6 @@ export default function GeradorDeIconeNeo({
             {/* Criados pelo NEO */}
             <section>
               <p className="mb-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-violet-300">
-                <Sparkles className="w-3.5 h-3.5" />
                 Criados pelo NEO
                 {estudio.rodadas.length > 1 && (
                   <span className="text-slate-500 normal-case tracking-normal font-bold">

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { PenTool } from 'lucide-react';
 import { OPERATION_ICONS } from '../operationIcons';
 import { ehIconeNeo } from '../iconeSvg';
 import OperationIcon from './OperationIcon';
@@ -10,7 +10,7 @@ import GeradorDeIconeNeo from './GeradorDeIconeNeo';
  * a biblioteca não tem o que se procura.
  *
  * O ícone desenhado pelo NEO entra como a primeira casa da grade, marcada com
- * a faísca — é o ícone deste tipo, e fica à vista junto dos outros para dar
+ * a sigla NEO — é o ícone deste tipo, e fica à vista junto dos outros para dar
  * para trocar de ideia com um clique.
  */
 export default function SeletorDeIcone({
@@ -54,8 +54,8 @@ export default function SeletorDeIcone({
       >
         <OperationIcon icon={icone} size={compacto ? 15 : 18} />
         {doNeo && (
-          <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 border-2 border-white flex items-center justify-center">
-            <Sparkles className="w-2 h-2 text-white" />
+          <span className="absolute -top-1.5 -right-2 px-1 h-3.5 rounded-md bg-violet-600 border border-white text-[7px] font-black leading-none text-white flex items-center">
+            NEO
           </span>
         )}
       </button>
@@ -80,7 +80,7 @@ export default function SeletorDeIcone({
         title={semNome ? 'Escreva o nome do tipo primeiro: é dele que o NEO parte.' : undefined}
         className="neo-botao group relative w-full h-11 rounded-xl overflow-hidden text-[12px] font-black flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
       >
-        <Sparkles className="w-4 h-4 transition-transform group-enabled:group-hover:rotate-12 group-enabled:group-hover:scale-110" />
+        <PenTool className="w-4 h-4 transition-transform group-enabled:group-hover:-rotate-12" />
         Gerar ícone com NEO
       </button>
       {semNome && (
