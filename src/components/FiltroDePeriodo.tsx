@@ -29,6 +29,8 @@ interface Props {
     /** Favoritos dentro do recorte de data. */
     favoritos: number;
   };
+  /** O corte de favoritos é o da coroa: a pastilha diz "super favoritos". */
+  soSuper?: boolean;
 }
 
 /** Data no formato do <input type="date">, no fuso de quem está olhando. */
@@ -107,7 +109,7 @@ export const rotuloDoPeriodo = (de: string, ate: string) => {
  * parece vazio, sem dizer por quê, faz alguém concluir que a equipe não
  * trabalhou.
  */
-export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, contagem }: Props) {
+export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, contagem, soSuper = false }: Props) {
   const caixa = useRef<HTMLDivElement | null>(null);
   const { de, ate, verCheckIns, verMissoes, prazos, soFavoritos } = valor;
 
@@ -172,9 +174,9 @@ export default function FiltroDePeriodo({ aberto, onAbrir, valor, onMudar, conta
             <span className="text-[9.5px] font-semibold text-white/75 leading-none mt-1">
               {[
                 verCheckIns &&
-                  `${contagem.checkInsVisiveis} ${soFavoritos ? 'favorito' : 'check-in'}${
-                    contagem.checkInsVisiveis === 1 ? '' : 's'
-                  }`,
+                  `${contagem.checkInsVisiveis} ${
+                    soFavoritos ? (soSuper ? 'super favorito' : 'favorito') : 'check-in'
+                  }${contagem.checkInsVisiveis === 1 ? '' : 's'}`,
                 verMissoes &&
                   `${contagem.missoesVisiveis} missã${
                     contagem.missoesVisiveis === 1 ? 'o' : 'es'

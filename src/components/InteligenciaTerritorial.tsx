@@ -53,6 +53,15 @@ interface InteligenciaTerritorialProps {
   circuloExterno?: { lat: number; lng: number; raio: number } | null;
   /** Centro e zoom do mapa agora — é o ponto que a análise de raio mede. */
   centroDoMapa: () => { lat: number; lng: number; zoom: number } | null;
+  /**
+   * Muda a cada ✕ tocado na etiqueta do círculo, lá no mapa.
+   *
+   * O círculo é estado deste painel (centro, medida, o que já foi medido), e
+   * não só um desenho: apagar só o desenho deixaria o painel respondendo
+   * sobre uma área que ninguém vê mais. Cada novo número pede para o painel
+   * sair do círculo por inteiro, como o "voltar" daqui de dentro.
+   */
+  pedidoParaFecharCirculo?: number;
   /** Desenha no mapa o círculo que foi medido. */
   onCirculoAnalisado: (
     circulo: { lat: number; lng: number; raio: number } | null
@@ -152,6 +161,7 @@ export default function InteligenciaTerritorial({
   cidadeDoCliente,
   centroDoMapa,
   circuloExterno,
+  pedidoParaFecharCirculo = 0,
   onCirculoAnalisado,
   onRecortes,
   recorteEmFoco,
@@ -725,20 +735,31 @@ export default function InteligenciaTerritorial({
     const centro = alvo || centroFixo || centroDoMapa();
     const metros = raioAlvo || raio;
     if (!centro || !uf || analisando) return;
+    const geracao = geracaoDoCirculoRef.current;
     setAnalisando(true);
     setErro(null);
     setAnalise(null);
     try {
       const dados = await analisarRaio(uf, centro.lat, centro.lng, metros);
+      // Fechado no meio da medida: a resposta chegou tarde e não redesenha nada.
+      if (geracao !== geracaoDoCirculoRef.current) return;
       setAnalise(dados.analise);
       onCirculoAnalisado({ lat: centro.lat, lng: centro.lng, raio: metros });
     } catch (falha: any) {
+      if (geracao !== geracaoDoCirculoRef.current) return;
       setErro(falha);
       onCirculoAnalisado(null);
     } finally {
       setAnalisando(false);
     }
   };
+
+  /**
+   * Muda a cada vez que o círculo é largado. Uma medida que sai antes e volta
+   * depois do fechar compara a geração e morre calada — senão o círculo
+   * fechado reaparecia sozinho segundos depois.
+   */
+  const geracaoDoCirculoRef = useRef(0);
 
   /** A identidade de um círculo: dois círculos iguais não são medidos duas vezes. */
   const chaveDoCirculo = (circulo: { lat: number; lng: number; raio: number }) =>
@@ -793,6 +814,7 @@ export default function InteligenciaTerritorial({
 
   /** Sai do círculo e volta para o recorte do Censo, sem perder o desenho. */
   const voltarParaORecorte = () => {
+    geracaoDoCirculoRef.current += 1;
     setCirculoEmFoco(null);
     setAnalise(null);
     setAnaliseDe(null);
@@ -800,6 +822,31 @@ export default function InteligenciaTerritorial({
     setErro(null);
     onCirculoAnalisado(null);
   };
+
+  /**
+   * Fechar é fechar: o círculo não sobrevive ao painel.
+   *
+   * O painel fica montado quando some (é assim que ele lembra o município e
+   * o recorte), e o círculo ia junto nessa memória — fechava-se o painel e a
+   * área verde continuava no mapa, sem ter mais de onde tirá-la. Os recortes
+   * do Censo continuam lembrados; a pergunta do raio, não.
+   */
+  useEffect(() => {
+    if (aberto) return;
+    geracaoDoCirculoRef.current += 1;
+    setCirculoEmFoco(null);
+    setAnalise(null);
+    setAnaliseDe(null);
+    setCentroFixo(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto]);
+
+  /** O ✕ do mapa: sai do círculo como se fosse pelo botão daqui de dentro. */
+  useEffect(() => {
+    if (!pedidoParaFecharCirculo) return;
+    voltarParaORecorte();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidoParaFecharCirculo]);
 
   /** Mede de novo o mesmo círculo — o botão que a falha deixa na tela. */
   const medirDeNovo = () => {

@@ -225,8 +225,15 @@ create table if not exists public.check_ins (
   -- Estrela do administrador: destaca o registro na lista e no mapa
   favorite             boolean default false,
 
+  -- Coroa do administrador: o degrau acima da estrela (todo super e favorito)
+  super_favorite       boolean default false,
+
   -- Na lixeira: sai das telas e do mapa, e da para restaurar
-  trashed              boolean default false
+  trashed              boolean default false,
+
+  -- Coroa sem estrela nao existe: tirar a estrela tira a coroa
+  constraint check_ins_super_e_favorito
+    check (not coalesce(super_favorite, false) or coalesce(favorite, false))
 );
 
 
@@ -1057,6 +1064,32 @@ begin
     );
   end loop;
 end $$;
+
+
+
+-- ----------------------------------------------------------------------------
+-- 17. Check-in Super Favorito - a coroa acima da estrela
+-- ----------------------------------------------------------------------------
+-- O mesmo conteudo de db/migrations/2026-09-26-checkin-super-favorito.sql.
+-- A coluna ja nasce no create table de check_ins; isto e para o banco que ja
+-- existia antes dela.
+alter table public.check_ins add column if not exists super_favorite boolean default false;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'check_ins_super_e_favorito'
+  ) then
+    alter table public.check_ins
+      add constraint check_ins_super_e_favorito
+      check (not coalesce(super_favorite, false) or coalesce(favorite, false));
+  end if;
+end $$;
+
+create index if not exists idx_check_ins_super_favorito
+  on public.check_ins ("candidateId", super_favorite);
+
+notify pgrst, 'reload schema';
 
 
 
