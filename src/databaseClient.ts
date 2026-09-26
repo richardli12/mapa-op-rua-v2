@@ -95,7 +95,8 @@ function normalizeFields<T>(obj: any): T {
     userlatitude: 'userLatitude',
     userlongitude: 'userLongitude',
     missionid: 'missionId',
-    missiontitle: 'missionTitle'
+    missiontitle: 'missionTitle',
+    super_favorite: 'superFavorite'
   };
 
   for (const [lowerKey, camelKey] of Object.entries(mappings)) {
@@ -130,8 +131,9 @@ function normalizeFields<T>(obj: any): T {
 const somenteColunasDoCheckIn = (checkIn: any) => {
   // status, confirmedAt e updatedAt saem daqui e voltam na primeira tentativa:
   // assim a tentativa seguinte, para bancos sem a migração, fica sem eles.
-  // favorite fica de fora: quem grava a estrela é definirFavoritoCheckIn, e
-  // num banco sem a migração a coluna derrubaria o upsert inteiro.
+  // favorite e superFavorite ficam de fora: quem grava a estrela e a coroa
+  // são as funções próprias, e num banco sem a migração a coluna derrubaria
+  // o upsert inteiro.
   const {
     notes,
     operations,
@@ -139,6 +141,8 @@ const somenteColunasDoCheckIn = (checkIn: any) => {
     confirmedAt,
     updatedAt,
     favorite,
+    superFavorite,
+    super_favorite,
     trashed,
     ...colunas
   } = checkIn || {};
@@ -1175,10 +1179,24 @@ export const DatabaseService = {
     }
   },
 
-  /** Liga ou desliga a estrela de um check-in. */
+  /**
+   * Liga ou desliga a estrela de um check-in.
+   *
+   * Tirar a estrela tira a coroa junto: super favorito sem favorito não
+   * existe. Num banco que ainda não tem a coluna da coroa, a estrela é
+   * gravada sozinha — a falta da migração nova não pode quebrar a antiga.
+   */
   async definirFavoritoCheckIn(id: string, favorito: boolean) {
     if (!db) return { success: false };
     try {
+      if (!favorito) {
+        const { error } = await db
+          .from('check_ins')
+          .update({ favorite: false, super_favorite: false })
+          .eq('id', id);
+        if (!error) return { success: true };
+        if (!colunaDesconhecida(error)) throw error;
+      }
       const { error } = await db
         .from('check_ins')
         .update({ favorite: favorito })
@@ -1187,6 +1205,40 @@ export const DatabaseService = {
       return { success: true };
     } catch (err: any) {
       console.error('Erro ao favoritar check-in:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Liga ou desliga a coroa (Super Favorito) de um check-in.
+   *
+   * Coroar também estrela: o super favorito é um favorito que subiu de
+   * degrau, e continua aparecendo em tudo que filtra por favoritos.
+   */
+  async definirSuperFavoritoCheckIn(id: string, superFavorito: boolean) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('check_ins')
+        .update(
+          superFavorito
+            ? { super_favorite: true, favorite: true }
+            : { super_favorite: false }
+        )
+        .eq('id', id);
+      if (error) {
+        if (colunaDesconhecida(error)) {
+          return {
+            success: false,
+            error:
+              'o banco ainda não tem o Super Favorito. Rode db/migrations/2026-09-26-checkin-super-favorito.sql no SQL Editor.'
+          };
+        }
+        throw error;
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao definir super favorito do check-in:', err);
       return { success: false, error: err.message };
     }
   },

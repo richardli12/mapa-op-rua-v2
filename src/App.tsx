@@ -35,6 +35,7 @@ import CarregandoOperacional from "./components/CarregandoOperacional";
 import TelaDeLogin from "./components/TelaDeLogin";
 import FiltroDeFavoritos from "./components/FiltroDeFavoritos";
 import Contador from "./components/Contador";
+import SeletorDeIcone from "./components/SeletorDeIcone";
 import PainelDeltaOperacional from "./components/operacional/PainelDeltaOperacional";
 import CadastroDeltaOperacional from "./components/operacional/CadastroDeltaOperacional";
 import AbaDeltaOperacional from "./components/operacional/AbaDeltaOperacional";
@@ -101,6 +102,7 @@ import {
   Flag,
   Megaphone,
   Star,
+  Crown,
   Crosshair,
   Store,
   Maximize2,
@@ -171,7 +173,6 @@ import {
   FerramentasDoMapa,
   GrupoDeFerramentas,
 } from "./components/FerramentasDoMapa";
-import { OPERATION_ICONS } from "./operationIcons";
 
 /**
  * Os blocos do trilho de ferramentas do mapa.
@@ -702,6 +703,10 @@ export default function App() {
   const [statusCheckIns, setStatusCheckIns] = useState<
     "todos" | "concluido" | "andamento"
   >("todos");
+  /** Recorte dos destaques na lista: tudo, só estrelados ou só coroados. */
+  const [destaqueCheckIns, setDestaqueCheckIns] = useState<
+    "todos" | "favoritos" | "super"
+  >("todos");
   const [paginaCheckIns, setPaginaCheckIns] = useState(1);
   const [checkInAberto, setCheckInAberto] = useState<string | null>(null);
   /** Recortes do mapa da visão geral: período e nível de prioridade. */
@@ -1110,6 +1115,42 @@ export default function App() {
     lng: number;
     raio: number;
   } | null>(null);
+  /** Cresce a cada ✕ na etiqueta do círculo analisado (ver o painel). */
+  const [pedidoParaFecharCirculo, setPedidoParaFecharCirculo] = useState(0);
+
+  /*
+   * FECHAR UM RAIO É FECHAR DE VERDADE.
+   *
+   * O círculo da análise e o da busca eram apagados só por um caminho — o X
+   * do próprio painel — e qualquer outro jeito de fechar (abrir outra camada,
+   * trocar de ferramenta) deixava o desenho órfão no mapa, sem dono e sem
+   * botão para tirá-lo. Agora quem decide é o estado do painel: painel
+   * fechado, círculo fora, venha o fechamento de onde vier.
+   */
+  useEffect(() => {
+    if (territorioAberto) return;
+    setCirculoAnalisado(null);
+    setCirculoParaTerritorio(null);
+  }, [territorioAberto]);
+
+  useEffect(() => {
+    if (pesquisaLojasAberta) return;
+    setCirculoDeBusca(null);
+    setDesenhandoRaioDeBusca(false);
+  }, [pesquisaLojasAberta]);
+
+  /** O ✕ do círculo verde: a medida sai do mapa e o painel sai do círculo. */
+  const fecharCirculoAnalisado = () => {
+    setCirculoAnalisado(null);
+    setCirculoParaTerritorio(null);
+    setPedidoParaFecharCirculo((n) => n + 1);
+  };
+
+  /** O ✕ do círculo azul: mesmo gesto da lixeira do painel de busca. */
+  const fecharCirculoDeBusca = () => {
+    setCirculoDeBusca(null);
+    setDesenhandoRaioDeBusca(false);
+  };
   /** Bairros ou setores desenhados no mapa, e a escala que os pinta. */
   const [recortesTerritoriais, setRecortesTerritoriais] = useState<any[]>([]);
   const [escalaTerritorial, setEscalaTerritorial] = useState<
@@ -1212,7 +1253,7 @@ export default function App() {
    * pergunta.
    */
   const [mapFilter, setMapFilter] = useState<
-    "all" | "checkins" | "markers" | "favoritos" | "nada"
+    "all" | "checkins" | "markers" | "favoritos" | "superfavoritos" | "nada"
   >("all");
 
   // Modo de visualização (admin / checkin)
@@ -4221,15 +4262,67 @@ export default function App() {
    */
   const alternarFavoritoCheckIn = (registro: any) => {
     const favorito = !registro.favorite;
+    const antes = {
+      favorite: !!registro.favorite,
+      superFavorite: !!registro.superFavorite,
+    };
+    // Tirar a estrela tira a coroa: super favorito sem favorito não existe.
+    const depois = favorito
+      ? { favorite: true }
+      : { favorite: false, superFavorite: false };
     setCheckIns((prev: any) =>
-      prev.map((c: any) => (c.id === registro.id ? { ...c, favorite: favorito } : c)),
+      prev.map((c: any) => (c.id === registro.id ? { ...c, ...depois } : c)),
     );
+    if (!favorito && antes.superFavorite) {
+      triggerNotification("Estrela e coroa retiradas do check-in.", "info");
+    }
     if (isDatabaseConfigured) {
       DatabaseService.definirFavoritoCheckIn(registro.id, favorito).then((res) => {
         if (!res.success) {
           setCheckIns((prev: any) =>
             prev.map((c: any) =>
-              c.id === registro.id ? { ...c, favorite: !favorito } : c,
+              c.id === registro.id ? { ...c, ...antes } : c,
+            ),
+          );
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+        }
+      });
+    }
+  };
+
+  /**
+   * A coroa: Super Favorito.
+   *
+   * Quando os favoritos passam de um punhado, a estrela para de separar — e
+   * achar "aquele" check-in volta a ser rolar a lista. A coroa é o degrau de
+   * cima, para os poucos que precisam ser achados em um toque. Coroar também
+   * estrela (o super continua em tudo que filtra favoritos); descoroar deixa
+   * a estrela onde estava.
+   */
+  const alternarSuperFavoritoCheckIn = (registro: any) => {
+    const coroado = !registro.superFavorite;
+    const antes = {
+      favorite: !!registro.favorite,
+      superFavorite: !!registro.superFavorite,
+    };
+    const depois = coroado
+      ? { favorite: true, superFavorite: true }
+      : { superFavorite: false };
+    setCheckIns((prev: any) =>
+      prev.map((c: any) => (c.id === registro.id ? { ...c, ...depois } : c)),
+    );
+    if (coroado) {
+      triggerNotification(
+        `${registro.name || "Check-in"} agora é Super Favorito.`,
+        "success",
+      );
+    }
+    if (isDatabaseConfigured) {
+      DatabaseService.definirSuperFavoritoCheckIn(registro.id, coroado).then((res) => {
+        if (!res.success) {
+          setCheckIns((prev: any) =>
+            prev.map((c: any) =>
+              c.id === registro.id ? { ...c, ...antes } : c,
             ),
           );
           triggerNotification(`Banco de dados: ${res.error}`, "error");
@@ -4854,8 +4947,27 @@ export default function App() {
     saveArea({ preventDefault: () => {} } as React.FormEvent);
   };
 
+  /**
+   * As perguntas feitas a partir do rascunho ("Estabelecimentos aqui", "Quem
+   * mora aqui") desenham os próprios círculos, no mesmo centro. Largar o
+   * rascunho larga também essas perguntas — senão o cancelar tirava o
+   * círculo roxo e deixava o verde e o azul em cima do mesmo lugar.
+   */
+  const largarPerguntasDoRascunho = () => {
+    if (!pickedCoords) return;
+    const mesmoCentro = (c: { lat: number; lng: number } | null) =>
+      !!c &&
+      Math.abs(c.lat - pickedCoords.lat) < 1e-7 &&
+      Math.abs(c.lng - pickedCoords.lng) < 1e-7;
+    if (mesmoCentro(circuloDeBusca)) fecharCirculoDeBusca();
+    if (mesmoCentro(circuloParaTerritorio) || mesmoCentro(circuloAnalisado)) {
+      fecharCirculoAnalisado();
+    }
+  };
+
   /** Larga a criação do raio inteira: nada fica desenhado nem pela metade. */
   const cancelarRaio = () => {
+    largarPerguntasDoRascunho();
     setClickToPickCoords(false);
     descartarMaterialPendente();
     resetAreaForm();
@@ -5200,9 +5312,11 @@ export default function App() {
     // Favoritos é um corte do menu de visualização, não do período: a conta
     // tem de bater com o que o mapa realmente desenha.
     checkInsVisiveis:
-      mapFilter === "favoritos"
-        ? filteredCheckIns.filter((c: any) => c.favorite).length
-        : filteredCheckIns.length,
+      mapFilter === "superfavoritos"
+        ? filteredCheckIns.filter((c: any) => c.superFavorite).length
+        : mapFilter === "favoritos"
+          ? filteredCheckIns.filter((c: any) => c.favorite).length
+          : filteredCheckIns.length,
     checkInsTotal: checkInsDoMapa.length,
     missoesVisiveis: filteredPins.length + filteredAreas.length,
     missoesTotal: missoesNoFoco,
@@ -5218,6 +5332,7 @@ export default function App() {
   const verMissoes =
     mapFilter !== "checkins" &&
     mapFilter !== "favoritos" &&
+    mapFilter !== "superfavoritos" &&
     mapFilter !== "nada";
 
   const estadoDoPeriodo: EstadoDoPeriodo = {
@@ -5225,7 +5340,8 @@ export default function App() {
     ate: filtroAte,
     verCheckIns,
     verMissoes,
-    soFavoritos: mapFilter === "favoritos",
+    // A coroa é um favorito que subiu de degrau: para o período, é "só favoritos".
+    soFavoritos: mapFilter === "favoritos" || mapFilter === "superfavoritos",
     prazos: filtroPrazos,
   };
 
@@ -5233,7 +5349,8 @@ export default function App() {
     setFiltroDe(novo.de);
     setFiltroAte(novo.ate);
     setFiltroPrazos(novo.prazos);
-    if (novo.verCheckIns && novo.soFavoritos) setMapFilter("favoritos");
+    if (novo.verCheckIns && novo.soFavoritos)
+      setMapFilter(mapFilter === "superfavoritos" ? "superfavoritos" : "favoritos");
     else if (novo.verCheckIns && novo.verMissoes) setMapFilter("all");
     else if (novo.verCheckIns) setMapFilter("checkins");
     else if (novo.verMissoes) setMapFilter("markers");
@@ -5246,14 +5363,50 @@ export default function App() {
    * desfaria o recorte que a pessoa tinha montado.
    */
   const filtroAntesDosFavoritos = React.useRef<typeof mapFilter>("all");
+  const lembrarDeOndeVeio = () => {
+    if (mapFilter === "favoritos" || mapFilter === "superfavoritos") return;
+    filtroAntesDosFavoritos.current =
+      mapFilter === "nada" || mapFilter === "markers" ? "all" : mapFilter;
+  };
   const alternarFavoritos = () => {
     if (mapFilter === "favoritos") {
       setMapFilter(filtroAntesDosFavoritos.current || "all");
       return;
     }
-    filtroAntesDosFavoritos.current =
-      mapFilter === "nada" || mapFilter === "markers" ? "all" : mapFilter;
+    lembrarDeOndeVeio();
     setMapFilter("favoritos");
+  };
+  /** A metade da coroa: o mesmo vai-e-volta, um degrau acima. */
+  const alternarSuperFavoritos = () => {
+    if (mapFilter === "superfavoritos") {
+      setMapFilter(filtroAntesDosFavoritos.current || "all");
+      return;
+    }
+    lembrarDeOndeVeio();
+    setMapFilter("superfavoritos");
+  };
+
+  /** Os coroados do recorte de agora, do mais novo ao mais antigo. */
+  const superFavoritosDoRecorte = React.useMemo(
+    () =>
+      filteredCheckIns
+        .filter((c: any) => c.superFavorite)
+        .sort(
+          (a: any, b: any) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+    [filteredCheckIns],
+  );
+
+  /** Pedido para o mapa voar até um check-in e abrir a ficha dele. */
+  const [checkInParaAbrir, setCheckInParaAbrir] = useState<{
+    id: string;
+    n: number;
+  } | null>(null);
+  const irAteOCheckIn = (checkIn: any) => {
+    // Um coroado escondido pelo filtro de missões não teria onde pousar.
+    if (mapFilter === "markers" || mapFilter === "nada") setMapFilter("all");
+    setCheckInParaAbrir((atual) => ({ id: checkIn.id, n: (atual?.n || 0) + 1 }));
   };
 
   /** O nível de prioridade que a missão guarda, quando ele ainda existe. */
@@ -8549,23 +8702,13 @@ export default function App() {
                 <label className="block text-[10px] uppercase tracking-widest font-black text-slate-400 mb-1.5">
                   Ícone
                 </label>
-                <div className="grid grid-cols-8 gap-1.5 max-h-36 overflow-y-auto pr-1">
-                  {OPERATION_ICONS.map((icone) => (
-                    <button
-                      key={icone.key}
-                      type="button"
-                      title={icone.label}
-                      onClick={() => setOpTypeIcon(icone.key)}
-                      className={`h-10 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
-                        opTypeIcon === icone.key
-                          ? "border-[#015FC9] bg-[#EFF4FB] text-[#015FC9]"
-                          : "border-slate-200 text-slate-400 hover:bg-slate-50"
-                      }`}
-                    >
-                      <OperationIcon icon={icone.key} size={18} />
-                    </button>
-                  ))}
-                </div>
+                <SeletorDeIcone
+                  valor={opTypeIcon}
+                  onMudar={setOpTypeIcon}
+                  cor={opTypeColor}
+                  nome={opTypeLabel}
+                  descricao={opTypeDescription}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -11379,8 +11522,21 @@ export default function App() {
                 const casaStatus =
                   statusCheckIns === "todos" ||
                   (statusCheckIns === "concluido" ? r.concluido : !r.concluido);
-                return casaBusca && casaPeriodo && casaOperacao && casaStatus;
-              });
+                const casaDestaque =
+                  destaqueCheckIns === "todos" ||
+                  (destaqueCheckIns === "super" ? r.superFavorite : r.favorite);
+                return (
+                  casaBusca && casaPeriodo && casaOperacao && casaStatus && casaDestaque
+                );
+              })
+                // Os coroados abrem a lista: é para isso que existe a coroa.
+                .sort(
+                  (a: any, b: any) =>
+                    Number(!!b.superFavorite) - Number(!!a.superFavorite) ||
+                    b.quando - a.quando,
+                );
+              const estrelados = registros.filter((r: any) => r.favorite).length;
+              const coroados = registros.filter((r: any) => r.superFavorite).length;
 
               const porPagina = 8;
               const totalPaginas = Math.max(
@@ -11675,6 +11831,66 @@ export default function App() {
                             </select>
                             <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                           </div>
+
+                          {/*
+                            Os destaques em três toques: tudo, as estrelas, as
+                            coroas. O contador fica à vista para a pessoa saber
+                            se vale a pena abrir o recorte antes de abri-lo.
+                          */}
+                          <div className="flex items-center h-10 p-1 bg-slate-100/80 border border-slate-200 rounded-2xl">
+                            {(
+                              [
+                                { id: "todos", rotulo: "Todos", quantos: null },
+                                { id: "favoritos", rotulo: "Favoritos", quantos: estrelados },
+                                { id: "super", rotulo: "Super", quantos: coroados },
+                              ] as const
+                            ).map((op) => {
+                              const ativo = destaqueCheckIns === op.id;
+                              return (
+                                <button
+                                  key={op.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setDestaqueCheckIns(op.id);
+                                    setPaginaCheckIns(1);
+                                  }}
+                                  aria-pressed={ativo}
+                                  className={`h-full px-2.5 rounded-xl text-[11px] font-black flex items-center gap-1.5 cursor-pointer transition-all duration-300 ${
+                                    ativo
+                                      ? op.id === "super"
+                                        ? "super-botao-ligado text-white shadow-md"
+                                        : op.id === "favoritos"
+                                          ? "bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md"
+                                          : "bg-white text-slate-800 shadow-sm"
+                                      : "text-slate-500 hover:text-slate-800"
+                                  }`}
+                                >
+                                  {op.id === "favoritos" && (
+                                    <Star
+                                      className={`w-3.5 h-3.5 ${ativo ? "fav-estrela-acende" : ""}`}
+                                      fill={ativo ? "#fff" : "none"}
+                                    />
+                                  )}
+                                  {op.id === "super" && (
+                                    <Crown
+                                      className={`w-3.5 h-3.5 ${ativo ? "super-coroa-pousa" : ""}`}
+                                      fill={ativo ? "#fff" : "none"}
+                                    />
+                                  )}
+                                  {op.rotulo}
+                                  {op.quantos !== null && (
+                                    <span
+                                      className={`px-1 min-w-[16px] h-4 rounded-full text-[9.5px] flex items-center justify-center tabular-nums ${
+                                        ativo ? "bg-white/25 text-white" : "bg-white text-slate-500"
+                                      }`}
+                                    >
+                                      {op.quantos}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
 
@@ -11723,7 +11939,7 @@ export default function App() {
                                     escolhido?.id === registro.id
                                       ? "bg-[#EFF4FB]"
                                       : "hover:bg-slate-50/60"
-                                  }`}
+                                  }${registro.superFavorite ? " super-linha" : ""}`}
                                 >
                                   <td className="py-3.5 px-2.5">
                                     <div className="flex items-center gap-2.5">
@@ -11742,6 +11958,14 @@ export default function App() {
                                       <span className="font-black text-slate-800 text-[12.5px] truncate max-w-[85px]">
                                         {registro.name}
                                       </span>
+                                      {registro.superFavorite && (
+                                        <span
+                                          title="Super Favorito"
+                                          className="super-selo w-5 h-5 rounded-full flex items-center justify-center shrink-0"
+                                        >
+                                          <Crown className="w-3 h-3 text-white" fill="#fff" />
+                                        </span>
+                                      )}
                                     </div>
                                   </td>
                                   <td className="py-3.5 px-2.5">
@@ -11803,35 +12027,79 @@ export default function App() {
                                     </span>
                                   </td>
                                   <td className="py-3.5 px-2.5 text-right">
-                                    <div className="flex items-center justify-end gap-1.5">
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          alternarFavoritoCheckIn(registro);
-                                        }}
-                                        title={
-                                          registro.favorite
-                                            ? "Tirar dos favoritos"
-                                            : "Favoritar: ganha estrela no mapa"
-                                        }
-                                        aria-label="Favoritar check-in"
-                                        className={`w-8 h-8 border rounded-xl flex items-center justify-center cursor-pointer transition-all ${
-                                          registro.favorite
-                                            ? "border-amber-300 bg-amber-50 text-amber-500"
-                                            : "border-slate-200 text-slate-400 hover:text-amber-500 hover:border-amber-300"
+                                    <div className="flex items-center justify-end gap-1">
+                                      {/*
+                                        Estrela e coroa numa pílula só: são
+                                        dois degraus da mesma coisa, e lado a
+                                        lado a coroa se explica sozinha.
+                                      */}
+                                      <div
+                                        className={`flex h-8 rounded-xl border overflow-hidden transition-colors ${
+                                          registro.superFavorite
+                                            ? "border-amber-500"
+                                            : registro.favorite
+                                              ? "border-amber-300"
+                                              : "border-slate-200"
                                         }`}
                                       >
-                                        <Star
-                                          className="w-4 h-4"
-                                          fill={registro.favorite ? "currentColor" : "none"}
-                                        />
-                                      </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            alternarFavoritoCheckIn(registro);
+                                          }}
+                                          title={
+                                            registro.favorite
+                                              ? registro.superFavorite
+                                                ? "Tirar dos favoritos (a coroa sai junto)"
+                                                : "Tirar dos favoritos"
+                                              : "Favoritar: ganha estrela no mapa"
+                                          }
+                                          aria-label="Favoritar check-in"
+                                          aria-pressed={!!registro.favorite}
+                                          className={`w-7 flex items-center justify-center cursor-pointer transition-all ${
+                                            registro.favorite
+                                              ? "bg-amber-50 text-amber-500"
+                                              : "text-slate-400 hover:text-amber-500 hover:bg-amber-50/60"
+                                          }`}
+                                        >
+                                          <Star
+                                            className="w-4 h-4"
+                                            fill={registro.favorite ? "currentColor" : "none"}
+                                          />
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            alternarSuperFavoritoCheckIn(registro);
+                                          }}
+                                          title={
+                                            registro.superFavorite
+                                              ? "Tirar do Super Favorito (a estrela continua)"
+                                              : "Super Favorito: coroa no mapa e no topo da lista"
+                                          }
+                                          aria-label="Super Favorito"
+                                          aria-pressed={!!registro.superFavorite}
+                                          className={`w-7 flex items-center justify-center cursor-pointer transition-all border-l ${
+                                            registro.superFavorite
+                                              ? "super-botao-ligado text-white border-amber-500"
+                                              : registro.favorite
+                                                ? "border-amber-300 text-amber-400 hover:text-amber-600 hover:bg-amber-50/60"
+                                                : "border-slate-200 text-slate-300 hover:text-amber-600 hover:bg-amber-50/60"
+                                          }`}
+                                        >
+                                          <Crown
+                                            key={registro.superFavorite ? "c" : "s"}
+                                            className={`w-4 h-4 ${registro.superFavorite ? "super-coroa-pousa" : ""}`}
+                                            fill={registro.superFavorite ? "currentColor" : "none"}
+                                          />
+                                        </button>
+                                      </div>
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setCheckInAberto(registro.id);
                                         }}
-                                        className="h-8 px-4 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all"
+                                        className="h-8 px-3 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all"
                                       >
                                         Ver
                                       </button>
@@ -13505,6 +13773,30 @@ export default function App() {
                   {mapFilter === "favoritos" && <Check className="w-3.5 h-3.5" />}
                 </button>
 
+                {/* Option 3b: Super Favoritos */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMapFilter("superfavoritos");
+                    setIsFilterDropdownOpen(false);
+                    triggerNotification(
+                      "Filtrado para exibir apenas os Super Favoritos.",
+                      "info",
+                    );
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
+                    mapFilter === "superfavoritos"
+                      ? "super-botao-ligado text-white shadow-md"
+                      : "text-slate-700 hover:bg-white/70 hover:text-slate-900"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Crown className="w-3.5 h-3.5" />
+                    <span>Super Favoritos</span>
+                  </div>
+                  {mapFilter === "superfavoritos" && <Check className="w-3.5 h-3.5" />}
+                </button>
+
                 {/* Option 4: Marcações */}
                 <button
                   onClick={(e) => {
@@ -13726,6 +14018,7 @@ export default function App() {
         }
         centroDoMapa={() => lerVistaDoMapaRef.current?.() || null}
         circuloExterno={circuloParaTerritorio}
+        pedidoParaFecharCirculo={pedidoParaFecharCirculo}
         onCirculoAnalisado={setCirculoAnalisado}
         onRecortes={receberRecortes}
         recorteEmFoco={recorteEmFoco}
@@ -14147,7 +14440,7 @@ export default function App() {
 
       {/* CENTRO MARCADO: agora o raio cresce arrastando a alça no mapa */}
       {definindoRaio && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2001] bg-[#0c1322]/95 backdrop-blur-md border border-indigo-500/50 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 pointer-events-auto">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[2001] w-max max-w-[calc(100vw-2rem)] flex-wrap justify-center bg-[#0c1322]/95 backdrop-blur-md border border-indigo-500/50 text-white px-5 py-3 rounded-[28px] shadow-2xl flex items-center gap-x-4 gap-y-2 pointer-events-auto">
           <Circle className="w-4 h-4 text-indigo-400" />
           <span className="text-xs font-bold uppercase tracking-wider">
             {areaRadius === ""
@@ -14216,6 +14509,7 @@ export default function App() {
           )}
           <button
             onClick={() => {
+              largarPerguntasDoRascunho();
               setDefinindoRaio(false);
               setClickToPickCoords(true);
               setPickedCoords(null);
@@ -15107,6 +15401,8 @@ export default function App() {
           estabelecimentoDestacado={lojaDestacada}
           circuloAnalisado={circuloAnalisado}
           circuloDeBusca={circuloDeBusca}
+          onFecharCirculoAnalisado={fecharCirculoAnalisado}
+          onFecharCirculoDeBusca={fecharCirculoDeBusca}
           desenhandoRaioDeBusca={desenhandoRaioDeBusca}
           onRaioDeBuscaDesenhado={(circulo) => {
             setCirculoDeBusca(circulo);
@@ -15139,6 +15435,8 @@ export default function App() {
           }}
           aoRegistrarVista={registrarVistaDoMapa}
           onToggleCheckInFavorite={alternarFavoritoCheckIn}
+          onToggleCheckInSuperFavorite={alternarSuperFavoritoCheckIn}
+          checkInParaAbrir={checkInParaAbrir}
           onDeleteCheckIn={excluirCheckIn}
           onVincularCheckInAMissao={vincularCheckInAMissao}
           onNarrativasDaMissao={salvarNarrativasDaMissao}
@@ -15186,11 +15484,16 @@ export default function App() {
                   valor={estadoDoPeriodo}
                   onMudar={mudarPeriodo}
                   contagem={contagemDoPeriodo}
+                  soSuper={mapFilter === "superfavoritos"}
                 />
                 <FiltroDeFavoritos
                   ligado={mapFilter === "favoritos"}
                   quantos={contagemDoPeriodo.favoritos}
                   onAlternar={alternarFavoritos}
+                  superLigado={mapFilter === "superfavoritos"}
+                  superFavoritos={superFavoritosDoRecorte}
+                  onAlternarSuper={alternarSuperFavoritos}
+                  onAbrirCheckIn={irAteOCheckIn}
                 />
                 {/*
                   As camadas do território ficam ao lado do recorte de data:
@@ -15343,30 +15646,15 @@ export default function App() {
                   <label className="block text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1.5">
                     Ícone no mapa
                   </label>
-                  <div className="grid grid-cols-7 sm:grid-cols-10 gap-1.5 bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
-                    {OPERATION_ICONS.map((icon) => {
-                      const isActive = icon.key === opTypeIcon;
-                      return (
-                        <button
-                          type="button"
-                          key={icon.key}
-                          title={icon.label}
-                          onClick={() => setOpTypeIcon(icon.key)}
-                          className={`aspect-square rounded-lg flex items-center justify-center border transition-all cursor-pointer ${
-                            isActive
-                              ? "border-transparent text-white shadow-xs scale-105"
-                              : "border-slate-150 bg-slate-50 text-slate-500 hover:bg-slate-100"
-                          }`}
-                          style={
-                            isActive
-                              ? { backgroundColor: opTypeColor }
-                              : undefined
-                          }
-                        >
-                          <OperationIcon icon={icon.key} size={15} />
-                        </button>
-                      );
-                    })}
+                  <div className="bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
+                    <SeletorDeIcone
+                      valor={opTypeIcon}
+                      onMudar={setOpTypeIcon}
+                      cor={opTypeColor}
+                      nome={opTypeLabel}
+                      descricao={opTypeDescription}
+                      compacto
+                    />
                   </div>
                 </div>
 

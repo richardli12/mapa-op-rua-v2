@@ -343,6 +343,7 @@ export interface CheckIn {
   notes?: CheckInNote[]; // observações digitadas e áudios gravados
   operations?: CheckInOperationRef[]; // todos os tipos de operação escolhidos
   favorite?: boolean; // marcado como favorito pelo administrador
+  superFavorite?: boolean; // a coroa: o degrau acima do favorito (sempre favorito também)
   trashed?: boolean; // na lixeira: some das telas, mas dá para restaurar
 }
 

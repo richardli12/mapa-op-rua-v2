@@ -8,6 +8,8 @@
  * figura, sem duas listas para manter em sincronia.
  */
 
+import { ehIconeNeo, lerIconeNeo } from './iconeSvg';
+
 export interface OperationIconDef {
   /** Chave gravada no banco junto do tipo de operação. */
   key: string;
@@ -134,6 +136,17 @@ const ICONS_BY_KEY = new Map(OPERATION_ICONS.map((icon) => [icon.key, icon]));
 export const DEFAULT_OPERATION_ICON = 'pin';
 
 export function getOperationIconDef(key?: string): OperationIconDef {
+  /*
+   * Ícone desenhado pelo NEO: o SVG mora no próprio campo, e só chega aqui
+   * depois de limpo (ver iconeSvg.ts). Se a limpeza não deixar forma nenhuma
+   * — campo adulterado, desenho quebrado — vale o ícone genérico, e o
+   * marcador continua aparecendo no mapa.
+   */
+  if (ehIconeNeo(key)) {
+    const neo = lerIconeNeo(key);
+    if (neo) return { key, label: 'Ícone do NEO', body: neo.body, stroked: neo.stroked };
+    return ICONS_BY_KEY.get(DEFAULT_OPERATION_ICON)!;
+  }
   return (
     (key ? ICONS_BY_KEY.get(key) : undefined) ||
     ICONS_BY_KEY.get(DEFAULT_OPERATION_ICON)!

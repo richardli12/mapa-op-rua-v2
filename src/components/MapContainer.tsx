@@ -5,7 +5,7 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ArrowLeft, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, FilePlus, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ArrowLeft, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Crown, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, FilePlus, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
 import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
 import { UnidadeDeSaude } from '../dados/ubs';
@@ -344,6 +344,10 @@ interface MapContainerProps {
    * coisa.
    */
   circuloDeBusca?: { lat: number; lng: number; raio: number } | null;
+  /** O ✕ da etiqueta do círculo analisado: tira a medida do mapa. */
+  onFecharCirculoAnalisado?: () => void;
+  /** O ✕ da etiqueta do círculo da busca: tira o recorte do mapa. */
+  onFecharCirculoDeBusca?: () => void;
   /** Ferramenta armada: o próximo gesto no mapa desenha o raio da busca. */
   desenhandoRaioDeBusca?: boolean;
   onRaioDeBuscaDesenhado?: (circulo: { lat: number; lng: number; raio: number }) => void;
@@ -431,10 +435,17 @@ interface MapContainerProps {
    * fica com o território e nada por cima. Existe porque desligar a última
    * camada tem de fazer o que diz, e não virar um clique que não responde.
    */
-  mapFilter?: 'all' | 'checkins' | 'markers' | 'favoritos' | 'nada';
-  onMapFilterChange?: (filter: 'all' | 'checkins' | 'markers' | 'favoritos' | 'nada') => void;
+  mapFilter?: 'all' | 'checkins' | 'markers' | 'favoritos' | 'superfavoritos' | 'nada';
+  onMapFilterChange?: (filter: 'all' | 'checkins' | 'markers' | 'favoritos' | 'superfavoritos' | 'nada') => void;
   /** Liga ou desliga a estrela de um check-in, direto do mapa. */
   onToggleCheckInFavorite?: (checkIn: CheckIn) => void;
+  /** A coroa na ficha do check-in: liga e desliga o Super Favorito. */
+  onToggleCheckInSuperFavorite?: (checkIn: CheckIn) => void;
+  /**
+   * Pedido de fora para achar um check-in: o mapa voa até ele e abre a ficha.
+   * O `n` muda a cada pedido, para pedir o mesmo check-in duas vezes.
+   */
+  checkInParaAbrir?: { id: string; n: number } | null;
   /** Exclusão do check-in pelo administrador, direto do mapa. */
   onDeleteCheckIn?: (checkIn: CheckIn) => void;
   /**
@@ -491,6 +502,122 @@ const escaparHtml = (texto: string) =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+
+/** "250 m", "1,5 km": a medida que a etiqueta do raio mostra. */
+const medidaDoRaio = (metros: number) =>
+  metros >= 1000
+    ? `${(metros / 1000).toFixed(1).replace('.0', '').replace('.', ',')} km`
+    : `${Math.round(metros)} m`;
+
+/**
+ * Um círculo de pergunta (análise de território, busca de estabelecimentos)
+ * que se fecha de verdade.
+ *
+ * Antes a etiqueta era um balão parado: dizia o raio, mas não havia onde
+ * tocar para tirá-lo do mapa — o círculo ficava lá até alguém descobrir que
+ * fechar o painel certo, pelo caminho certo, apagava o desenho. Agora a
+ * etiqueta é um controle: tocar no nome enquadra o círculo, tocar no ✕ fecha.
+ *
+ * O fechar tem um instante de animação (o círculo recolhe para o centro)
+ * antes de avisar quem manda no estado — assim o gesto se vê acontecendo, e
+ * não parece que o círculo simplesmente piscou.
+ */
+const desenharCirculoFechavel = (
+  grupo: L.LayerGroup,
+  map: L.Map,
+  circulo: { lat: number; lng: number; raio: number },
+  estilo: {
+    cor: string;
+    preenchimento: number;
+    tracejado?: string;
+    rotulo: string;
+    /** Classe de cor do chip (ex.: 'raio-chip--verde'). */
+    tom: string;
+    /**
+     * Em que borda a etiqueta mora. A análise e a busca podem ser o mesmo
+     * círculo (as duas perguntas do mesmo rascunho): uma em cima e outra
+     * embaixo, as duas etiquetas se leem e os dois ✕ se acertam.
+     */
+    lado: 'cima' | 'baixo';
+  },
+  aoFechar?: () => void
+) => {
+  const centro = L.latLng(circulo.lat, circulo.lng);
+
+  const anel = L.circle(centro, {
+    radius: circulo.raio,
+    color: estilo.cor,
+    weight: 2,
+    opacity: 0.9,
+    dashArray: estilo.tracejado,
+    fillColor: estilo.cor,
+    fillOpacity: estilo.preenchimento,
+    interactive: false,
+    className: 'raio-nasce'
+  }).addTo(grupo);
+
+  const ponto = L.marker(centro, {
+    interactive: false,
+    keyboard: false,
+    icon: L.divIcon({
+      className: '',
+      html:
+        `<span class="raio-centro" style="background:${estilo.cor}"></span>`,
+      iconSize: [12, 12],
+      iconAnchor: [6, 6]
+    })
+  }).addTo(grupo);
+
+  const fechavel = !!aoFechar;
+  // A borda do círculo, no mesmo meridiano do centro.
+  let borda = centro;
+  try {
+    const limites = anel.getBounds();
+    borda = L.latLng(estilo.lado === 'cima' ? limites.getNorth() : limites.getSouth(), centro.lng);
+  } catch {
+    // Sem mapa para projetar, a etiqueta fica no centro.
+  }
+  const chip = L.marker(borda, {
+    keyboard: false,
+    zIndexOffset: 900,
+    bubblingMouseEvents: false,
+    icon: L.divIcon({
+      className: 'raio-chip-ancora',
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+      html:
+        `<div class="raio-chip ${estilo.tom} raio-chip--${estilo.lado}">` +
+        `<span class="raio-chip__rotulo" title="Enquadrar o raio">${escaparHtml(estilo.rotulo)}</span>` +
+        (fechavel
+          ? '<button type="button" class="raio-chip__fechar" data-fechar-raio ' +
+            'title="Fechar o raio" aria-label="Fechar o raio">' +
+            '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" ' +
+            'stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' +
+            '</button>'
+          : '') +
+        '</div>'
+    })
+  }).addTo(grupo);
+
+  let fechando = false;
+  chip.on('click', (ev: L.LeafletMouseEvent) => {
+    const alvo = ev.originalEvent?.target as Element | null;
+    if (fechavel && alvo?.closest?.('[data-fechar-raio]')) {
+      if (fechando) return;
+      fechando = true;
+      anel.getElement()?.classList.add('raio-fechando');
+      ponto.getElement()?.querySelector('.raio-centro')?.classList.add('raio-fechando-centro');
+      chip.getElement()?.querySelector('.raio-chip')?.classList.add('raio-chip--saindo');
+      window.setTimeout(() => aoFechar?.(), 340);
+      return;
+    }
+    try {
+      map.flyToBounds(anel.getBounds(), { padding: [60, 60], maxZoom: 17, duration: 0.6 });
+    } catch {
+      // Sem enquadrar, o círculo continua lá: nada a desfazer.
+    }
+  });
+};
 
 /**
  * O pino da missão.
@@ -651,6 +778,8 @@ export default function MapContainer({
   estabelecimentoDestacado,
   circuloAnalisado,
   circuloDeBusca,
+  onFecharCirculoAnalisado,
+  onFecharCirculoDeBusca,
   desenhandoRaioDeBusca,
   onRaioDeBuscaDesenhado,
   recortesTerritoriais,
@@ -678,6 +807,8 @@ export default function MapContainer({
   mapFilter: propMapFilter,
   onMapFilterChange,
   onToggleCheckInFavorite,
+  onToggleCheckInSuperFavorite,
+  checkInParaAbrir,
   onDeleteCheckIn,
   onVincularCheckInAMissao,
   onNarrativasDaMissao,
@@ -742,12 +873,19 @@ export default function MapContainer({
   const [ubsAberta, setUbsAberta] = useState<UnidadeDeSaude | null>(null);
   /** A camada já enquadrou o mapa uma vez? */
   const camadaUbsLigadaRef = useRef(false);
+  /** As unidades já desenhadas: só as novas caem com a animação. */
+  const idsDeUbsNoMapaRef = useRef<Set<string>>(new Set());
   const lojasGroupRef = useRef<L.LayerGroup | null>(null);
   const analiseGroupRef = useRef<L.LayerGroup | null>(null);
   const buscaGroupRef = useRef<L.LayerGroup | null>(null);
   /** O aviso de raio desenhado, sempre o atual, lido de dentro do gesto. */
   const aoDesenharRaioDeBuscaRef = useRef(onRaioDeBuscaDesenhado);
   aoDesenharRaioDeBuscaRef.current = onRaioDeBuscaDesenhado;
+  /** Os ✕ das etiquetas dos círculos: lidos no clique, sempre os atuais. */
+  const aoFecharCirculoAnalisadoRef = useRef(onFecharCirculoAnalisado);
+  aoFecharCirculoAnalisadoRef.current = onFecharCirculoAnalisado;
+  const aoFecharCirculoDeBuscaRef = useRef(onFecharCirculoDeBusca);
+  aoFecharCirculoDeBuscaRef.current = onFecharCirculoDeBusca;
   const recortesGroupRef = useRef<L.LayerGroup | null>(null);
   /** O seletor de missão está aberto dentro da ficha do check-in? */
   const [escolhendoMissaoNaFicha, setEscolhendoMissaoNaFicha] = useState(false);
@@ -780,10 +918,16 @@ export default function MapContainer({
   const delimitationGroupRef = useRef<L.LayerGroup | null>(null);
 
   const [mouseCoords, setMouseCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [localMapFilter, setLocalMapFilter] = useState<'all' | 'checkins' | 'markers' | 'favoritos' | 'nada'>('all');
+  const [localMapFilter, setLocalMapFilter] = useState<'all' | 'checkins' | 'markers' | 'favoritos' | 'superfavoritos' | 'nada'>('all');
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
+  /** Conta as coroas postas na ficha: cada uma replay a animação de pouso. */
+  const [coroaRecemPosta, setCoroaRecemPosta] = useState(0);
+  // Outra ficha, outra história: a coroa dela não chega pousando.
+  useEffect(() => {
+    setCoroaRecemPosta(0);
+  }, [selectedCheckInForModal?.id]);
   /** Check-ins desenhados da última vez: só quem não estava surge animado. */
   const idsDeCheckInNoMapaRef = useRef<Set<string>>(new Set());
 
@@ -1948,7 +2092,12 @@ export default function MapContainer({
 
     circlesGroup.clearLayers();
 
-    if (mapFilter === 'checkins' || mapFilter === 'favoritos' || mapFilter === 'nada') {
+    if (
+      mapFilter === 'checkins' ||
+      mapFilter === 'favoritos' ||
+      mapFilter === 'superfavoritos' ||
+      mapFilter === 'nada'
+    ) {
       return;
     }
 
@@ -2034,7 +2183,12 @@ export default function MapContainer({
 
     pinsGroup.clearLayers();
 
-    if (mapFilter === 'checkins' || mapFilter === 'favoritos' || mapFilter === 'nada') {
+    if (
+      mapFilter === 'checkins' ||
+      mapFilter === 'favoritos' ||
+      mapFilter === 'superfavoritos' ||
+      mapFilter === 'nada'
+    ) {
       return;
     }
 
@@ -2120,7 +2274,11 @@ export default function MapContainer({
     if (!checkIns) return;
 
     const visiveis =
-      mapFilter === 'favoritos' ? checkIns.filter(c => c.favorite) : checkIns;
+      mapFilter === 'superfavoritos'
+        ? checkIns.filter(c => c.superFavorite)
+        : mapFilter === 'favoritos'
+          ? checkIns.filter(c => c.favorite)
+          : checkIns;
 
     /*
      * QUEM ACABOU DE APARECER, SURGE.
@@ -2138,7 +2296,16 @@ export default function MapContainer({
       agora.add(checkIn.id);
       const surge = !anteriores.has(checkIn.id);
       const atraso = surge ? Math.min(novos++ * 22, 600) : 0;
-      const brilha = mapFilter === 'favoritos' && checkIn.favorite;
+      const brilha = mapFilter === 'favoritos' && checkIn.favorite && !checkIn.superFavorite;
+      /*
+       * A coroa se acha sozinha.
+       *
+       * O super favorito não espera filtro para aparecer: em qualquer vista
+       * ele leva a coroa, o aro dourado e fica por cima dos vizinhos — é
+       * isso que faz dele o check-in que se encontra de relance. Com o
+       * filtro da coroa ligado, a aura gira mais forte.
+       */
+      const coroado = !!checkIn.superFavorite;
       // Check-in por missão usa o bonequinho verde de sempre. O check-in livre
       // vira um alerta pintado com a cor do grau de prioridade informado.
       const isFree = checkIn.mode === 'livre';
@@ -2164,8 +2331,8 @@ export default function MapContainer({
           height: 38px;
           border-radius: 50%;
           background: ${markerColor};
-          border: 3px solid white;
-          box-shadow: 0 4px 10px ${markerColor}66;
+          border: 3px solid ${coroado ? '#FDE68A' : 'white'};
+          box-shadow: ${coroado ? `0 0 0 2px #D97706, 0 6px 16px rgba(217,119,6,.55)` : `0 4px 10px ${markerColor}66`};
           display: flex;
           align-items: center;
           justify-content: center;
@@ -2177,7 +2344,13 @@ export default function MapContainer({
       `;
 
       // Estrela no canto: o favorito se acha no meio dos outros marcadores.
-      const estrelaHtml = checkIn.favorite
+      const estrelaHtml = coroado
+        ? `<span class="ck-coroa" style="position:absolute;top:-9px;left:50%;width:24px;height:18px;margin-left:-12px;
+             border-radius:9px;background:linear-gradient(135deg,#FDE68A,#F59E0B 55%,#B45309);border:2px solid #fff;
+             box-shadow:0 2px 6px rgba(180,83,9,.55);display:flex;align-items:center;justify-content:center;">
+             <svg viewBox="0 0 24 24" width="12" height="12" fill="#fff" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"><path d="M2.5 8.5l4.5 3.5L12 4l5 8 4.5-3.5-2 10.5h-15z"/></svg>
+           </span>`
+        : checkIn.favorite
         ? `<span style="position:absolute;top:-2px;right:-2px;width:18px;height:18px;border-radius:50%;
              background:#F59E0B;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);
              display:flex;align-items:center;justify-content:center;">
@@ -2186,7 +2359,9 @@ export default function MapContainer({
         : '';
 
       const checkInIcon = L.divIcon({
-        className: `custom-div-icon drop-shadow-md${surge ? ' ck-marcador-entra' : ''}${brilha ? ' ck-fav-brilho' : ''}`,
+        className: `custom-div-icon drop-shadow-md${surge ? ' ck-marcador-entra' : ''}${brilha ? ' ck-fav-brilho' : ''}${
+          coroado ? ` ck-super${mapFilter === 'superfavoritos' ? ' ck-super-forte' : ''}` : ''
+        }`,
         html: `
           <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; --atraso: ${atraso}ms;">
             ${avatarHtml}
@@ -2197,7 +2372,11 @@ export default function MapContainer({
         iconAnchor: [22, 22]
       });
 
-      const marker = L.marker([checkIn.coordinates.lat, checkIn.coordinates.lng], { icon: checkInIcon });
+      const marker = L.marker([checkIn.coordinates.lat, checkIn.coordinates.lng], {
+        icon: checkInIcon,
+        // O coroado nunca fica embaixo de um vizinho.
+        zIndexOffset: coroado ? 800 : checkIn.favorite ? 300 : 0
+      });
 
       const dateText = new Date(checkIn.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' • ' + new Date(checkIn.createdAt).toLocaleDateString([], { day: '2-digit', month: '2-digit' });
 
@@ -2223,9 +2402,11 @@ export default function MapContainer({
 
       // O mesmo cartão da missão: no mapa as duas coisas se clicam igual, e
       // o que o cursor mostra também tem de ser igual.
-      const etiqueta = isFree
-        ? `⚠️ Check-in livre${priority ? ` • Prioridade ${priority.label}` : ''}`
-        : '✅ Check-in de voluntário';
+      const etiqueta = `${coroado ? '👑 Super Favorito • ' : ''}${
+        isFree
+          ? `⚠️ Check-in livre${priority ? ` • Prioridade ${priority.label}` : ''}`
+          : '✅ Check-in de voluntário'
+      }`;
 
       marker.bindTooltip(`
         <div class="font-sans min-w-[190px] max-w-[250px]">
@@ -2259,6 +2440,52 @@ export default function MapContainer({
     });
     idsDeCheckInNoMapaRef.current = agora;
   }, [checkIns, mapFilter]);
+
+  /**
+   * Achar um check-in pedido de fora (a lista dos Super Favoritos).
+   *
+   * O mapa voa até ele, um anel dourado marca o chão por um instante — o
+   * olho precisa de um alvo depois do voo — e a ficha abre quando o voo
+   * pousa, e não antes, para a ficha não cobrir o caminho.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !checkInParaAbrir) return;
+    const alvo = (checkIns || []).find(c => c.id === checkInParaAbrir.id);
+    if (!alvo?.coordinates) return;
+    const ponto = L.latLng(alvo.coordinates.lat, alvo.coordinates.lng);
+
+    let aberto = false;
+    const abrir = () => {
+      if (aberto) return;
+      aberto = true;
+      const anel = L.marker(ponto, {
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 1000,
+        icon: L.divIcon({
+          className: 'ck-achado',
+          html: '<span></span><span></span>',
+          iconSize: [44, 44],
+          iconAnchor: [22, 22]
+        })
+      }).addTo(map);
+      window.setTimeout(() => map.removeLayer(anel), 2400);
+      setMissaoAbertaRef(null);
+      setVoltaParaMissao(null);
+      setSelectedCheckInForModal(alvo);
+    };
+
+    map.once('moveend', abrir);
+    // Já estava lá: não há voo, então não haverá moveend.
+    const reserva = window.setTimeout(abrir, 1400);
+    map.flyTo(ponto, Math.max(map.getZoom(), 17), { duration: 0.9 });
+    return () => {
+      map.off('moveend', abrir);
+      window.clearTimeout(reserva);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkInParaAbrir?.n]);
 
   /**
    * Estabelecimentos da pesquisa.
@@ -2627,40 +2854,20 @@ export default function MapContainer({
     grupo.clearLayers();
     if (!circuloAnalisado) return;
 
-    const centro = L.latLng(circuloAnalisado.lat, circuloAnalisado.lng);
-
-    L.circle(centro, {
-      radius: circuloAnalisado.raio,
-      color: '#059669',
-      weight: 2,
-      opacity: 0.9,
-      dashArray: '6, 6',
-      fillColor: '#10B981',
-      fillOpacity: 0.08,
-      interactive: false
-    }).addTo(grupo);
-
-    L.marker(centro, {
-      interactive: false,
-      keyboard: false,
-      icon: L.divIcon({
-        className: '',
-        html:
-          '<span style="display:block;width:12px;height:12px;border-radius:50%;' +
-          'background:#059669;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></span>',
-        iconSize: [12, 12],
-        iconAnchor: [6, 6]
-      })
-    })
-      .addTo(grupo)
-      .bindTooltip(
-        `Área analisada · raio de ${
-          circuloAnalisado.raio >= 1000
-            ? `${circuloAnalisado.raio / 1000} km`
-            : `${circuloAnalisado.raio} m`
-        }`,
-        { permanent: true, direction: 'top', offset: [0, -10], className: 'medida-raio' }
-      );
+    desenharCirculoFechavel(
+      grupo,
+      map,
+      circuloAnalisado,
+      {
+        cor: '#059669',
+        preenchimento: 0.08,
+        tracejado: '6, 6',
+        rotulo: `Área analisada · ${medidaDoRaio(circuloAnalisado.raio)}`,
+        tom: 'raio-chip--verde',
+        lado: 'baixo'
+      },
+      aoFecharCirculoAnalisadoRef.current ? () => aoFecharCirculoAnalisadoRef.current?.() : undefined
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [circuloAnalisado]);
 
@@ -2677,41 +2884,22 @@ export default function MapContainer({
     if (!grupo) return;
 
     grupo.clearLayers();
-    if (!circuloDeBusca) return;
+    const map = mapRef.current;
+    if (!circuloDeBusca || !map) return;
 
-    const centro = L.latLng(circuloDeBusca.lat, circuloDeBusca.lng);
-
-    L.circle(centro, {
-      radius: circuloDeBusca.raio,
-      color: '#015FC9',
-      weight: 2,
-      opacity: 0.9,
-      fillColor: '#015FC9',
-      fillOpacity: 0.07,
-      interactive: false
-    }).addTo(grupo);
-
-    L.marker(centro, {
-      interactive: false,
-      keyboard: false,
-      icon: L.divIcon({
-        className: '',
-        html:
-          '<span style="display:block;width:12px;height:12px;border-radius:50%;' +
-          'background:#015FC9;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></span>',
-        iconSize: [12, 12],
-        iconAnchor: [6, 6]
-      })
-    })
-      .addTo(grupo)
-      .bindTooltip(
-        `Busca · ${
-          circuloDeBusca.raio >= 1000
-            ? `${(circuloDeBusca.raio / 1000).toFixed(1).replace('.0', '')} km`
-            : `${Math.round(circuloDeBusca.raio)} m`
-        }`,
-        { permanent: true, direction: 'top', offset: [0, -10], className: 'medida-raio' }
-      );
+    desenharCirculoFechavel(
+      grupo,
+      map,
+      circuloDeBusca,
+      {
+        cor: '#015FC9',
+        preenchimento: 0.07,
+        rotulo: `Busca · ${medidaDoRaio(circuloDeBusca.raio)}`,
+        tom: 'raio-chip--azul',
+        lado: 'cima'
+      },
+      aoFecharCirculoDeBuscaRef.current ? () => aoFecharCirculoDeBuscaRef.current?.() : undefined
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [circuloDeBusca]);
 
@@ -2760,6 +2948,8 @@ export default function MapContainer({
     grupo.clearLayers();
     if (!ubsVisiveis) {
       camadaUbsLigadaRef.current = false;
+      // Desligou: quando voltar, todas caem de novo, em onda.
+      idsDeUbsNoMapaRef.current = new Set();
       setUbsAberta(null);
       return;
     }
@@ -2771,26 +2961,70 @@ export default function MapContainer({
     ) as (UnidadeDeSaude & { lat: number; lng: number })[];
     if (comLugar.length === 0) return;
 
-    const cor = '#0E9F9F';
+    /*
+     * O PINO DA SAÚDE, E COMO ELE CHEGA.
+     *
+     * Era um "+" branco num disco: dizia "algo aqui", não "saúde aqui". Agora
+     * é a gota verde-água da saúde com um coração dentro e o traço do
+     * batimento atravessando — o mesmo símbolo da ficha e do botão da camada.
+     *
+     * Ligar a camada faz as unidades caírem em ONDA: do meio do conjunto para
+     * as bordas, como um sinal que se espalha pela cidade. Cada uma pousa,
+     * solta um anel no chão, desenha o batimento e passa a bater — cada uma
+     * no seu tempo, para o mapa não pulsar como um pisca-pisca sincronizado.
+     * Só quem ainda não estava no mapa cai: uma atualização da lista não faz
+     * as outras caírem de novo.
+     */
+    const anteriores = idsDeUbsNoMapaRef.current;
+    const agora = new Set<string>();
+    const centroLat = comLugar.reduce((soma, u) => soma + u.lat, 0) / comLugar.length;
+    const centroLng = comLugar.reduce((soma, u) => soma + u.lng, 0) / comLugar.length;
+    const distancia = (u: { lat: number; lng: number }) =>
+      Math.hypot(u.lat - centroLat, (u.lng - centroLng) * Math.cos((centroLat * Math.PI) / 180));
+    const maisLonge = Math.max(...comLugar.map(distancia), 1e-9);
+
+    const coracao =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="19" height="19" ' +
+      'fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path class="pino-saude__coracao-forma" d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" ' +
+      'fill="#CCFBF1" stroke="#0E9F9F" stroke-width="2.2"/>' +
+      '<path class="pino-saude__ecg" pathLength="1" d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27" ' +
+      'stroke="#E11D48" stroke-width="2.4"/>' +
+      '</svg>';
+
     comLugar.forEach(unidade => {
+      agora.add(unidade.id);
+      const surge = !anteriores.has(unidade.id);
+      // Onda do centro para fora (até ~1s), com um grão de acaso para a
+      // frente da onda não parecer uma régua.
+      const atraso = surge
+        ? Math.round((distancia(unidade) / maisLonge) * 950 + Math.random() * 120)
+        : 0;
+      // O batimento de cada uma começa num ponto diferente do ciclo.
+      const fase = -Math.round(Math.random() * 2800);
+
       const icone = L.divIcon({
         className: 'pino-ubs',
         html:
-          '<span style="display:block;width:30px;height:30px">' +
-          `<span class="pino-ubs__corpo" style="--cor:${cor}">` +
-          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" ' +
-          'stroke="#fff" stroke-width="3" stroke-linecap="round" width="15" height="15">' +
-          '<path d="M12 5v14M5 12h14"/></svg>' +
-          '</span></span>',
-        iconSize: [30, 30],
-        iconAnchor: [15, 15]
+          `<span class="pino-saude${surge ? ' pino-saude--surge' : ''}" ` +
+          `style="--atraso:${atraso}ms;--fase:${fase}ms">` +
+          '<span class="pino-saude__anel"></span>' +
+          '<span class="pino-saude__sombra"></span>' +
+          '<span class="pino-saude__queda">' +
+          '<span class="pino-saude__gota"></span>' +
+          `<span class="pino-saude__disco"><span class="pino-saude__coracao">${coracao}</span></span>` +
+          '</span>' +
+          '</span>',
+        iconSize: [40, 54],
+        // A ponta da gota é o lugar de verdade no mapa.
+        iconAnchor: [20, 47]
       });
 
       const marcador = L.marker([unidade.lat, unidade.lng], { icon: icone });
       marcador.bindTooltip(
         `<b>${escaparHtml(unidade.nome)}</b>` +
           (unidade.endereco ? `<br>${escaparHtml(unidade.endereco)}` : ''),
-        { direction: 'top', offset: [0, -16] }
+        { direction: 'top', offset: [0, -48] }
       );
       marcador.on('click', evento => {
         // O clique é da unidade: não pode virar marcação de ponto no mapa.
@@ -2799,6 +3033,8 @@ export default function MapContainer({
       });
       grupo.addLayer(marcador);
     });
+
+    idsDeUbsNoMapaRef.current = agora;
 
     // Ligar a camada e não ver nada seria um botão quebrado: o mapa vai onde
     // as unidades estão, mas só no momento em que a camada acende.
@@ -3404,6 +3640,27 @@ export default function MapContainer({
         que a equipe não trabalhou. Aqui o vazio diz por que está vazio e
         oferece a saída.
       */}
+      {mapFilter === 'superfavoritos' && (checkIns || []).filter(c => c.superFavorite).length === 0 && (
+        <div className="absolute inset-x-0 bottom-24 z-[1000] flex justify-center pointer-events-none px-4">
+          <div className="pointer-events-auto anim-sobe flex items-center gap-3 pl-3 pr-2 py-2 rounded-2xl bg-white/95 backdrop-blur border border-amber-300 shadow-2xl max-w-md">
+            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-orange-500 flex items-center justify-center shrink-0 shadow-md shadow-amber-500/30">
+              <Crown className="w-4.5 h-4.5 text-white" />
+            </span>
+            <p className="text-[12px] font-semibold text-slate-600 leading-snug">
+              <strong className="text-slate-800">Nenhum Super Favorito aqui.</strong> Toque na
+              coroa da ficha do check-in para ele subir de degrau.
+            </p>
+            <button
+              type="button"
+              onClick={() => setMapFilter('all')}
+              className="shrink-0 h-9 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black cursor-pointer"
+            >
+              Ver tudo
+            </button>
+          </div>
+        </div>
+      )}
+
       {mapFilter === 'favoritos' && (checkIns || []).filter(c => c.favorite).length === 0 && (
         <div className="absolute inset-x-0 bottom-24 z-[1000] flex justify-center pointer-events-none px-4">
           <div className="pointer-events-auto anim-sobe flex items-center gap-3 pl-3 pr-2 py-2 rounded-2xl bg-white/95 backdrop-blur border border-amber-200 shadow-2xl max-w-md">
@@ -4857,19 +5114,69 @@ export default function MapContainer({
               </div>
             )}
             {/* Header com tom esmeralda */}
-            <div className="bg-emerald-600 px-6 py-4 flex items-center justify-between text-white shadow-md">
+            <div
+              className={`px-6 py-4 flex items-center justify-between text-white shadow-md transition-colors duration-500 ${
+                selectedCheckInForModal.superFavorite ? 'super-cabecalho' : 'bg-emerald-600'
+              }`}
+            >
               <div className="flex items-center gap-2">
                 <div className="p-1.5 bg-white/20 rounded-lg">
                   <User className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="font-extrabold text-[11px] uppercase tracking-wider text-emerald-100 leading-none">Detalhes do Check-in</h3>
-                  <p className="text-xs font-semibold text-emerald-50 mt-0.5">
+                  <p className="text-xs font-semibold text-emerald-50 mt-0.5 flex items-center gap-1.5 flex-wrap">
                     {selectedCheckInForModal.mode === 'livre' ? 'Registro Livre (sem missão)' : 'Voluntário Registrado'}
+                    {selectedCheckInForModal.superFavorite && (
+                      <span className="anim-sobe inline-flex items-center gap-1 h-[18px] px-1.5 rounded-full bg-white text-amber-700 text-[9.5px] font-black uppercase tracking-wider shadow-sm">
+                        <Crown className="w-3 h-3" fill="currentColor" />
+                        Super Favorito
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-1">
+                {onToggleCheckInSuperFavorite && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggleCheckInSuperFavorite(selectedCheckInForModal);
+                      const coroa = !selectedCheckInForModal.superFavorite;
+                      if (coroa) setCoroaRecemPosta((n) => n + 1);
+                      setSelectedCheckInForModal({
+                        ...selectedCheckInForModal,
+                        superFavorite: coroa,
+                        // Coroar também estrela; descoroar deixa a estrela.
+                        favorite: coroa ? true : selectedCheckInForModal.favorite
+                      });
+                    }}
+                    className={`relative p-1.5 rounded-full transition-all cursor-pointer ${
+                      selectedCheckInForModal.superFavorite
+                        ? 'bg-gradient-to-br from-amber-300 to-orange-500 shadow-lg shadow-amber-600/40 ring-2 ring-white/70'
+                        : 'hover:bg-white/10'
+                    }`}
+                    title={
+                      selectedCheckInForModal.superFavorite
+                        ? 'Tirar do Super Favorito (a estrela continua)'
+                        : 'Tornar Super Favorito'
+                    }
+                    aria-label="Super Favorito"
+                    aria-pressed={!!selectedCheckInForModal.superFavorite}
+                  >
+                    <Crown
+                      key={coroaRecemPosta}
+                      className={`w-5 h-5 ${
+                        selectedCheckInForModal.superFavorite && coroaRecemPosta > 0 ? 'super-coroa-pousa' : ''
+                      }`}
+                      fill={selectedCheckInForModal.superFavorite ? '#fff' : 'none'}
+                      color="#fff"
+                    />
+                    {selectedCheckInForModal.superFavorite && coroaRecemPosta > 0 && (
+                      <span key={`o-${coroaRecemPosta}`} className="super-onda" aria-hidden="true" />
+                    )}
+                  </button>
+                )}
                 {onToggleCheckInFavorite && (
                   <button
                     type="button"
@@ -4879,7 +5186,11 @@ export default function MapContainer({
                       // no mapa atrás dele.
                       setSelectedCheckInForModal({
                         ...selectedCheckInForModal,
-                        favorite: !selectedCheckInForModal.favorite
+                        favorite: !selectedCheckInForModal.favorite,
+                        // Sem estrela, sem coroa.
+                        superFavorite: selectedCheckInForModal.favorite
+                          ? false
+                          : selectedCheckInForModal.superFavorite
                       });
                     }}
                     className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"

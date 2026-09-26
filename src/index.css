@@ -1046,16 +1046,194 @@
  * nesta folha (carregada depois da dele) tira o `absolute` do ícone e derruba
  * todos os pinos no fluxo do painel. Foi o que aconteceu com as escolas.
  */
-.pino-ubs__corpo {
+.pino-saude {
+  display: block;
+  width: 40px;
+  height: 54px;
+  /* A ponta da gota: é por ela que o pino cresce, cai e pousa. */
+  transform-origin: 20px 47px;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.pino-ubs:hover .pino-saude {
+  transform: translateY(-3px) scale(1.14);
+}
+
+.pino-saude__queda {
   position: absolute;
   inset: 0;
+  transform-origin: 20px 47px;
+}
+
+/* A gota: verde-água da saúde, em degradê, aro branco e brilho da cor. */
+.pino-saude__gota {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: linear-gradient(135deg, #2dd4bf 0%, #0e9f9f 55%, #0b7a7a 100%);
+  border: 3px solid #ffffff;
+  box-shadow:
+    0 6px 14px rgba(15, 23, 42, 0.32),
+    0 0 14px rgba(20, 184, 166, 0.45);
+}
+
+/* O disco branco com o coração e o batimento dentro. */
+.pino-saude__disco {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: inset 0 -2px 0 rgba(14, 159, 159, 0.15);
+}
+
+.pino-saude__coracao {
+  display: flex;
+  animation: pino-saude-bate 2.8s ease-in-out var(--fase, 0ms) infinite;
+}
+
+.pino-saude__ecg {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.pino-saude__sombra {
+  position: absolute;
+  left: 13px;
+  top: 45px;
+  width: 14px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--cor, #0e9f9f);
-  border: 3px solid #ffffff;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+  background: rgba(15, 23, 42, 0.3);
+  filter: blur(1.2px);
+}
+
+/* O anel que a unidade solta no chão ao pousar. */
+.pino-saude__anel {
+  position: absolute;
+  left: 13px;
+  top: 43px;
+  width: 14px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid #14b8a6;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --- a chegada, em onda ------------------------------------------------ */
+.pino-saude--surge .pino-saude__queda {
+  animation: pino-saude-cai 0.75s cubic-bezier(0.3, 0.7, 0.4, 1) var(--atraso, 0ms) both;
+}
+
+.pino-saude--surge .pino-saude__sombra {
+  animation: pino-saude-sombra 0.75s ease-out var(--atraso, 0ms) both;
+}
+
+.pino-saude--surge .pino-saude__anel {
+  animation: pino-saude-anel 0.9s cubic-bezier(0.22, 1, 0.36, 1) calc(var(--atraso, 0ms) + 0.4s) both;
+}
+
+/* O batimento se desenha depois do pouso: o monitor "liga". */
+.pino-saude--surge .pino-saude__ecg {
+  animation: pino-saude-ecg 0.8s cubic-bezier(0.65, 0, 0.35, 1) calc(var(--atraso, 0ms) + 0.5s) both;
+}
+
+@keyframes pino-saude-cai {
+  0% {
+    opacity: 0;
+    transform: translateY(-90px) scale(0.55, 0.7);
+  }
+  15% {
+    opacity: 1;
+  }
+  55% {
+    transform: translateY(0) scale(1.12, 0.84);
+  }
+  70% {
+    transform: translateY(-9px) scale(0.95, 1.06);
+  }
+  84% {
+    transform: translateY(0) scale(1.04, 0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pino-saude-sombra {
+  0% {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pino-saude-anel {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.4);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(4.2);
+  }
+}
+
+@keyframes pino-saude-ecg {
+  0% {
+    stroke-dashoffset: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Tum-tum: duas batidas e um respiro, como um coração, e não um pisca. */
+@keyframes pino-saude-bate {
+  0%,
+  34%,
+  100% {
+    transform: scale(1);
+  }
+  8% {
+    transform: scale(1.2);
+  }
+  16% {
+    transform: scale(0.98);
+  }
+  24% {
+    transform: scale(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pino-saude,
+  .pino-saude__coracao,
+  .pino-saude--surge .pino-saude__queda,
+  .pino-saude--surge .pino-saude__sombra,
+  .pino-saude--surge .pino-saude__anel,
+  .pino-saude--surge .pino-saude__ecg {
+    animation: none;
+    transition: none;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -2118,5 +2296,582 @@
   }
   .card-eleva:hover {
     translate: none;
+  }
+}
+
+/* ===========================================================================
+ * Gerar ícone com NEO — o estúdio
+ *
+ * O violeta é a cor do NEO criando (o laranja continua sendo da operação):
+ * quem vê violeta sabe que ali tem desenho de IA, e não da biblioteca.
+ * ======================================================================== */
+.neo-estudio {
+  box-shadow: 0 30px 80px -20px rgba(124, 58, 237, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+/* A aurora que respira atrás do estúdio. */
+.neo-aurora {
+  position: absolute;
+  inset: -40% -20% auto -20%;
+  height: 80%;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 50% at 25% 40%, rgba(139, 92, 246, 0.28), transparent 70%),
+    radial-gradient(35% 45% at 75% 30%, rgba(236, 72, 153, 0.16), transparent 70%),
+    radial-gradient(30% 40% at 55% 60%, rgba(56, 189, 248, 0.12), transparent 70%);
+  filter: blur(10px);
+  animation: neo-aurora 14s ease-in-out infinite alternate;
+}
+
+@keyframes neo-aurora {
+  from {
+    transform: translateX(-4%) rotate(-2deg);
+  }
+  to {
+    transform: translateX(4%) rotate(2deg);
+  }
+}
+
+.neo-selo {
+  background: linear-gradient(135deg, #8B5CF6 0%, #D946EF 100%);
+  box-shadow: 0 8px 24px -6px rgba(139, 92, 246, 0.8);
+}
+
+/* "NEO entendeu": a frase aparece como quem digita. */
+.neo-escreve {
+  display: inline-block;
+  color: #C4B5FD;
+  animation: op-status-entra 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.neo-cartao {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.neo-cartao:hover {
+  border-color: rgba(167, 139, 250, 0.45);
+  background: linear-gradient(180deg, rgba(139, 92, 246, 0.1), rgba(255, 255, 255, 0.02));
+}
+
+.neo-escolhido,
+.neo-escolhido:hover {
+  border-color: #A78BFA;
+  background: linear-gradient(180deg, rgba(139, 92, 246, 0.22), rgba(139, 92, 246, 0.06));
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25), 0 12px 30px -10px rgba(139, 92, 246, 0.6);
+}
+
+/* O ícone novo se desenha, traço a traço. */
+.neo-desenha > * {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: neo-traco 1.1s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+.neo-desenha > *:nth-child(2) { animation-delay: 0.18s; }
+.neo-desenha > *:nth-child(3) { animation-delay: 0.36s; }
+.neo-desenha > *:nth-child(4) { animation-delay: 0.54s; }
+.neo-desenha > *:nth-child(n + 5) { animation-delay: 0.7s; }
+
+/* Detalhe sólido (um ponto) entra acendendo, já que não tem traço. */
+.neo-desenha > [fill="currentColor"] {
+  opacity: 0;
+  animation: neo-acende 0.4s 0.9s ease-out forwards;
+}
+
+@keyframes neo-traco {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes neo-acende {
+  to {
+    opacity: 1;
+  }
+}
+
+/* Enquanto o NEO pensa: papel quadriculado e um lápis rabiscando. */
+.neo-esbocando {
+  position: relative;
+  overflow: hidden;
+  animation: neo-respira 1.8s ease-in-out infinite;
+}
+
+@keyframes neo-respira {
+  50% {
+    border-color: rgba(167, 139, 250, 0.4);
+  }
+}
+
+.neo-grade {
+  position: absolute;
+  inset: 18%;
+  border-radius: 10px;
+  background-image:
+    linear-gradient(rgba(167, 139, 250, 0.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 139, 250, 0.14) 1px, transparent 1px);
+  background-size: 12.5% 12.5%;
+}
+
+.neo-lapis {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: #E9D5FF;
+  box-shadow: 0 0 12px 3px rgba(192, 132, 252, 0.8);
+  left: 30%;
+  top: 30%;
+  animation: neo-rabisca 2.4s ease-in-out infinite;
+}
+
+@keyframes neo-rabisca {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(40px, 10px); }
+  40% { transform: translate(20px, 50px); }
+  60% { transform: translate(-6px, 34px); }
+  80% { transform: translate(34px, 62px); }
+  100% { transform: translate(0, 0); }
+}
+
+/* A prévia no "mapa": papel quadriculado claro, marcador pulsando. */
+.neo-mapinha {
+  background-color: #E8EDF2;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.35) 1px, transparent 1px),
+    linear-gradient(115deg, transparent 44%, #fff 44%, #fff 52%, transparent 52%);
+  background-size: 22px 22px, 22px 22px, 100% 100%;
+}
+
+.neo-pulso {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border-radius: 9999px;
+  border: 3px solid;
+  animation: pino-busca-pulso 1.8s ease-out infinite;
+}
+
+.neo-marcador {
+  animation: ck-marcador-brota 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.neo-confirmar {
+  background: linear-gradient(135deg, #8B5CF6 0%, #C026D3 100%);
+  color: #fff;
+  box-shadow: 0 10px 26px -12px rgba(168, 85, 247, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: filter 0.2s, transform 0.1s;
+}
+
+.neo-confirmar:hover:enabled {
+  filter: brightness(1.1);
+}
+
+.neo-confirmar:active:enabled {
+  transform: scale(0.98);
+}
+
+.neo-confirmar:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  color: #64748B;
+  box-shadow: none;
+}
+
+/* O botão que abre o estúdio: borda em gradiente que corre devagar. */
+.neo-botao {
+  color: #6D28D9;
+  background: linear-gradient(#F5F3FF, #F5F3FF) padding-box,
+    linear-gradient(90deg, #8B5CF6, #D946EF, #38BDF8, #8B5CF6) border-box;
+  background-size: 100% 100%, 300% 100%;
+  border: 1.5px solid transparent;
+  animation: neo-borda 6s linear infinite;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.neo-botao:hover:enabled {
+  color: #fff;
+  background: linear-gradient(135deg, #8B5CF6, #C026D3) padding-box,
+    linear-gradient(90deg, #8B5CF6, #D946EF, #38BDF8, #8B5CF6) border-box;
+  background-size: 100% 100%, 300% 100%;
+}
+
+.neo-botao:disabled {
+  color: #94A3B8;
+  background: #F8FAFC;
+  border-color: #E2E8F0;
+  animation: none;
+}
+
+@keyframes neo-borda {
+  to {
+    background-position: 0 0, 300% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neo-aurora,
+  .neo-esbocando,
+  .neo-lapis,
+  .neo-pulso,
+  .neo-marcador,
+  .neo-botao {
+    animation: none;
+  }
+  .neo-desenha > * {
+    animation: none;
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------- os raios que se fecham --------- */
+
+/* O círculo nasce abrindo do centro. `transform-box: fill-box` é o que faz o
+   centro do desenho ser o centro do círculo, e não o canto do SVG. */
+path.raio-nasce {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: raio-nasce 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes raio-nasce {
+  0% {
+    transform: scale(0.15);
+    opacity: 0;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* E recolhe para o centro quando alguém toca no ✕. */
+path.raio-fechando {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: raio-fecha 0.34s cubic-bezier(0.55, 0, 0.75, 0) forwards !important;
+}
+
+@keyframes raio-fecha {
+  0% {
+    transform: none;
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.05);
+    opacity: 0;
+  }
+}
+
+.raio-centro {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.raio-fechando-centro {
+  animation: raio-fecha 0.34s ease-in forwards;
+}
+
+/* A etiqueta vira controle: nome (enquadra) + ✕ (fecha). O Leaflet posiciona
+   a âncora; o chip sobe acima do centro sozinho. */
+.raio-chip-ancora {
+  overflow: visible;
+}
+
+.raio-chip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  translate: -50% calc(-100% - 8px);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 3px 3px 10px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  box-shadow: 0 6px 18px -6px rgba(15, 23, 42, 0.55), 0 0 0 2px rgba(255, 255, 255, 0.95);
+  animation: raio-chip-entra 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Na borda de baixo, a etiqueta pende para fora do círculo. */
+.raio-chip--baixo {
+  translate: -50% 8px;
+}
+
+.raio-chip--verde {
+  background: linear-gradient(135deg, #059669, #047857);
+}
+
+.raio-chip--azul {
+  background: linear-gradient(135deg, #015fc9, #0b4a9c);
+}
+
+.raio-chip__rotulo {
+  padding-right: 4px;
+}
+
+.raio-chip__fechar {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.15s ease;
+}
+
+.raio-chip__fechar:hover {
+  background: #fff;
+  color: #e11d48;
+  transform: rotate(90deg) scale(1.08);
+}
+
+.raio-chip__fechar:active {
+  transform: rotate(90deg) scale(0.9);
+}
+
+.raio-chip--saindo {
+  animation: raio-chip-sai 0.3s ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes raio-chip-entra {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.6);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes raio-chip-sai {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  path.raio-nasce,
+  path.raio-fechando,
+  .raio-fechando-centro,
+  .raio-chip,
+  .raio-chip--saindo {
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------------------- o Super Favorito --------- */
+
+/* O ouro da coroa: um gradiente que corre devagar, para o botão ligado
+   parecer metal e não tinta chapada. */
+.super-botao-ligado,
+.super-cabecalho {
+  background-image: linear-gradient(115deg, #92400e 0%, #c2410c 22%, #d97706 42%, #f59e0b 50%, #d97706 58%, #c2410c 78%, #92400e 100%);
+  background-size: 250% 100%;
+  animation: super-ouro 4.5s ease-in-out infinite;
+}
+
+.super-cabecalho {
+  text-shadow: 0 1px 2px rgba(120, 53, 15, 0.45);
+}
+
+/* O cabeçalho da ficha nasceu esmeralda: no ouro, o texto vira branco. */
+.super-cabecalho h3,
+.super-cabecalho p {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+@keyframes super-ouro {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.super-selo {
+  background: linear-gradient(135deg, #fde68a, #f59e0b 55%, #b45309);
+  box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(180, 83, 9, 0.45);
+}
+
+/* Linha coroada da lista: um fio de ouro na borda esquerda. */
+tr.super-linha > td:first-child {
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+
+tr.super-linha {
+  background-image: linear-gradient(90deg, rgba(253, 230, 138, 0.28), transparent 55%);
+}
+
+/* A coroa pousa: cai do alto, quica e assenta. */
+.super-coroa-pousa {
+  animation: super-coroa-pousa 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes super-coroa-pousa {
+  0% {
+    transform: translateY(-14px) rotate(-18deg) scale(0.4);
+    opacity: 0;
+  }
+  55% {
+    transform: translateY(2px) rotate(6deg) scale(1.2);
+    opacity: 1;
+  }
+  80% {
+    transform: translateY(-1px) rotate(-2deg) scale(0.96);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* E uma onda dourada sai de onde ela pousou. */
+.super-onda {
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid #fcd34d;
+  pointer-events: none;
+  animation: super-onda 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes super-onda {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+/* No mapa: o coroado tem uma aura dourada que gira devagar, sempre — é o
+   que faz ele ser achado de relance no meio dos outros. */
+.ck-super > div::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  background: conic-gradient(from 0deg, #fde68a, #f59e0b, #b45309, #f59e0b, #fde68a);
+  opacity: 0.9;
+  z-index: -1;
+  animation: op-gira 3.2s linear infinite;
+  -webkit-mask: radial-gradient(circle, transparent 58%, #000 60%);
+  mask: radial-gradient(circle, transparent 58%, #000 60%);
+  pointer-events: none;
+}
+
+.ck-super .ck-coroa {
+  animation: super-coroa-balanca 2.8s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+
+@keyframes super-coroa-balanca {
+  0%,
+  100% {
+    transform: rotate(-6deg);
+  }
+  50% {
+    transform: rotate(6deg) translateY(-1px);
+  }
+}
+
+/* Filtro da coroa ligado: a aura cresce e pulsa em ondas. */
+.ck-super-forte > div::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 9999px;
+  border: 2px solid #f59e0b;
+  pointer-events: none;
+  animation: ck-fav-onda 1.8s ease-out infinite;
+}
+
+.ck-super-forte > div > div:first-child {
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.55), 0 0 26px rgba(245, 158, 11, 0.8) !important;
+}
+
+/* O anel que marca o chão depois do voo até um coroado. */
+.ck-achado span {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 3px solid #f59e0b;
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.7);
+  animation: ck-achado 1.2s cubic-bezier(0.22, 1, 0.36, 1) 2 forwards;
+  pointer-events: none;
+}
+
+.ck-achado span + span {
+  animation-delay: 0.3s;
+}
+
+@keyframes ck-achado {
+  0% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+}
+
+/* A lista dos coroados desce da barra. */
+.super-lista-entra {
+  transform-origin: top right;
+  animation: super-lista-entra 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes super-lista-entra {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .super-botao-ligado,
+  .super-cabecalho,
+  .super-coroa-pousa,
+  .super-onda,
+  .ck-super > div::before,
+  .ck-super .ck-coroa,
+  .ck-super-forte > div::after,
+  .ck-achado span,
+  .super-lista-entra {
+    animation: none;
   }
 }
