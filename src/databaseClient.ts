@@ -10,6 +10,7 @@ import {
   Party,
   OperationType,
   PriorityLevel,
+  CategoriaDeFavorito,
   Escola
 } from './types';
 import type { FichaDispositivo } from './services/dispositivo';
@@ -96,7 +97,8 @@ function normalizeFields<T>(obj: any): T {
     userlongitude: 'userLongitude',
     missionid: 'missionId',
     missiontitle: 'missionTitle',
-    super_favorite: 'superFavorite'
+    super_favorite: 'superFavorite',
+    favorite_categories: 'favoriteCategories'
   };
 
   for (const [lowerKey, camelKey] of Object.entries(mappings)) {
@@ -143,6 +145,8 @@ const somenteColunasDoCheckIn = (checkIn: any) => {
     favorite,
     superFavorite,
     super_favorite,
+    favoriteCategories,
+    favorite_categories,
     trashed,
     ...colunas
   } = checkIn || {};
@@ -1190,12 +1194,16 @@ export const DatabaseService = {
     if (!db) return { success: false };
     try {
       if (!favorito) {
-        const { error } = await db
-          .from('check_ins')
-          .update({ favorite: false, super_favorite: false })
-          .eq('id', id);
-        if (!error) return { success: true };
-        if (!colunaDesconhecida(error)) throw error;
+        // Sem estrela, sem coroa e sem categoria. Banco sem as migrações
+        // novas cai para o que ele tem, até sobrar só a estrela.
+        for (const campos of [
+          { favorite: false, super_favorite: false, favorite_categories: [] as string[] },
+          { favorite: false, super_favorite: false }
+        ]) {
+          const { error } = await db.from('check_ins').update(campos).eq('id', id);
+          if (!error) return { success: true };
+          if (!colunaDesconhecida(error)) throw error;
+        }
       }
       const { error } = await db
         .from('check_ins')
@@ -1738,6 +1746,112 @@ export const DatabaseService = {
     } catch (err: any) {
       console.warn('Nao foi possivel buscar as escolas do municipio:', err);
       return { success: false, data: [] as Escola[], error: err.message };
+    }
+  },
+
+  // ------------------------------------------------ categorias de favoritos
+  /** As categorias de favoritos de todos os clientes, na ordem de cada um. */
+  async listarCategoriasDeFavorito() {
+    if (!db) return { success: false, data: [] as CategoriaDeFavorito[] };
+    try {
+      const { data, error } = await db
+        .from('favorite_categories')
+        .select('*')
+        .order('posicao', { ascending: true })
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return {
+        success: true,
+        data: (data || []).map((l: any) => ({
+          id: l.id,
+          candidateId: l.candidate_id ?? null,
+          nome: l.nome,
+          cor: l.cor || '#F59E0B',
+          emoji: l.emoji ?? null,
+          posicao: l.posicao ?? 0
+        })) as CategoriaDeFavorito[]
+      };
+    } catch (err: any) {
+      // Banco sem a tabela: o sistema segue sem categorias, e nada quebra.
+      console.warn('Categorias de favoritos indisponíveis:', err);
+      return { success: false, data: [] as CategoriaDeFavorito[], error: err.message };
+    }
+  },
+
+  /** Cria ou atualiza uma categoria. */
+  async salvarCategoriaDeFavorito(categoria: CategoriaDeFavorito) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('favorite_categories').upsert({
+        id: categoria.id,
+        candidate_id: categoria.candidateId,
+        nome: categoria.nome,
+        cor: categoria.cor,
+        emoji: categoria.emoji || null,
+        posicao: categoria.posicao
+      });
+      if (error) {
+        if (colunaDesconhecida(error) || /favorite_categories/i.test(error.message || '')) {
+          return {
+            success: false,
+            error:
+              'o banco ainda não tem as categorias de favoritos. Rode db/migrations/2026-09-26-categorias-de-favorito.sql no SQL Editor.'
+          };
+        }
+        throw error;
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao salvar categoria de favorito:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /** Apaga a categoria. Os check-ins que estavam nela são limpos por quem chama. */
+  async excluirCategoriaDeFavorito(id: string) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db.from('favorite_categories').delete().eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao excluir categoria de favorito:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * As categorias de um check-in, de uma vez.
+   *
+   * Entrar numa categoria também estrela o check-in: a categoria é uma
+   * gaveta da estrela, e o que está nela continua em tudo que filtra
+   * favoritos.
+   */
+  async definirCategoriasDoCheckIn(id: string, categorias: string[]) {
+    if (!db) return { success: false };
+    try {
+      const { error } = await db
+        .from('check_ins')
+        .update(
+          categorias.length > 0
+            ? { favorite_categories: categorias, favorite: true }
+            : { favorite_categories: categorias }
+        )
+        .eq('id', id);
+      if (error) {
+        if (colunaDesconhecida(error)) {
+          return {
+            success: false,
+            error:
+              'o banco ainda não tem as categorias de favoritos. Rode db/migrations/2026-09-26-categorias-de-favorito.sql no SQL Editor.'
+          };
+        }
+        throw error;
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('Erro ao definir categorias do check-in:', err);
+      return { success: false, error: err.message };
     }
   },
 

@@ -344,6 +344,7 @@ export interface CheckIn {
   operations?: CheckInOperationRef[]; // todos os tipos de operação escolhidos
   favorite?: boolean; // marcado como favorito pelo administrador
   superFavorite?: boolean; // a coroa: o degrau acima do favorito (sempre favorito também)
+  favoriteCategories?: string[]; // ids das categorias de favoritos em que o check-in está
   trashed?: boolean; // na lixeira: some das telas, mas dá para restaurar
 }
 
@@ -452,3 +453,17 @@ export interface Party {
 }
 
 
+
+/**
+ * Uma categoria de favoritos: a gaveta onde o comitê guarda o que importa
+ * para um fim — "Pauta da reunião", "Imprensa", "Retorno à comunidade".
+ * É do cliente: cada campanha tem as suas.
+ */
+export interface CategoriaDeFavorito {
+  id: string;
+  candidateId: string | null;
+  nome: string;
+  cor: string;
+  emoji?: string | null;
+  posicao: number;
+}

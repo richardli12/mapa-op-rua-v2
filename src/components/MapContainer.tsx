@@ -5,9 +5,15 @@ import { buscarLugares, LugarEncontrado } from '../services/buscaNoMapa';
 import FichaEstabelecimento from './FichaEstabelecimento';
 import { Estabelecimento } from '../services/estabelecimentos';
 import { DatabaseService } from '../databaseClient';
-import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ArrowLeft, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Crown, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, FilePlus, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
-import { PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
+import { Search, X, MapPin, Loader2, Compass, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ArrowLeft, Check, Building2, Layers, Calendar, Clock, User, Navigation, MessageSquare, Mic, Flag, Ruler, Undo2, Trash2, Star, Crown, Tags, Users, FileText, Pencil, CircleDot, Play, Maximize2, Target, Inbox, FilePlus, HeartPulse, Phone, Mail, Link2 as LinkIcon } from 'lucide-react';
+import { CategoriaDeFavorito, PanfletagemArea, CampaignPin, CheckIn, Candidate, OperationType, PriorityLevel, Escola, MaterialDeApoio, LinkDeAcao, corDaDependencia, getCheckInPriority } from '../types';
 import { EditorDeMaterial, ItemMaterial } from './MaterialDaMissao';
+import {
+  SeletorDeCategorias,
+  SelosDeCategorias,
+  anelDeCategorias,
+  categoriasDoCheckIn
+} from './CategoriasDeFavorito';
 import { UnidadeDeSaude } from '../dados/ubs';
 import {
   VisorDoMaterial,
@@ -441,6 +447,19 @@ interface MapContainerProps {
   onToggleCheckInFavorite?: (checkIn: CheckIn) => void;
   /** A coroa na ficha do check-in: liga e desliga o Super Favorito. */
   onToggleCheckInSuperFavorite?: (checkIn: CheckIn) => void;
+  /** Todas as categorias de favoritos (cada uma sabe de que cliente é). */
+  categoriasDeFavorito?: CategoriaDeFavorito[];
+  /** Filtro da barra: só os check-ins em alguma destas categorias. */
+  filtroDeCategorias?: string[];
+  onLimparFiltroDeCategorias?: () => void;
+  /** Põe ou tira o check-in da categoria; devolve as categorias dele depois. */
+  onAlternarCategoriaDoCheckIn?: (checkIn: CheckIn, categoriaId: string) => string[];
+  onCriarCategoria?: (
+    dados: { nome: string; cor: string; emoji: string | null },
+    candidateId: string | null
+  ) => Promise<CategoriaDeFavorito | null>;
+  onEditarCategoria?: (categoria: CategoriaDeFavorito) => void;
+  onExcluirCategoria?: (categoria: CategoriaDeFavorito) => void;
   /**
    * Pedido de fora para achar um check-in: o mapa voa até ele e abre a ficha.
    * O `n` muda a cada pedido, para pedir o mesmo check-in duas vezes.
@@ -889,6 +908,13 @@ export default function MapContainer({
   onMapFilterChange,
   onToggleCheckInFavorite,
   onToggleCheckInSuperFavorite,
+  categoriasDeFavorito = [],
+  filtroDeCategorias = [],
+  onLimparFiltroDeCategorias,
+  onAlternarCategoriaDoCheckIn,
+  onCriarCategoria,
+  onEditarCategoria,
+  onExcluirCategoria,
   checkInParaAbrir,
   onDeleteCheckIn,
   onVincularCheckInAMissao,
@@ -1003,11 +1029,15 @@ export default function MapContainer({
   const mapFilter = propMapFilter !== undefined ? propMapFilter : localMapFilter;
   const setMapFilter = onMapFilterChange !== undefined ? onMapFilterChange : setLocalMapFilter;
   const [selectedCheckInForModal, setSelectedCheckInForModal] = useState<CheckIn | null>(null);
+  /** O botão de categorias da ficha, onde o seletor se ancora quando abre. */
+  const [ancoraDasCategorias, setAncoraDasCategorias] = useState<HTMLElement | null>(null);
   /** Conta as coroas postas na ficha: cada uma replay a animação de pouso. */
   const [coroaRecemPosta, setCoroaRecemPosta] = useState(0);
-  // Outra ficha, outra história: a coroa dela não chega pousando.
+  // Outra ficha, outra história: a coroa dela não chega pousando, e o
+  // seletor de categorias da anterior não fica aberto sobre ela.
   useEffect(() => {
     setCoroaRecemPosta(0);
+    setAncoraDasCategorias(null);
   }, [selectedCheckInForModal?.id]);
   /** Check-ins desenhados da última vez: só quem não estava surge animado. */
   const idsDeCheckInNoMapaRef = useRef<Set<string>>(new Set());
@@ -2199,7 +2229,9 @@ export default function MapContainer({
       mapFilter === 'checkins' ||
       mapFilter === 'favoritos' ||
       mapFilter === 'superfavoritos' ||
-      mapFilter === 'nada'
+      mapFilter === 'nada' ||
+      // Filtrar por categoria é pedir só os check-ins daquelas gavetas.
+      filtroDeCategorias.length > 0
     ) {
       // Camada desligada: quando voltar, as áreas se abrem de novo.
       idsDeAreaNoMapaRef.current = new Set();
@@ -2304,7 +2336,7 @@ export default function MapContainer({
       if (nasce) (circle.getElement() as SVGElement | undefined)?.style.setProperty('--atraso', `${atraso}ms`);
     });
     idsDeAreaNoMapaRef.current = areasAgora;
-  }, [areas, selectedId, mapFilter, itemEmEdicaoId, equipe, missaoAbertaRef]);
+  }, [areas, selectedId, mapFilter, itemEmEdicaoId, equipe, missaoAbertaRef, filtroDeCategorias.length > 0]);
 
   // Render Pins
   useEffect(() => {
@@ -2318,7 +2350,9 @@ export default function MapContainer({
       mapFilter === 'checkins' ||
       mapFilter === 'favoritos' ||
       mapFilter === 'superfavoritos' ||
-      mapFilter === 'nada'
+      mapFilter === 'nada' ||
+      // Filtrar por categoria é pedir só os check-ins daquelas gavetas.
+      filtroDeCategorias.length > 0
     ) {
       // Camada desligada: quando voltar, as missões caem de novo.
       idsDeMissaoNoMapaRef.current = new Set();
@@ -2411,7 +2445,7 @@ export default function MapContainer({
       pinsGroup.addLayer(marker);
     });
     idsDeMissaoNoMapaRef.current = agora;
-  }, [pins, selectedId, mapFilter, operationTypes, itemEmEdicaoId, equipe, missaoAbertaRef]);
+  }, [pins, selectedId, mapFilter, operationTypes, itemEmEdicaoId, equipe, missaoAbertaRef, filtroDeCategorias.length > 0]);
 
   // Render Check-ins
   useEffect(() => {
@@ -2430,12 +2464,18 @@ export default function MapContainer({
 
     if (!checkIns) return;
 
-    const visiveis =
+    const doModo =
       mapFilter === 'superfavoritos'
         ? checkIns.filter(c => c.superFavorite)
         : mapFilter === 'favoritos'
           ? checkIns.filter(c => c.favorite)
           : checkIns;
+    // O filtro de categorias corta por cima do modo: qualquer uma das escolhidas.
+    const visiveis =
+      filtroDeCategorias.length > 0
+        ? doModo.filter(c => (c.favoriteCategories || []).some(id => filtroDeCategorias.includes(id)))
+        : doModo;
+    const corDaCategoria = new Map(categoriasDeFavorito.map(c => [c.id, c]));
 
     /*
      * QUEM ACABOU DE APARECER, SURGE.
@@ -2536,6 +2576,18 @@ export default function MapContainer({
            </span>`
         : '';
 
+      /*
+       * O ANEL DAS CATEGORIAS: uma fatia de cor por gaveta em que o check-in
+       * está. Com o filtro de categoria ligado, o anel gira e brilha.
+       */
+      const categoriasDele = (checkIn.favoriteCategories || [])
+        .map(id => corDaCategoria.get(id))
+        .filter(Boolean) as CategoriaDeFavorito[];
+      const anelHtml = categoriasDele.length
+        ? `<span class="ck-categorias${filtroDeCategorias.length ? ' ck-categorias--forte' : ''}" ` +
+          `style="--anel:${anelDeCategorias(categoriasDele.map(c => c.cor))}"></span>`
+        : '';
+
       const checkInIcon = L.divIcon({
         className: `custom-div-icon drop-shadow-md ck-marcador${surge ? ' ck-marcador-entra' : ''}${brilha ? ' ck-fav-brilho' : ''}${
           aoVivo ? ' ck-ao-vivo' : ''
@@ -2546,6 +2598,7 @@ export default function MapContainer({
           <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; --atraso: ${atraso}ms; --cor-ck: ${markerColor};">
             ${avatarHtml}
             ${estrelaHtml}
+            ${anelHtml}
             ${aoVivo ? '<span class="ck-radar"></span><span class="ck-radar ck-radar--2"></span><span class="ck-agora">agora</span>' : ''}
           </div>
         `,
@@ -2598,6 +2651,9 @@ export default function MapContainer({
             <div class="mt-1.5 space-y-0.5">
               <p class="text-[10.5px] text-slate-500 font-semibold leading-snug">📍 ${escaparHtml([checkIn.rua, checkIn.bairro].filter(Boolean).join(', ') || 'Sem endereço')}</p>
               <p class="text-[10.5px] text-slate-500 font-semibold leading-snug">🕒 ${dateText}</p>
+              ${categoriasDele.length ? `<p class="text-[10.5px] font-bold leading-snug mt-1 flex flex-wrap gap-1">${categoriasDele
+                .map(c => `<span style="color:${c.cor}">${escaparHtml(`${c.emoji || '●'} ${c.nome}`)}</span>`)
+                .join('<span class="text-slate-300">·</span>')}</p>` : ''}
             </div>
             ${countHtml}
             <p class="text-[8.5px] text-slate-400 font-black uppercase tracking-wider mt-2">💡 Clique para abrir a ficha</p>
@@ -2621,7 +2677,7 @@ export default function MapContainer({
       checkInsGroup.addLayer(marker);
     });
     idsDeCheckInNoMapaRef.current = agora;
-  }, [checkIns, mapFilter, relogioDoMapa]);
+  }, [checkIns, mapFilter, relogioDoMapa, categoriasDeFavorito, filtroDeCategorias]);
 
   /**
    * Achar um check-in pedido de fora (a lista dos Super Favoritos).
@@ -3845,6 +3901,28 @@ export default function MapContainer({
         que a equipe não trabalhou. Aqui o vazio diz por que está vazio e
         oferece a saída.
       */}
+      {filtroDeCategorias.length > 0 &&
+        (checkIns || []).filter(c => (c.favoriteCategories || []).some(id => filtroDeCategorias.includes(id))).length === 0 && (
+        <div className="absolute inset-x-0 bottom-24 z-[1000] flex justify-center pointer-events-none px-4">
+          <div className="pointer-events-auto anim-sobe flex items-center gap-3 pl-3 pr-2 py-2 rounded-2xl bg-white/95 backdrop-blur border border-pink-200 shadow-2xl max-w-md">
+            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 via-pink-500 to-violet-500 flex items-center justify-center shrink-0 shadow-md">
+              <Tags className="w-4.5 h-4.5 text-white" />
+            </span>
+            <p className="text-[12px] font-semibold text-slate-600 leading-snug">
+              <strong className="text-slate-800">Nenhum check-in nestas categorias aqui.</strong> Guarde
+              check-ins nelas pela etiqueta da ficha.
+            </p>
+            <button
+              type="button"
+              onClick={() => onLimparFiltroDeCategorias?.()}
+              className="shrink-0 h-9 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black cursor-pointer"
+            >
+              Limpar filtro
+            </button>
+          </div>
+        </div>
+      )}
+
       {mapFilter === 'superfavoritos' && (checkIns || []).filter(c => c.superFavorite).length === 0 && (
         <div className="absolute inset-x-0 bottom-24 z-[1000] flex justify-center pointer-events-none px-4">
           <div className="pointer-events-auto anim-sobe flex items-center gap-3 pl-3 pr-2 py-2 rounded-2xl bg-white/95 backdrop-blur border border-amber-300 shadow-2xl max-w-md">
@@ -5339,9 +5417,85 @@ export default function MapContainer({
                       </span>
                     )}
                   </p>
+                  {(selectedCheckInForModal.favoriteCategories || []).length > 0 && (
+                    <div className="mt-1.5">
+                      <SelosDeCategorias
+                        claro
+                        categorias={categoriasDoCheckIn(
+                          categoriasDeFavorito,
+                          selectedCheckInForModal.favoriteCategories
+                        )}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1">
+                {onAlternarCategoriaDoCheckIn && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      const botao = e.currentTarget;
+                      setAncoraDasCategorias((atual) => (atual ? null : botao));
+                    }}
+                    className={`relative p-1.5 rounded-full transition-all cursor-pointer ${
+                      ancoraDasCategorias ? 'bg-white/25' : 'hover:bg-white/10'
+                    }`}
+                    title="Categorias: guardar este check-in numa gaveta"
+                    aria-label="Categorias do check-in"
+                    aria-expanded={!!ancoraDasCategorias}
+                  >
+                    <Tags className="w-5 h-5" />
+                    {(selectedCheckInForModal.favoriteCategories || []).length > 0 && (
+                      <span
+                        key={(selectedCheckInForModal.favoriteCategories || []).length}
+                        className="cat-contador absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-white text-[9px] font-black text-slate-800 flex items-center justify-center shadow"
+                      >
+                        {(selectedCheckInForModal.favoriteCategories || []).length}
+                      </span>
+                    )}
+                  </button>
+                )}
+                {ancoraDasCategorias && onAlternarCategoriaDoCheckIn && (
+                  <SeletorDeCategorias
+                    ancora={ancoraDasCategorias}
+                    onFechar={() => setAncoraDasCategorias(null)}
+                    categorias={categoriasDeFavorito.filter(
+                      c => !c.candidateId || !selectedCheckInForModal.candidateId || c.candidateId === selectedCheckInForModal.candidateId
+                    )}
+                    selecionadas={selectedCheckInForModal.favoriteCategories || []}
+                    onAlternar={(id) => {
+                      const novas = onAlternarCategoriaDoCheckIn(selectedCheckInForModal, id);
+                      setSelectedCheckInForModal({
+                        ...selectedCheckInForModal,
+                        favoriteCategories: novas,
+                        favorite: novas.length > 0 ? true : selectedCheckInForModal.favorite
+                      });
+                    }}
+                    onCriar={async (dados) => {
+                      if (!onCriarCategoria) return null;
+                      const nova = await onCriarCategoria(dados, selectedCheckInForModal.candidateId || null);
+                      if (nova) {
+                        // Criou a partir da ficha: já guarda o check-in nela.
+                        const novas = onAlternarCategoriaDoCheckIn(selectedCheckInForModal, nova.id);
+                        setSelectedCheckInForModal({
+                          ...selectedCheckInForModal,
+                          favoriteCategories: novas,
+                          favorite: true
+                        });
+                      }
+                      return nova;
+                    }}
+                    onEditar={(c) => onEditarCategoria?.(c)}
+                    onExcluir={(c) => {
+                      onExcluirCategoria?.(c);
+                      setSelectedCheckInForModal({
+                        ...selectedCheckInForModal,
+                        favoriteCategories: (selectedCheckInForModal.favoriteCategories || []).filter(id => id !== c.id)
+                      });
+                    }}
+                  />
+                )}
                 {onToggleCheckInSuperFavorite && (
                   <button
                     type="button"
@@ -5392,10 +5546,13 @@ export default function MapContainer({
                       setSelectedCheckInForModal({
                         ...selectedCheckInForModal,
                         favorite: !selectedCheckInForModal.favorite,
-                        // Sem estrela, sem coroa.
+                        // Sem estrela, sem coroa e sem categoria.
                         superFavorite: selectedCheckInForModal.favorite
                           ? false
-                          : selectedCheckInForModal.superFavorite
+                          : selectedCheckInForModal.superFavorite,
+                        favoriteCategories: selectedCheckInForModal.favorite
+                          ? []
+                          : selectedCheckInForModal.favoriteCategories
                       });
                     }}
                     className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer"

@@ -228,6 +228,9 @@ create table if not exists public.check_ins (
   -- Coroa do administrador: o degrau acima da estrela (todo super e favorito)
   super_favorite       boolean default false,
 
+  -- Categorias de favoritos em que o check-in esta (ids de favorite_categories)
+  favorite_categories  text[] not null default '{}',
+
   -- Na lixeira: sai das telas e do mapa, e da para restaurar
   trashed              boolean default false,
 
@@ -1088,6 +1091,53 @@ end $$;
 
 create index if not exists idx_check_ins_super_favorito
   on public.check_ins ("candidateId", super_favorite);
+
+notify pgrst, 'reload schema';
+
+
+
+-- ----------------------------------------------------------------------------
+-- 18. Categorias de favoritos - as gavetas da estrela
+-- ----------------------------------------------------------------------------
+-- O mesmo conteudo de db/migrations/2026-09-26-categorias-de-favorito.sql.
+
+create table if not exists public.favorite_categories (
+  id           text primary key default gen_random_uuid()::text,
+  candidate_id text,
+  nome         text not null,
+  cor          text not null default '#F59E0B',
+  emoji        text,
+  posicao      integer not null default 0,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists idx_favorite_categories_cliente
+  on public.favorite_categories (candidate_id, posicao);
+
+alter table public.check_ins
+  add column if not exists favorite_categories text[] not null default '{}';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'check_ins_categoria_e_favorito'
+  ) then
+    alter table public.check_ins
+      add constraint check_ins_categoria_e_favorito
+      check (coalesce(cardinality(favorite_categories), 0) = 0 or coalesce(favorite, false));
+  end if;
+end $$;
+
+-- "Quais check-ins estão nesta categoria?" é a pergunta do filtro.
+create index if not exists idx_check_ins_categorias
+  on public.check_ins using gin (favorite_categories);
+
+do $$
+begin
+  execute 'alter table public.favorite_categories enable row level security';
+  execute 'drop policy if exists "acesso_app" on public.favorite_categories';
+  execute 'create policy "acesso_app" on public.favorite_categories for all to anon, authenticated using (true) with check (true)';
+end $$;
 
 notify pgrst, 'reload schema';
 

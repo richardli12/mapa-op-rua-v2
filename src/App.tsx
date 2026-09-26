@@ -34,6 +34,12 @@ import FichaDoRecorteNoMapa from "./components/FichaDoRecorteNoMapa";
 import CarregandoOperacional from "./components/CarregandoOperacional";
 import TelaDeLogin from "./components/TelaDeLogin";
 import FiltroDeFavoritos from "./components/FiltroDeFavoritos";
+import FiltroDeCategorias from "./components/FiltroDeCategorias";
+import {
+  SeletorDeCategorias,
+  SelosDeCategorias,
+  categoriasDoCheckIn,
+} from "./components/CategoriasDeFavorito";
 import Contador from "./components/Contador";
 import SeletorDeIcone from "./components/SeletorDeIcone";
 import PainelDeltaOperacional from "./components/operacional/PainelDeltaOperacional";
@@ -103,6 +109,7 @@ import {
   Megaphone,
   Star,
   Crown,
+  Tags,
   Crosshair,
   Store,
   Maximize2,
@@ -203,6 +210,7 @@ import {
   CHECKIN_PRIORITIES,
   getCheckInPriority,
   PriorityLevel,
+  CategoriaDeFavorito,
   Escola,
   corDaDependencia,
   CheckInMedia,
@@ -707,6 +715,13 @@ export default function App() {
   const [destaqueCheckIns, setDestaqueCheckIns] = useState<
     "todos" | "favoritos" | "super"
   >("todos");
+  /** Categoria de favoritos escolhida no filtro da lista ("todas" = sem filtro). */
+  const [categoriaCheckIns, setCategoriaCheckIns] = useState("todas");
+  /** O botão de categorias de uma linha da lista, onde o seletor se ancora. */
+  const [categoriasDaLinha, setCategoriasDaLinha] = useState<{
+    ancora: HTMLElement;
+    id: string;
+  } | null>(null);
   const [paginaCheckIns, setPaginaCheckIns] = useState(1);
   const [checkInAberto, setCheckInAberto] = useState<string | null>(null);
   /** Recortes do mapa da visão geral: período e nível de prioridade. */
@@ -1255,6 +1270,12 @@ export default function App() {
   const [mapFilter, setMapFilter] = useState<
     "all" | "checkins" | "markers" | "favoritos" | "superfavoritos" | "nada"
   >("all");
+  /**
+   * Categorias de favoritos escolhidas no filtro da barra. Vazio é "sem
+   * filtro de categoria"; com alguma, o mapa mostra só os check-ins que
+   * estão em QUALQUER uma delas.
+   */
+  const [filtroDeCategorias, setFiltroDeCategorias] = useState<string[]>([]);
 
   // Modo de visualização (admin / checkin)
   /**
@@ -1731,6 +1752,18 @@ export default function App() {
     (async () => {
       const res = await DatabaseService.fetchSupporters();
       if (res.success && res.data) setSupporters(res.data);
+    })();
+  }, []);
+
+  /** As categorias de favoritos de todos os clientes (cada uma sabe o seu). */
+  const [categoriasDeFavorito, setCategoriasDeFavorito] = useState<
+    CategoriaDeFavorito[]
+  >([]);
+  useEffect(() => {
+    if (ROTA_INICIAL.semLink) return;
+    (async () => {
+      const res = await DatabaseService.listarCategoriasDeFavorito();
+      if (res.success) setCategoriasDeFavorito(res.data);
     })();
   }, []);
 
@@ -4265,16 +4298,23 @@ export default function App() {
     const antes = {
       favorite: !!registro.favorite,
       superFavorite: !!registro.superFavorite,
+      favoriteCategories: registro.favoriteCategories || [],
     };
-    // Tirar a estrela tira a coroa: super favorito sem favorito não existe.
+    // Tirar a estrela tira a coroa e esvazia as categorias: as duas são
+    // degraus da estrela, e não existem sem ela.
     const depois = favorito
       ? { favorite: true }
-      : { favorite: false, superFavorite: false };
+      : { favorite: false, superFavorite: false, favoriteCategories: [] };
     setCheckIns((prev: any) =>
       prev.map((c: any) => (c.id === registro.id ? { ...c, ...depois } : c)),
     );
-    if (!favorito && antes.superFavorite) {
-      triggerNotification("Estrela e coroa retiradas do check-in.", "info");
+    if (!favorito && (antes.superFavorite || antes.favoriteCategories.length > 0)) {
+      triggerNotification(
+        antes.favoriteCategories.length > 0
+          ? "Estrela retirada: o check-in saiu também das categorias."
+          : "Estrela e coroa retiradas do check-in.",
+        "info",
+      );
     }
     if (isDatabaseConfigured) {
       DatabaseService.definirFavoritoCheckIn(registro.id, favorito).then((res) => {
@@ -4329,6 +4369,131 @@ export default function App() {
         }
       });
     }
+  };
+
+  /* --------------------------------------- categorias de favoritos --- */
+
+  /**
+   * Põe ou tira um check-in de uma categoria.
+   *
+   * Entrar numa gaveta estrela o check-in (a categoria é da estrela); sair
+   * da última gaveta deixa a estrela onde estava — quem quiser tirá-la tira
+   * pela própria estrela.
+   */
+  const alternarCategoriaDoCheckIn = (registro: any, categoriaId: string) => {
+    const atuais: string[] = registro.favoriteCategories || [];
+    const novas = atuais.includes(categoriaId)
+      ? atuais.filter((id) => id !== categoriaId)
+      : [...atuais, categoriaId];
+    const antes = { favorite: !!registro.favorite, favoriteCategories: atuais };
+    const depois =
+      novas.length > 0
+        ? { favorite: true, favoriteCategories: novas }
+        : { favoriteCategories: novas };
+    setCheckIns((prev: any) =>
+      prev.map((c: any) => (c.id === registro.id ? { ...c, ...depois } : c)),
+    );
+    if (isDatabaseConfigured) {
+      DatabaseService.definirCategoriasDoCheckIn(registro.id, novas).then((res) => {
+        if (!res.success) {
+          setCheckIns((prev: any) =>
+            prev.map((c: any) => (c.id === registro.id ? { ...c, ...antes } : c)),
+          );
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+        }
+      });
+    }
+    return novas;
+  };
+
+  /** Cria uma categoria para o cliente e devolve ela já pronta para usar. */
+  const criarCategoriaDeFavorito = async (
+    dados: { nome: string; cor: string; emoji: string | null },
+    candidateId: string | null,
+  ): Promise<CategoriaDeFavorito | null> => {
+    const doCliente = categoriasDeFavorito.filter(
+      (c) => c.candidateId === candidateId,
+    );
+    const nova: CategoriaDeFavorito = {
+      id: `cat_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      candidateId,
+      nome: dados.nome,
+      cor: dados.cor,
+      emoji: dados.emoji,
+      posicao: doCliente.length,
+    };
+    if (isDatabaseConfigured) {
+      const res = await DatabaseService.salvarCategoriaDeFavorito(nova);
+      if (!res.success) {
+        triggerNotification(`Banco de dados: ${res.error}`, "error");
+        return null;
+      }
+    }
+    setCategoriasDeFavorito((prev) => [...prev, nova]);
+    triggerNotification(`Categoria "${nova.nome}" criada.`, "success");
+    return nova;
+  };
+
+  const editarCategoriaDeFavorito = (categoria: CategoriaDeFavorito) => {
+    const antes = categoriasDeFavorito.find((c) => c.id === categoria.id);
+    setCategoriasDeFavorito((prev) =>
+      prev.map((c) => (c.id === categoria.id ? categoria : c)),
+    );
+    if (isDatabaseConfigured) {
+      DatabaseService.salvarCategoriaDeFavorito(categoria).then((res) => {
+        if (!res.success && antes) {
+          setCategoriasDeFavorito((prev) =>
+            prev.map((c) => (c.id === categoria.id ? antes : c)),
+          );
+          triggerNotification(`Banco de dados: ${res.error}`, "error");
+        }
+      });
+    }
+  };
+
+  /**
+   * Apaga a categoria. Os check-ins que estavam nela saem dela e continuam
+   * com a estrela: apagar uma gaveta não é desfavoritar o que havia dentro.
+   */
+  const excluirCategoriaDeFavorito = async (categoria: CategoriaDeFavorito) => {
+    const afetados = checkIns.filter((c: any) =>
+      (c.favoriteCategories || []).includes(categoria.id),
+    );
+    setCategoriasDeFavorito((prev) => prev.filter((c) => c.id !== categoria.id));
+    setFiltroDeCategorias((prev) => prev.filter((id) => id !== categoria.id));
+    setCheckIns((prev: any) =>
+      prev.map((c: any) =>
+        (c.favoriteCategories || []).includes(categoria.id)
+          ? {
+              ...c,
+              favoriteCategories: c.favoriteCategories.filter(
+                (id: string) => id !== categoria.id,
+              ),
+            }
+          : c,
+      ),
+    );
+    if (isDatabaseConfigured) {
+      await Promise.all(
+        afetados.map((c: any) =>
+          DatabaseService.definirCategoriasDoCheckIn(
+            c.id,
+            (c.favoriteCategories || []).filter((id: string) => id !== categoria.id),
+          ),
+        ),
+      );
+      const res = await DatabaseService.excluirCategoriaDeFavorito(categoria.id);
+      if (!res.success) {
+        triggerNotification(`Banco de dados: ${res.error}`, "error");
+        return;
+      }
+    }
+    triggerNotification(
+      afetados.length > 0
+        ? `Categoria "${categoria.nome}" apagada. ${afetados.length} check-in${afetados.length > 1 ? "s saíram" : " saiu"} dela e ${afetados.length > 1 ? "continuam" : "continua"} com a estrela.`
+        : `Categoria "${categoria.nome}" apagada.`,
+      "info",
+    );
   };
 
   /** Move o check-in para a lixeira, de onde ele ainda pode voltar. */
@@ -5311,14 +5476,23 @@ export default function App() {
   const contagemDoPeriodo = {
     // Favoritos é um corte do menu de visualização, não do período: a conta
     // tem de bater com o que o mapa realmente desenha.
-    checkInsVisiveis:
+    checkInsVisiveis: (filtroDeCategorias.length > 0
+      ? filteredCheckIns.filter((c: any) =>
+          (c.favoriteCategories || []).some((id: string) =>
+            filtroDeCategorias.includes(id),
+          ),
+        )
+      : filteredCheckIns
+    ).filter((c: any) =>
       mapFilter === "superfavoritos"
-        ? filteredCheckIns.filter((c: any) => c.superFavorite).length
+        ? c.superFavorite
         : mapFilter === "favoritos"
-          ? filteredCheckIns.filter((c: any) => c.favorite).length
-          : filteredCheckIns.length,
+          ? c.favorite
+          : true,
+    ).length,
     checkInsTotal: checkInsDoMapa.length,
-    missoesVisiveis: filteredPins.length + filteredAreas.length,
+    missoesVisiveis:
+      filtroDeCategorias.length > 0 ? 0 : filteredPins.length + filteredAreas.length,
     missoesTotal: missoesNoFoco,
     favoritos: filteredCheckIns.filter((c: any) => c.favorite).length,
   };
@@ -5385,6 +5559,37 @@ export default function App() {
     lembrarDeOndeVeio();
     setMapFilter("superfavoritos");
   };
+
+  /**
+   * As categorias do cliente em foco (todas, com "todos os clientes"), e
+   * quantos check-ins do recorte de agora estão em cada uma.
+   */
+  const categoriasDoFoco = React.useMemo(
+    () =>
+      categoriasDeFavorito.filter(
+        (c) =>
+          selectedCandidateFilter === "all" ||
+          c.candidateId === selectedCandidateFilter,
+      ),
+    [categoriasDeFavorito, selectedCandidateFilter],
+  );
+  const contagemPorCategoria = React.useMemo(() => {
+    const conta: Record<string, number> = {};
+    filteredCheckIns.forEach((c: any) =>
+      (c.favoriteCategories || []).forEach((id: string) => {
+        conta[id] = (conta[id] || 0) + 1;
+      }),
+    );
+    return conta;
+  }, [filteredCheckIns]);
+
+  // Trocar de cliente leva junto o filtro das categorias que não são dele.
+  useEffect(() => {
+    setFiltroDeCategorias((prev) => {
+      const validas = prev.filter((id) => categoriasDoFoco.some((c) => c.id === id));
+      return validas.length === prev.length ? prev : validas;
+    });
+  }, [categoriasDoFoco]);
 
   /** Os coroados do recorte de agora, do mais novo ao mais antigo. */
   const superFavoritosDoRecorte = React.useMemo(
@@ -11527,8 +11732,16 @@ export default function App() {
                 const casaDestaque =
                   destaqueCheckIns === "todos" ||
                   (destaqueCheckIns === "super" ? r.superFavorite : r.favorite);
+                const casaCategoria =
+                  categoriaCheckIns === "todas" ||
+                  (r.favoriteCategories || []).includes(categoriaCheckIns);
                 return (
-                  casaBusca && casaPeriodo && casaOperacao && casaStatus && casaDestaque
+                  casaBusca &&
+                  casaPeriodo &&
+                  casaOperacao &&
+                  casaStatus &&
+                  casaDestaque &&
+                  casaCategoria
                 );
               })
                 // Os coroados abrem a lista: é para isso que existe a coroa.
@@ -11538,6 +11751,9 @@ export default function App() {
                     b.quando - a.quando,
                 );
               const estrelados = registros.filter((r: any) => r.favorite).length;
+              const categoriasDoCliente = categoriasDeFavorito.filter(
+                (c) => c.candidateId === inspectedCandidate.id,
+              );
               const coroados = registros.filter((r: any) => r.superFavorite).length;
 
               const porPagina = 8;
@@ -11893,6 +12109,38 @@ export default function App() {
                               );
                             })}
                           </div>
+
+                          {categoriasDoCliente.length > 0 && (
+                            <div className="relative">
+                              <Tags className="w-3.5 h-3.5 text-pink-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              <select
+                                value={categoriaCheckIns}
+                                onChange={(e) => {
+                                  setCategoriaCheckIns(e.target.value);
+                                  setPaginaCheckIns(1);
+                                }}
+                                className="appearance-none h-10 pl-8 pr-8 bg-white border border-slate-200 rounded-2xl text-[11.5px] font-bold text-slate-600 cursor-pointer focus:outline-hidden max-w-[200px]"
+                                style={
+                                  categoriaCheckIns !== "todas"
+                                    ? {
+                                        borderColor:
+                                          categoriasDoCliente.find((c) => c.id === categoriaCheckIns)?.cor,
+                                        color: categoriasDoCliente.find((c) => c.id === categoriaCheckIns)?.cor,
+                                      }
+                                    : undefined
+                                }
+                              >
+                                <option value="todas">Todas as categorias</option>
+                                {categoriasDoCliente.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.emoji ? `${c.emoji} ` : ""}
+                                    {c.nome} ({registros.filter((r: any) => (r.favoriteCategories || []).includes(c.id)).length})
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -11968,6 +12216,13 @@ export default function App() {
                                           <Crown className="w-3 h-3 text-white" fill="#fff" />
                                         </span>
                                       )}
+                                      <SelosDeCategorias
+                                        compacto
+                                        categorias={categoriasDoCheckIn(
+                                          categoriasDeFavorito,
+                                          registro.favoriteCategories,
+                                        )}
+                                      />
                                     </div>
                                   </td>
                                   <td className="py-3.5 px-2.5">
@@ -11989,7 +12244,7 @@ export default function App() {
                                     </div>
                                   </td>
                                   <td className="py-3.5 px-2.5 text-[12px] font-semibold text-slate-500">
-                                    <span className="block max-w-[110px] truncate">
+                                    <span className="block max-w-[90px] truncate">
                                       {[registro.rua, registro.bairro]
                                         .filter(Boolean)
                                         .join(", ") || "Sem endereço"}
@@ -12095,15 +12350,53 @@ export default function App() {
                                             fill={registro.superFavorite ? "currentColor" : "none"}
                                           />
                                         </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const botao = e.currentTarget;
+                                            setCategoriasDaLinha((atual) =>
+                                              atual?.id === registro.id ? null : { ancora: botao, id: registro.id },
+                                            );
+                                          }}
+                                          title="Categorias: guardar numa gaveta"
+                                          aria-label="Categorias do check-in"
+                                          className={`w-7 flex items-center justify-center cursor-pointer transition-all border-l ${
+                                            (registro.favoriteCategories || []).length > 0
+                                              ? "text-white"
+                                              : registro.favorite
+                                                ? "border-amber-300 text-pink-400 hover:text-pink-600 hover:bg-pink-50/60"
+                                                : "border-slate-200 text-slate-300 hover:text-pink-600 hover:bg-pink-50/60"
+                                          }`}
+                                          style={
+                                            (registro.favoriteCategories || []).length > 0
+                                              ? {
+                                                  background: (() => {
+                                                    const cores = categoriasDoCheckIn(
+                                                      categoriasDeFavorito,
+                                                      registro.favoriteCategories,
+                                                    ).map((c) => c.cor);
+                                                    return cores.length > 1
+                                                      ? `linear-gradient(160deg, ${cores.join(", ")})`
+                                                      : cores[0] || "#EC4899";
+                                                  })(),
+                                                  borderColor: "transparent",
+                                                }
+                                              : undefined
+                                          }
+                                        >
+                                          <Tags className="w-3.5 h-3.5" />
+                                        </button>
                                       </div>
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setCheckInAberto(registro.id);
                                         }}
-                                        className="h-8 px-3 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-600 text-[11px] font-bold rounded-xl cursor-pointer transition-all"
+                                        title="Ver no painel ao lado"
+                                        aria-label="Ver o check-in"
+                                        className="w-7 h-8 border border-slate-200 hover:border-[#015FC9] hover:text-[#015FC9] text-slate-500 rounded-xl flex items-center justify-center cursor-pointer transition-all"
                                       >
-                                        Ver
+                                        <Eye className="w-4 h-4" />
                                       </button>
                                       <button
                                         onClick={(e) => {
@@ -12112,7 +12405,7 @@ export default function App() {
                                         }}
                                         title="Mover para a lixeira"
                                         aria-label="Mover o check-in para a lixeira"
-                                        className="w-8 h-8 border border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-300 rounded-xl flex items-center justify-center cursor-pointer transition-all"
+                                        className="w-7 h-8 border border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-300 rounded-xl flex items-center justify-center cursor-pointer transition-all"
                                       >
                                         <Trash2 className="w-4 h-4" />
                                       </button>
@@ -12123,6 +12416,32 @@ export default function App() {
                             )}
                           </tbody>
                         </table>
+                        {categoriasDaLinha &&
+                          (() => {
+                            const alvo: any = checkIns.find(
+                              (c: any) => c.id === categoriasDaLinha.id,
+                            );
+                            if (!alvo) return null;
+                            return (
+                              <SeletorDeCategorias
+                                ancora={categoriasDaLinha.ancora}
+                                onFechar={() => setCategoriasDaLinha(null)}
+                                categorias={categoriasDoCliente}
+                                selecionadas={alvo.favoriteCategories || []}
+                                onAlternar={(id) => alternarCategoriaDoCheckIn(alvo, id)}
+                                onCriar={async (dados) => {
+                                  const nova = await criarCategoriaDeFavorito(
+                                    dados,
+                                    inspectedCandidate.id,
+                                  );
+                                  if (nova) alternarCategoriaDoCheckIn(alvo, nova.id);
+                                  return nova;
+                                }}
+                                onEditar={editarCategoriaDeFavorito}
+                                onExcluir={excluirCategoriaDeFavorito}
+                              />
+                            );
+                          })()}
                       </div>
 
                       <div className="px-6 py-4 flex items-center justify-between gap-3 border-t border-slate-100">
@@ -15438,6 +15757,13 @@ export default function App() {
           aoRegistrarVista={registrarVistaDoMapa}
           onToggleCheckInFavorite={alternarFavoritoCheckIn}
           onToggleCheckInSuperFavorite={alternarSuperFavoritoCheckIn}
+          categoriasDeFavorito={categoriasDeFavorito}
+          filtroDeCategorias={filtroDeCategorias}
+          onLimparFiltroDeCategorias={() => setFiltroDeCategorias([])}
+          onAlternarCategoriaDoCheckIn={alternarCategoriaDoCheckIn}
+          onCriarCategoria={criarCategoriaDeFavorito}
+          onEditarCategoria={editarCategoriaDeFavorito}
+          onExcluirCategoria={excluirCategoriaDeFavorito}
           checkInParaAbrir={checkInParaAbrir}
           onDeleteCheckIn={excluirCheckIn}
           onVincularCheckInAMissao={vincularCheckInAMissao}
@@ -15496,6 +15822,12 @@ export default function App() {
                   superFavoritos={superFavoritosDoRecorte}
                   onAlternarSuper={alternarSuperFavoritos}
                   onAbrirCheckIn={irAteOCheckIn}
+                />
+                <FiltroDeCategorias
+                  categorias={categoriasDoFoco}
+                  contagem={contagemPorCategoria}
+                  selecionadas={filtroDeCategorias}
+                  onMudar={setFiltroDeCategorias}
                 />
                 {/*
                   As camadas do território ficam ao lado do recorte de data:
