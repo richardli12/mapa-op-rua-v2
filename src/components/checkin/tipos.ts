@@ -74,4 +74,13 @@ export interface MissaoDoCampo {
   /** Id do nível de prioridade que o comitê deu à missão. */
   priority?: string;
   createdAt?: string;
+  /**
+   * Já tem check-in confirmado: a missão foi feita.
+   *
+   * Vem marcada, e não filtrada, de propósito: quem está no meio do check-in
+   * DESTA missão não pode vê-la sumir da mão porque o registro dela mesma
+   * (ou o de um colega, no mesmo minuto) acabou de ser confirmado. Quem
+   * decide o que fica na tela é a conversa, que sabe qual missão está aberta.
+   */
+  concluida?: boolean;
 }

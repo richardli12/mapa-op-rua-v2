@@ -179,7 +179,7 @@ function FioDoCheckIn({
   operationTypes,
   nomesReservados = [],
   onTipoCriado,
-  missoes = [],
+  missoes: todasAsMissoes = [],
   metas = METAS_VAZIAS,
   meusCheckIns = [],
   onSaved,
@@ -273,6 +273,19 @@ function FioDoCheckIn({
    * registro livre numa missão que ninguém pediu.
    */
   const [missaoId, setMissaoId] = useState<string | null>(null);
+  /**
+   * As missões que ainda estão de pé.
+   *
+   * Missão concluída sai da lista de quem vai fazer o check-in: ela já foi
+   * feita, e oferecê-la de novo é mandar alguém refazer o trabalho de outro
+   * (ou o próprio). A exceção é a missão aberta nesta conversa — concluída
+   * no meio do caminho, pelo próprio registro ou por um colega, ela fica até
+   * o fim, para o check-in não perder a missão debaixo do dedo.
+   */
+  const missoes = React.useMemo(
+    () => todasAsMissoes.filter(m => !m.concluida || m.id === missaoId),
+    [todasAsMissoes, missaoId]
+  );
   /**
    * Missões que chegaram com a tela já aberta e que a pessoa ainda não viu.
    *

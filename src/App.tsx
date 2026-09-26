@@ -5605,24 +5605,6 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // Quantas missões o integrante logado tem atribuídas no cliente escolhido.
-  const userMissionCount = (() => {
-    if (!checkInCandidateId || !authenticatedSupporter?.id) return 0;
-    const isMine = (assigned: any) =>
-      Array.isArray(assigned) && assigned.includes(authenticatedSupporter.id);
-    const mineAreas = areas.filter(
-      (a) =>
-        a.candidateId === checkInCandidateId &&
-        isMine(a.assignedDeltas || a.center?.assignedDeltas),
-    ).length;
-    const minePins = pins.filter(
-      (p) =>
-        p.candidateId === checkInCandidateId &&
-        isMine(p.assignedDeltas || p.position?.assignedDeltas),
-    ).length;
-    return mineAreas + minePins;
-  })();
-  const hasAssignedMissions = userMissionCount > 0;
 
   /**
    * As missões que o comitê mandou para quem está logado no check-in.
@@ -5642,6 +5624,17 @@ export default function App() {
       Array.isArray(atribuidos) && atribuidos.includes(meuId);
     const rotuloDoTipo = (id?: string) =>
       operationTypes.find((t) => t.id === id)?.label;
+    /*
+      Missão concluída é missão com check-in confirmado colado nela — de
+      quem for. É a mesma régua dos painéis do comitê ("cumprida", "Concluído"):
+      rascunho não conta, e o que está na lixeira também não.
+    */
+    const concluidas = new Set(
+      checkIns
+        .filter((c: any) => !c.trashed && c.status !== "rascunho")
+        .map((c: any) => c.missionId || c.mission_id)
+        .filter(Boolean),
+    );
 
     const deAreas: MissaoDoCampo[] = areas
       .filter(
@@ -5663,6 +5656,7 @@ export default function App() {
         turno: a.center?.turno,
         priority: a.center?.priority,
         createdAt: a.createdAt,
+        concluida: concluidas.has(a.id),
       }));
 
     const dePinos: MissaoDoCampo[] = pins
@@ -5691,13 +5685,21 @@ export default function App() {
         turno: p.position?.turno,
         priority: p.position?.priority,
         createdAt: p.createdAt,
+        concluida: concluidas.has(p.id),
       }));
 
     // Mais nova em cima: a missão que acabou de chegar é a que interessa.
     return [...deAreas, ...dePinos].sort((a, b) =>
       (b.createdAt || "").localeCompare(a.createdAt || ""),
     );
-  }, [areas, pins, operationTypes, checkInCandidateId, authenticatedSupporter]);
+  }, [areas, pins, operationTypes, checkInCandidateId, authenticatedSupporter, checkIns]);
+
+  /**
+   * Tem missão para fazer? Só as que ainda estão de pé contam: com todas as
+   * atribuídas já concluídas, o check-in entra direto no registro livre, em
+   * vez de oferecer um caminho que não leva a missão nenhuma.
+   */
+  const hasAssignedMissions = missoesDoIntegrante.some((m) => !m.concluida);
 
   // Sem missão atribuída não há escolha a fazer: o check-in livre é o único
   // caminho, então o app já entra nele em vez de oferecer um botão.
