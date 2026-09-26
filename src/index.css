@@ -1046,16 +1046,194 @@
  * nesta folha (carregada depois da dele) tira o `absolute` do ícone e derruba
  * todos os pinos no fluxo do painel. Foi o que aconteceu com as escolas.
  */
-.pino-ubs__corpo {
+.pino-saude {
+  display: block;
+  width: 40px;
+  height: 54px;
+  /* A ponta da gota: é por ela que o pino cresce, cai e pousa. */
+  transform-origin: 20px 47px;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.pino-ubs:hover .pino-saude {
+  transform: translateY(-3px) scale(1.14);
+}
+
+.pino-saude__queda {
   position: absolute;
   inset: 0;
+  transform-origin: 20px 47px;
+}
+
+/* A gota: verde-água da saúde, em degradê, aro branco e brilho da cor. */
+.pino-saude__gota {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: linear-gradient(135deg, #2dd4bf 0%, #0e9f9f 55%, #0b7a7a 100%);
+  border: 3px solid #ffffff;
+  box-shadow:
+    0 6px 14px rgba(15, 23, 42, 0.32),
+    0 0 14px rgba(20, 184, 166, 0.45);
+}
+
+/* O disco branco com o coração e o batimento dentro. */
+.pino-saude__disco {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: inset 0 -2px 0 rgba(14, 159, 159, 0.15);
+}
+
+.pino-saude__coracao {
+  display: flex;
+  animation: pino-saude-bate 2.8s ease-in-out var(--fase, 0ms) infinite;
+}
+
+.pino-saude__ecg {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.pino-saude__sombra {
+  position: absolute;
+  left: 13px;
+  top: 45px;
+  width: 14px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--cor, #0e9f9f);
-  border: 3px solid #ffffff;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+  background: rgba(15, 23, 42, 0.3);
+  filter: blur(1.2px);
+}
+
+/* O anel que a unidade solta no chão ao pousar. */
+.pino-saude__anel {
+  position: absolute;
+  left: 13px;
+  top: 43px;
+  width: 14px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid #14b8a6;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --- a chegada, em onda ------------------------------------------------ */
+.pino-saude--surge .pino-saude__queda {
+  animation: pino-saude-cai 0.75s cubic-bezier(0.3, 0.7, 0.4, 1) var(--atraso, 0ms) both;
+}
+
+.pino-saude--surge .pino-saude__sombra {
+  animation: pino-saude-sombra 0.75s ease-out var(--atraso, 0ms) both;
+}
+
+.pino-saude--surge .pino-saude__anel {
+  animation: pino-saude-anel 0.9s cubic-bezier(0.22, 1, 0.36, 1) calc(var(--atraso, 0ms) + 0.4s) both;
+}
+
+/* O batimento se desenha depois do pouso: o monitor "liga". */
+.pino-saude--surge .pino-saude__ecg {
+  animation: pino-saude-ecg 0.8s cubic-bezier(0.65, 0, 0.35, 1) calc(var(--atraso, 0ms) + 0.5s) both;
+}
+
+@keyframes pino-saude-cai {
+  0% {
+    opacity: 0;
+    transform: translateY(-90px) scale(0.55, 0.7);
+  }
+  15% {
+    opacity: 1;
+  }
+  55% {
+    transform: translateY(0) scale(1.12, 0.84);
+  }
+  70% {
+    transform: translateY(-9px) scale(0.95, 1.06);
+  }
+  84% {
+    transform: translateY(0) scale(1.04, 0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pino-saude-sombra {
+  0% {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pino-saude-anel {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.4);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(4.2);
+  }
+}
+
+@keyframes pino-saude-ecg {
+  0% {
+    stroke-dashoffset: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Tum-tum: duas batidas e um respiro, como um coração, e não um pisca. */
+@keyframes pino-saude-bate {
+  0%,
+  34%,
+  100% {
+    transform: scale(1);
+  }
+  8% {
+    transform: scale(1.2);
+  }
+  16% {
+    transform: scale(0.98);
+  }
+  24% {
+    transform: scale(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pino-saude,
+  .pino-saude__coracao,
+  .pino-saude--surge .pino-saude__queda,
+  .pino-saude--surge .pino-saude__sombra,
+  .pino-saude--surge .pino-saude__anel,
+  .pino-saude--surge .pino-saude__ecg {
+    animation: none;
+    transition: none;
+  }
 }
 
 /* ---------------------------------------------------------------------------

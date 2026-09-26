@@ -873,6 +873,8 @@ export default function MapContainer({
   const [ubsAberta, setUbsAberta] = useState<UnidadeDeSaude | null>(null);
   /** A camada já enquadrou o mapa uma vez? */
   const camadaUbsLigadaRef = useRef(false);
+  /** As unidades já desenhadas: só as novas caem com a animação. */
+  const idsDeUbsNoMapaRef = useRef<Set<string>>(new Set());
   const lojasGroupRef = useRef<L.LayerGroup | null>(null);
   const analiseGroupRef = useRef<L.LayerGroup | null>(null);
   const buscaGroupRef = useRef<L.LayerGroup | null>(null);
@@ -2946,6 +2948,8 @@ export default function MapContainer({
     grupo.clearLayers();
     if (!ubsVisiveis) {
       camadaUbsLigadaRef.current = false;
+      // Desligou: quando voltar, todas caem de novo, em onda.
+      idsDeUbsNoMapaRef.current = new Set();
       setUbsAberta(null);
       return;
     }
@@ -2957,26 +2961,70 @@ export default function MapContainer({
     ) as (UnidadeDeSaude & { lat: number; lng: number })[];
     if (comLugar.length === 0) return;
 
-    const cor = '#0E9F9F';
+    /*
+     * O PINO DA SAÚDE, E COMO ELE CHEGA.
+     *
+     * Era um "+" branco num disco: dizia "algo aqui", não "saúde aqui". Agora
+     * é a gota verde-água da saúde com um coração dentro e o traço do
+     * batimento atravessando — o mesmo símbolo da ficha e do botão da camada.
+     *
+     * Ligar a camada faz as unidades caírem em ONDA: do meio do conjunto para
+     * as bordas, como um sinal que se espalha pela cidade. Cada uma pousa,
+     * solta um anel no chão, desenha o batimento e passa a bater — cada uma
+     * no seu tempo, para o mapa não pulsar como um pisca-pisca sincronizado.
+     * Só quem ainda não estava no mapa cai: uma atualização da lista não faz
+     * as outras caírem de novo.
+     */
+    const anteriores = idsDeUbsNoMapaRef.current;
+    const agora = new Set<string>();
+    const centroLat = comLugar.reduce((soma, u) => soma + u.lat, 0) / comLugar.length;
+    const centroLng = comLugar.reduce((soma, u) => soma + u.lng, 0) / comLugar.length;
+    const distancia = (u: { lat: number; lng: number }) =>
+      Math.hypot(u.lat - centroLat, (u.lng - centroLng) * Math.cos((centroLat * Math.PI) / 180));
+    const maisLonge = Math.max(...comLugar.map(distancia), 1e-9);
+
+    const coracao =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="19" height="19" ' +
+      'fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path class="pino-saude__coracao-forma" d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" ' +
+      'fill="#CCFBF1" stroke="#0E9F9F" stroke-width="2.2"/>' +
+      '<path class="pino-saude__ecg" pathLength="1" d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27" ' +
+      'stroke="#E11D48" stroke-width="2.4"/>' +
+      '</svg>';
+
     comLugar.forEach(unidade => {
+      agora.add(unidade.id);
+      const surge = !anteriores.has(unidade.id);
+      // Onda do centro para fora (até ~1s), com um grão de acaso para a
+      // frente da onda não parecer uma régua.
+      const atraso = surge
+        ? Math.round((distancia(unidade) / maisLonge) * 950 + Math.random() * 120)
+        : 0;
+      // O batimento de cada uma começa num ponto diferente do ciclo.
+      const fase = -Math.round(Math.random() * 2800);
+
       const icone = L.divIcon({
         className: 'pino-ubs',
         html:
-          '<span style="display:block;width:30px;height:30px">' +
-          `<span class="pino-ubs__corpo" style="--cor:${cor}">` +
-          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" ' +
-          'stroke="#fff" stroke-width="3" stroke-linecap="round" width="15" height="15">' +
-          '<path d="M12 5v14M5 12h14"/></svg>' +
-          '</span></span>',
-        iconSize: [30, 30],
-        iconAnchor: [15, 15]
+          `<span class="pino-saude${surge ? ' pino-saude--surge' : ''}" ` +
+          `style="--atraso:${atraso}ms;--fase:${fase}ms">` +
+          '<span class="pino-saude__anel"></span>' +
+          '<span class="pino-saude__sombra"></span>' +
+          '<span class="pino-saude__queda">' +
+          '<span class="pino-saude__gota"></span>' +
+          `<span class="pino-saude__disco"><span class="pino-saude__coracao">${coracao}</span></span>` +
+          '</span>' +
+          '</span>',
+        iconSize: [40, 54],
+        // A ponta da gota é o lugar de verdade no mapa.
+        iconAnchor: [20, 47]
       });
 
       const marcador = L.marker([unidade.lat, unidade.lng], { icon: icone });
       marcador.bindTooltip(
         `<b>${escaparHtml(unidade.nome)}</b>` +
           (unidade.endereco ? `<br>${escaparHtml(unidade.endereco)}` : ''),
-        { direction: 'top', offset: [0, -16] }
+        { direction: 'top', offset: [0, -48] }
       );
       marcador.on('click', evento => {
         // O clique é da unidade: não pode virar marcação de ponto no mapa.
@@ -2985,6 +3033,8 @@ export default function MapContainer({
       });
       grupo.addLayer(marcador);
     });
+
+    idsDeUbsNoMapaRef.current = agora;
 
     // Ligar a camada e não ver nada seria um botão quebrado: o mapa vai onde
     // as unidades estão, mas só no momento em que a camada acende.
