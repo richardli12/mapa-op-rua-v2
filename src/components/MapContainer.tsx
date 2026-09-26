@@ -620,6 +620,78 @@ const desenharCirculoFechavel = (
 };
 
 /**
+ * A ONDA DE CHEGADA.
+ *
+ * Pino que aparece todo de uma vez é um mapa que "pisca". Aqui a chegada tem
+ * direção: do meio do conjunto para as bordas, como um sinal que se espalha
+ * pela cidade. Quem está no centro chega primeiro; quem está na periferia,
+ * por último — e um grão de acaso impede a frente da onda de virar régua.
+ *
+ * O centro é o do próprio conjunto (e não o da tela) porque a camada costuma
+ * enquadrar o mapa logo depois de desenhar: medir pela tela de antes daria
+ * uma onda saindo do lugar errado.
+ */
+const ondaDeChegada = (pontos: { lat: number; lng: number }[], duracao = 900) => {
+  if (pontos.length === 0) return () => 0;
+  const cLat = pontos.reduce((s, p) => s + p.lat, 0) / pontos.length;
+  const cLng = pontos.reduce((s, p) => s + p.lng, 0) / pontos.length;
+  const cos = Math.cos((cLat * Math.PI) / 180);
+  const dist = (p: { lat: number; lng: number }) => Math.hypot(p.lat - cLat, (p.lng - cLng) * cos);
+  const maisLonge = Math.max(...pontos.map(dist), 1e-9);
+  return (p: { lat: number; lng: number }) =>
+    Math.round((dist(p) / maisLonge) * duracao + Math.random() * 90);
+};
+
+/**
+ * O relógio de chegada de cada pino.
+ *
+ * O mapa redesenha os marcadores por qualquer motivo — a equipe carregou, um
+ * tipo chegou, a ficha abriu — e redesenhar é recriar o HTML. Um pino no
+ * meio da queda voltava do zero ou parava seco. Aqui cada pino guarda QUANDO
+ * a queda dele começou; num redesenho, ele volta com o atraso que falta (ou
+ * negativo, se já começou), e a animação continua do ponto exato onde
+ * estava. Passada a queda, o pino sai do relógio e fica quieto.
+ *
+ * Devolve o atraso em ms enquanto o pino está chegando, ou `null` quando ele
+ * já chegou (ou nunca foi novo).
+ */
+const tempoDeChegada = (
+  relogio: Map<string, number>,
+  id: string,
+  novo: boolean,
+  atraso: () => number,
+  duracao = 1700
+): number | null => {
+  const agora = performance.now();
+  let inicio = relogio.get(id);
+  if (inicio === undefined) {
+    if (!novo) return null;
+    inicio = agora + atraso();
+    relogio.set(id, inicio);
+  }
+  if (agora > inicio + duracao) {
+    relogio.delete(id);
+    return null;
+  }
+  return Math.round(inicio - agora);
+};
+
+/**
+ * O estouro do toque: um anel sai do pino no instante do clique.
+ *
+ * A ficha leva um instante para abrir; o anel chega antes, no lugar onde o
+ * dedo tocou — é o "sim, foi este" que faz o clique parecer imediato.
+ */
+const estourarNoToque = (marcador: L.Marker) => {
+  const raiz = marcador.getElement()?.firstElementChild as HTMLElement | null;
+  if (!raiz) return;
+  raiz.classList.remove('pino-toque');
+  void raiz.offsetWidth; // reinicia a animação num segundo toque seguido
+  raiz.classList.add('pino-toque');
+  window.setTimeout(() => raiz.classList.remove('pino-toque'), 700);
+};
+
+/**
  * O pino da missão.
  *
  * A missão é a única coisa no mapa que alguém tem de cumprir — e vinha
@@ -638,8 +710,13 @@ const construirPinoDeMissao = (opcoes: {
   pessoas: number;
   temMaterial: boolean;
   prazoVencendo: boolean;
+  /** Acabou de aparecer no mapa: cai em onda, com este atraso em ms. */
+  surge?: number | null;
+  /** Acabou de ser aberto: acende com um estouro. */
+  acende?: boolean;
 }) => {
   const { cor, iconeChave, destacado, pessoas, temMaterial, prazoVencendo } = opcoes;
+  const surge = typeof opcoes.surge === 'number';
   const tamanho = destacado ? 52 : 44;
   const borda = destacado ? 4 : 3;
 
@@ -669,8 +746,12 @@ const construirPinoDeMissao = (opcoes: {
   return L.divIcon({
     className: 'custom-div-icon',
     html: `
-      <div class="pino-missao${destacado ? ' pino-missao--ativa' : ''}"
-           style="--cor:${cor};--tamanho:${tamanho}px;--borda:${borda}px">
+      <div class="pino-missao${destacado ? ' pino-missao--ativa' : ''}${surge ? ' pino-missao--surge' : ''}${
+        opcoes.acende ? ' pino-missao--acende' : ''
+      }"
+           style="--cor:${cor};--tamanho:${tamanho}px;--borda:${borda}px;--atraso:${surge ? opcoes.surge : 0}ms">
+        ${surge ? '<span class="pino-missao__impacto"></span>' : ''}
+        ${opcoes.acende ? '<span class="pino-missao__estouro"></span><span class="pino-missao__estouro pino-missao__estouro--2"></span>' : ''}
         <span class="pino-missao__onda"></span>
         <span class="pino-missao__onda pino-missao__onda--2"></span>
         <span class="pino-missao__sombra"></span>
@@ -930,6 +1011,28 @@ export default function MapContainer({
   }, [selectedCheckInForModal?.id]);
   /** Check-ins desenhados da última vez: só quem não estava surge animado. */
   const idsDeCheckInNoMapaRef = useRef<Set<string>>(new Set());
+  /**
+   * Um tique a cada cinco minutos: o "ao vivo" de um check-in vence com o
+   * tempo, e o mapa precisa apagar o radar de quem já passou da hora sem
+   * esperar outra mudança qualquer para se redesenhar.
+   */
+  const [relogioDoMapa, setRelogioDoMapa] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setRelogioDoMapa(n => n + 1), 5 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  /** Missões (pinos e áreas) já na tela: só as novas chegam em onda. */
+  const idsDeMissaoNoMapaRef = useRef<Set<string>>(new Set());
+  const idsDeAreaNoMapaRef = useRef<Set<string>>(new Set());
+  /** A missão que estava aberta no desenho anterior: a nova acende. */
+  const missaoAcesaRef = useRef<string | null>(null);
+  /** Escolas já na tela: só as novas chegam em onda. */
+  const idsDeEscolaNoMapaRef = useRef<Set<string>>(new Set());
+  /** Os relógios de chegada (ver `tempoDeChegada`), um por camada. */
+  const chegadaDasMissoesRef = useRef(new Map<string, number>());
+  const chegadaDasAreasRef = useRef(new Map<string, number>());
+  const chegadaDosCheckInsRef = useRef(new Map<string, number>());
+  const chegadaDasEscolasRef = useRef(new Map<string, number>());
 
   // Ficha nova, seletor fechado: abrir o próximo check-in já com a lista de
   // missões aberta seria oferecer uma escolha que ninguém pediu.
@@ -2098,16 +2201,36 @@ export default function MapContainer({
       mapFilter === 'superfavoritos' ||
       mapFilter === 'nada'
     ) {
+      // Camada desligada: quando voltar, as áreas se abrem de novo.
+      idsDeAreaNoMapaRef.current = new Set();
+      chegadaDasAreasRef.current.clear();
       return;
     }
+
+    const areasAntes = idsDeAreaNoMapaRef.current;
+    const areasAgora = new Set<string>();
+    const atrasoDaArea = ondaDeChegada(areas.map(a => a.center), 700);
 
     areas.forEach(area => {
       // Em edição: quem aparece no lugar dela é o fantasma arrastável.
       if (itemEmEdicaoId && area.id === itemEmEdicaoId) return;
 
       const isSelected = area.id === selectedId || missaoAbertaRef?.id === area.id;
+      areasAgora.add(area.id);
+      const chegada = tempoDeChegada(
+        chegadaDasAreasRef.current,
+        area.id,
+        !areasAntes.has(area.id),
+        () => atrasoDaArea(area.center)
+      );
+      const nasce = chegada !== null;
+      const atraso = chegada ?? 0;
 
-      // Draw Radius Circle
+      /*
+       * A área se abre do centro quando chega, e a aberta na ficha ganha a
+       * borda andando — o tracejado corre em volta, como uma cerca viva que
+       * diz "é esta" sem cobrir o que está dentro.
+       */
       const circle = L.circle([area.center.lat, area.center.lng], {
         radius: area.radius,
         color: area.color,
@@ -2115,7 +2238,8 @@ export default function MapContainer({
         opacity: 0.85,
         fillColor: area.color,
         fillOpacity: isSelected ? 0.35 : 0.20,
-        className: 'transition-all duration-300'
+        dashArray: isSelected ? '12 9' : undefined,
+        className: `area-missao${nasce ? ' area-missao--nasce' : ''}${isSelected ? ' area-missao--ativa' : ''}`
       });
 
       const abrirFicha = (e: any) => {
@@ -2124,14 +2248,19 @@ export default function MapContainer({
       };
       circle.on('click', abrirFicha);
 
-      // Add a small center point marker to make it clickable and visible
-      const centerMarker = L.circleMarker([area.center.lat, area.center.lng], {
-        radius: isSelected ? 8 : 5,
-        color: '#ffffff',
-        weight: 2,
-        opacity: 1,
-        fillColor: area.color,
-        fillOpacity: 1
+      // O núcleo: marca o centro, pega o clique e pulsa na cor da área.
+      const nucleo = isSelected ? 18 : 12;
+      const centerMarker = L.marker([area.center.lat, area.center.lng], {
+        keyboard: false,
+        icon: L.divIcon({
+          className: '',
+          html:
+            `<span class="area-nucleo${isSelected ? ' area-nucleo--ativo' : ''}${nasce ? ' area-nucleo--nasce' : ''}" ` +
+            `style="--cor:${area.color};--tamanho:${nucleo}px;--atraso:${atraso}ms">` +
+            '<span class="area-nucleo__pulso"></span><span class="area-nucleo__ponto"></span></span>',
+          iconSize: [nucleo, nucleo],
+          iconAnchor: [nucleo / 2, nucleo / 2]
+        })
       });
 
       centerMarker.on('click', abrirFicha);
@@ -2172,7 +2301,9 @@ export default function MapContainer({
       // Add to group
       circlesGroup.addLayer(circle);
       circlesGroup.addLayer(centerMarker);
+      if (nasce) (circle.getElement() as SVGElement | undefined)?.style.setProperty('--atraso', `${atraso}ms`);
     });
+    idsDeAreaNoMapaRef.current = areasAgora;
   }, [areas, selectedId, mapFilter, itemEmEdicaoId, equipe, missaoAbertaRef]);
 
   // Render Pins
@@ -2189,8 +2320,24 @@ export default function MapContainer({
       mapFilter === 'superfavoritos' ||
       mapFilter === 'nada'
     ) {
+      // Camada desligada: quando voltar, as missões caem de novo.
+      idsDeMissaoNoMapaRef.current = new Set();
+      chegadaDasMissoesRef.current.clear();
+      missaoAcesaRef.current = null;
       return;
     }
+
+    /*
+     * Só quem chegou agora cai; o resto do mapa fica quieto. E a missão que
+     * acabou de ser aberta acende — o pino é redesenhado ao abrir a ficha, e
+     * o estouro dele é a resposta ao toque.
+     */
+    const antes = idsDeMissaoNoMapaRef.current;
+    const agora = new Set<string>();
+    const atrasoDaMissao = ondaDeChegada(pins.map(p => p.position), 900);
+    const aberta = missaoAbertaRef?.id || selectedId || null;
+    const acesaAntes = missaoAcesaRef.current;
+    missaoAcesaRef.current = aberta;
 
     pins.forEach(pin => {
       // Em edição: quem aparece no lugar dele é o fantasma arrastável.
@@ -2204,13 +2351,21 @@ export default function MapContainer({
       const designados = pin.assignedDeltas || pin.position?.assignedDeltas || [];
       const material = pin.position?.material || [];
 
+      agora.add(pin.id);
       const customIcon = construirPinoDeMissao({
         cor: pin.color,
         iconeChave: operationType?.icon || pin.iconType,
         destacado: isSelected,
         pessoas: designados.length,
         temMaterial: material.length > 0,
-        prazoVencendo: prazoApertado(pin.date)
+        prazoVencendo: prazoApertado(pin.date),
+        surge: tempoDeChegada(
+          chegadaDasMissoesRef.current,
+          pin.id,
+          !antes.has(pin.id),
+          () => atrasoDaMissao(pin.position)
+        ),
+        acende: isSelected && acesaAntes !== pin.id && antes.has(pin.id)
       });
 
       const marker = L.marker([pin.position.lat, pin.position.lng], {
@@ -2255,6 +2410,7 @@ export default function MapContainer({
 
       pinsGroup.addLayer(marker);
     });
+    idsDeMissaoNoMapaRef.current = agora;
   }, [pins, selectedId, mapFilter, operationTypes, itemEmEdicaoId, equipe, missaoAbertaRef]);
 
   // Render Check-ins
@@ -2268,6 +2424,7 @@ export default function MapContainer({
     if (mapFilter === 'markers' || mapFilter === 'nada') {
       // Camada desligada: quando voltar, todos surgem de novo.
       idsDeCheckInNoMapaRef.current = new Set();
+      chegadaDosCheckInsRef.current.clear();
       return;
     }
 
@@ -2290,12 +2447,33 @@ export default function MapContainer({
      */
     const anteriores = idsDeCheckInNoMapaRef.current;
     const agora = new Set<string>();
-    let novos = 0;
+    // A onda se mede só entre os que chegam: um check-in que vem sozinho da
+    // rua brota na hora, sem esperar a vez numa onda que não existe.
+    const atrasoDoCheckIn = ondaDeChegada(
+      visiveis.filter(c => !anteriores.has(c.id)).map(c => c.coordinates),
+      800
+    );
 
     visiveis.forEach(checkIn => {
       agora.add(checkIn.id);
-      const surge = !anteriores.has(checkIn.id);
-      const atraso = surge ? Math.min(novos++ * 22, 600) : 0;
+      const chegada = tempoDeChegada(
+        chegadaDosCheckInsRef.current,
+        checkIn.id,
+        !anteriores.has(checkIn.id),
+        () => atrasoDoCheckIn(checkIn.coordinates),
+        1400
+      );
+      const surge = chegada !== null;
+      const atraso = chegada ?? 0;
+      /*
+       * AO VIVO: o que a equipe registrou na última hora.
+       *
+       * Um radar sai do marcador e uma pastilha "agora" fica embaixo dele —
+       * o mapa passa a dizer onde a equipe ESTÁ, e não só onde já esteve.
+       * Rascunho não entra: ao vivo é trabalho confirmado.
+       */
+      const idade = Date.now() - new Date(checkIn.createdAt).getTime();
+      const aoVivo = checkIn.status !== 'rascunho' && idade >= 0 && idade < 60 * 60 * 1000;
       const brilha = mapFilter === 'favoritos' && checkIn.favorite && !checkIn.superFavorite;
       /*
        * A coroa se acha sozinha.
@@ -2359,13 +2537,16 @@ export default function MapContainer({
         : '';
 
       const checkInIcon = L.divIcon({
-        className: `custom-div-icon drop-shadow-md${surge ? ' ck-marcador-entra' : ''}${brilha ? ' ck-fav-brilho' : ''}${
+        className: `custom-div-icon drop-shadow-md ck-marcador${surge ? ' ck-marcador-entra' : ''}${brilha ? ' ck-fav-brilho' : ''}${
+          aoVivo ? ' ck-ao-vivo' : ''
+        }${
           coroado ? ` ck-super${mapFilter === 'superfavoritos' ? ' ck-super-forte' : ''}` : ''
         }`,
         html: `
-          <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; --atraso: ${atraso}ms;">
+          <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; --atraso: ${atraso}ms; --cor-ck: ${markerColor};">
             ${avatarHtml}
             ${estrelaHtml}
+            ${aoVivo ? '<span class="ck-radar"></span><span class="ck-radar ck-radar--2"></span><span class="ck-agora">agora</span>' : ''}
           </div>
         `,
         iconSize: [44, 44],
@@ -2402,7 +2583,7 @@ export default function MapContainer({
 
       // O mesmo cartão da missão: no mapa as duas coisas se clicam igual, e
       // o que o cursor mostra também tem de ser igual.
-      const etiqueta = `${coroado ? '👑 Super Favorito • ' : ''}${
+      const etiqueta = `${aoVivo ? '🔴 Ao vivo • ' : ''}${coroado ? '👑 Super Favorito • ' : ''}${
         isFree
           ? `⚠️ Check-in livre${priority ? ` • Prioridade ${priority.label}` : ''}`
           : '✅ Check-in de voluntário'
@@ -2433,13 +2614,14 @@ export default function MapContainer({
 
       // Evento de clique para mostrar todas as informações no meio da tela
       marker.on('click', () => {
+        estourarNoToque(marker);
         setSelectedCheckInForModal(checkIn);
       });
 
       checkInsGroup.addLayer(marker);
     });
     idsDeCheckInNoMapaRef.current = agora;
-  }, [checkIns, mapFilter]);
+  }, [checkIns, mapFilter, relogioDoMapa]);
 
   /**
    * Achar um check-in pedido de fora (a lista dos Super Favoritos).
@@ -3029,6 +3211,7 @@ export default function MapContainer({
       marcador.on('click', evento => {
         // O clique é da unidade: não pode virar marcação de ponto no mapa.
         L.DomEvent.stopPropagation(evento);
+        estourarNoToque(marcador);
         setUbsAberta(unidade);
       });
       grupo.addLayer(marcador);
@@ -3054,8 +3237,20 @@ export default function MapContainer({
     grupo.clearLayers();
     if (!escolasVisiveis || !escolas || escolas.length === 0) {
       camadaEscolasLigadaRef.current = false;
+      // Desligou: quando voltar, as escolas chegam em onda de novo.
+      idsDeEscolaNoMapaRef.current = new Set();
+      chegadaDasEscolasRef.current.clear();
       return;
     }
+
+    const escolasAntes = idsDeEscolaNoMapaRef.current;
+    const escolasAgora = new Set<string>();
+    const atrasoDaEscola = ondaDeChegada(
+      escolas
+        .filter(e => e.latitude !== null && e.longitude !== null && !escolasAntes.has(e.codigoInep))
+        .map(e => ({ lat: e.latitude as number, lng: e.longitude as number })),
+      1000
+    );
 
     escolas.forEach(escola => {
       /*
@@ -3068,6 +3263,15 @@ export default function MapContainer({
       const lng = escola.longitude;
       if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const cor = corDaDependencia(escola.dependencia);
+      escolasAgora.add(escola.codigoInep);
+      const chegada = tempoDeChegada(
+        chegadaDasEscolasRef.current,
+        escola.codigoInep,
+        !escolasAntes.has(escola.codigoInep),
+        () => atrasoDaEscola({ lat, lng })
+      );
+      const surge = chegada !== null;
+      const atraso = chegada ?? 0;
       const parada = escola.situacao ? escola.situacao !== 'EM ATIVIDADE' : false;
       const emFoco = escolaEmFoco === escola.codigoInep;
 
@@ -3100,9 +3304,9 @@ export default function MapContainer({
        * de quem esta no celular, em campo, para nao mostrar nada.
        */
       const icone = L.divIcon({
-        className: `pino-escola${emFoco ? ' pino-escola--foco' : ''}`,
+        className: `pino-escola${emFoco ? ' pino-escola--foco' : ''}${surge ? ' pino-escola--surge' : ''}`,
         html:
-          `<span style="--tamanho:${tamanho}px;--cor:${cor};display:block;` +
+          `<span style="--tamanho:${tamanho}px;--cor:${cor};--atraso:${atraso}ms;display:block;` +
           `width:${tamanho}px;height:${tamanho}px;${parada ? 'opacity:.45;' : ''}">` +
           (emFoco
             ? '<span class="pino-escola__onda"></span>' +
@@ -3145,6 +3349,7 @@ export default function MapContainer({
       }
     }
     camadaEscolasLigadaRef.current = escolasVisiveis;
+    idsDeEscolaNoMapaRef.current = escolasAgora;
   }, [escolas, escolasVisiveis, escolaEmFoco]);
 
   /**

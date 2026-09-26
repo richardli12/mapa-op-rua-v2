@@ -2875,3 +2875,484 @@ tr.super-linha {
     animation: none;
   }
 }
+
+/* ======================================================================
+ * PINOS VIVOS
+ *
+ * O mapa inteiro fala a mesma língua de movimento: o que chega, chega em
+ * onda (do centro do conjunto para as bordas); o que está sob o cursor se
+ * levanta; o que é tocado responde com um estouro; e o que está acontecendo
+ * agora — a missão aberta, o check-in da última hora — pulsa. Nada disso
+ * mexe no `transform` do ícone, que é do Leaflet: tudo anima o miolo.
+ * ==================================================================== */
+
+/* --- missão: o pino se levanta sob o cursor ------------------------- */
+.pino-missao {
+  transform-origin: 50% calc(var(--tamanho, 44px) * 1.207);
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.leaflet-marker-icon:hover .pino-missao {
+  transform: translateY(-5px) scale(1.1);
+}
+
+/* --- missão: a queda em onda ---------------------------------------- */
+.pino-missao--surge .pino-missao__gota {
+  animation:
+    pino-missao-cai 0.8s cubic-bezier(0.3, 0.7, 0.4, 1) var(--atraso, 0ms) both,
+    pino-missao-flutua 2.4s ease-in-out calc(var(--atraso, 0ms) + 0.8s) infinite;
+}
+
+/* A gota é um quadrado girado: o giro vem por último na lista para o
+   amassado do pouso ser na vertical da tela, e não na diagonal da gota. */
+@keyframes pino-missao-cai {
+  0% {
+    opacity: 0;
+    transform: translateY(-110px) scale(0.6, 0.75) rotate(-45deg);
+  }
+  15% {
+    opacity: 1;
+  }
+  55% {
+    transform: translateY(0) scale(1.14, 0.84) rotate(-45deg);
+  }
+  70% {
+    transform: translateY(-10px) scale(0.95, 1.06) rotate(-45deg);
+  }
+  85% {
+    transform: translateY(0) scale(1.03, 0.97) rotate(-45deg);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(-45deg);
+  }
+}
+
+.pino-missao--surge .pino-missao__sombra {
+  animation:
+    pino-missao-sombra-chega 0.8s ease-out var(--atraso, 0ms) both,
+    pino-missao-sombra 2.4s ease-in-out calc(var(--atraso, 0ms) + 0.8s) infinite;
+}
+
+@keyframes pino-missao-sombra-chega {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.2);
+  }
+  55% {
+    opacity: 0.4;
+    transform: scaleX(1.35);
+  }
+  100% {
+    opacity: 0.32;
+    transform: scaleX(1);
+  }
+}
+
+/* As ondas só começam depois do pouso. */
+.pino-missao--surge .pino-missao__onda {
+  animation-delay: calc(var(--atraso, 0ms) + 0.7s);
+}
+
+.pino-missao--surge .pino-missao__onda--2 {
+  animation-delay: calc(var(--atraso, 0ms) + 1.9s);
+}
+
+/* O anel que o bico solta no chão ao pousar. */
+.pino-missao__impacto {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--tamanho, 44px) * 1.207);
+  width: calc(var(--tamanho, 44px) * 0.55);
+  height: calc(var(--tamanho, 44px) * 0.22);
+  margin-left: calc(var(--tamanho, 44px) * -0.275);
+  margin-top: calc(var(--tamanho, 44px) * -0.11);
+  border-radius: 50%;
+  border: 2px solid var(--cor, #ea580c);
+  opacity: 0;
+  pointer-events: none;
+  animation: pino-impacto 0.9s cubic-bezier(0.22, 1, 0.36, 1) calc(var(--atraso, 0ms) + 0.42s) both;
+}
+
+@keyframes pino-impacto {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.3);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(3.4);
+  }
+}
+
+/* Os selos entram depois do pino, com um estalo. */
+.pino-missao--surge .pino-missao__selo {
+  animation: pino-selo-entra 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--atraso, 0ms) + 0.6s) both;
+}
+
+@keyframes pino-selo-entra {
+  0% {
+    scale: 0;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+/* O prazo que está vencendo treme de tempos em tempos, como um despertador. */
+.pino-missao__selo--prazo {
+  transform-origin: 50% 25%;
+  animation: selo-prazo-treme 3.2s ease-in-out 1s infinite;
+}
+
+.pino-missao--surge .pino-missao__selo--prazo {
+  animation:
+    pino-selo-entra 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--atraso, 0ms) + 0.6s) both,
+    selo-prazo-treme 3.2s ease-in-out calc(var(--atraso, 0ms) + 1.4s) infinite;
+}
+
+@keyframes selo-prazo-treme {
+  0%,
+  22%,
+  100% {
+    rotate: 0deg;
+  }
+  4% {
+    rotate: -16deg;
+  }
+  8% {
+    rotate: 14deg;
+  }
+  12% {
+    rotate: -10deg;
+  }
+  16% {
+    rotate: 8deg;
+  }
+}
+
+/* --- missão aberta: acende ------------------------------------------ */
+.pino-missao--acende .pino-missao__gota {
+  animation:
+    pino-missao-acende 0.6s cubic-bezier(0.34, 1.56, 0.64, 1),
+    pino-missao-flutua 1.4s ease-in-out 0.6s infinite;
+}
+
+@keyframes pino-missao-acende {
+  0% {
+    transform: scale(0.78) rotate(-45deg);
+  }
+  50% {
+    transform: scale(1.2) rotate(-45deg);
+  }
+  100% {
+    transform: rotate(-45deg);
+  }
+}
+
+.pino-missao--acende .pino-missao__icone {
+  animation: pino-icone-gira 0.65s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+@keyframes pino-icone-gira {
+  0% {
+    rotate: -360deg;
+    scale: 0.6;
+  }
+  100% {
+    rotate: 0deg;
+    scale: 1;
+  }
+}
+
+.pino-missao__estouro {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--tamanho, 44px) * 0.5);
+  width: var(--tamanho, 44px);
+  height: var(--tamanho, 44px);
+  margin-left: calc(var(--tamanho, 44px) * -0.5);
+  margin-top: calc(var(--tamanho, 44px) * -0.5);
+  border-radius: 50%;
+  border: 3px solid var(--cor, #ea580c);
+  opacity: 0;
+  pointer-events: none;
+  animation: pino-estouro 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pino-missao__estouro--2 {
+  border-width: 2px;
+  animation-delay: 0.14s;
+}
+
+@keyframes pino-estouro {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.5);
+  }
+}
+
+/* --- área: abre do centro, núcleo pulsa, a aberta tem cerca viva ---- */
+path.area-missao {
+  transition: fill-opacity 0.25s ease, stroke-width 0.25s ease;
+}
+
+path.area-missao:not(.area-missao--ativa):hover {
+  fill-opacity: 0.3;
+  stroke-width: 3.5;
+}
+
+path.area-missao--nasce {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: raio-nasce 0.85s cubic-bezier(0.22, 1, 0.36, 1) var(--atraso, 0ms) both;
+}
+
+path.area-missao--ativa {
+  animation: area-cerca 1.3s linear infinite;
+}
+
+@keyframes area-cerca {
+  to {
+    stroke-dashoffset: -21;
+  }
+}
+
+.area-nucleo {
+  position: relative;
+  display: block;
+  width: var(--tamanho, 12px);
+  height: var(--tamanho, 12px);
+}
+
+.area-nucleo__ponto {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--cor, #4f46e5);
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.4);
+  transition: scale 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.leaflet-marker-icon:hover .area-nucleo__ponto {
+  scale: 1.35;
+}
+
+.area-nucleo__pulso {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--cor, #4f46e5);
+  opacity: 0;
+  pointer-events: none;
+  animation: area-pulso 2.8s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+
+.area-nucleo--ativo .area-nucleo__pulso {
+  animation-duration: 1.4s;
+}
+
+.area-nucleo--nasce .area-nucleo__ponto {
+  animation: area-nucleo-entra 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--atraso, 0ms) + 0.35s) both;
+}
+
+.area-nucleo--nasce .area-nucleo__pulso {
+  animation-delay: calc(var(--atraso, 0ms) + 0.6s);
+}
+
+@keyframes area-pulso {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(4.5);
+    opacity: 0;
+  }
+}
+
+@keyframes area-nucleo-entra {
+  0% {
+    transform: scale(0);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* --- check-in: hover, toque e o radar do "ao vivo" ------------------ */
+.ck-marcador > div > div:first-child {
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
+.ck-marcador:hover > div > div:first-child {
+  transform: translateY(-2px) scale(1.16);
+}
+
+.pino-toque > div:first-child {
+  animation:
+    ck-toque 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+    ck-toque-anel 0.65s ease-out;
+}
+
+@keyframes ck-toque {
+  0% {
+    scale: 0.8;
+  }
+  45% {
+    scale: 1.28;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+@keyframes ck-toque-anel {
+  0% {
+    outline: 3px solid var(--cor-ck, #10b981);
+    outline-offset: 0;
+  }
+  100% {
+    outline: 3px solid transparent;
+    outline-offset: 16px;
+  }
+}
+
+.ck-radar {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 38px;
+  height: 38px;
+  margin: -19px 0 0 -19px;
+  border-radius: 50%;
+  border: 2px solid var(--cor-ck, #10b981);
+  background: color-mix(in srgb, var(--cor-ck, #10b981) 18%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+  animation: ck-radar 2.4s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+
+.ck-radar--2 {
+  animation-delay: 1.2s;
+}
+
+@keyframes ck-radar {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(2.7);
+    opacity: 0;
+  }
+}
+
+.ck-agora {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  translate: -50% 0;
+  padding: 1px 5px 1px 11px;
+  border-radius: 9999px;
+  background: #e11d48;
+  color: #fff;
+  font: 900 7.5px/1.35 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1.5px solid #fff;
+  box-shadow: 0 2px 6px rgba(225, 29, 72, 0.45);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ck-agora::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: #fff;
+  animation: ck-agora-pisca 1.1s ease-in-out infinite;
+}
+
+@keyframes ck-agora-pisca {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* --- unidade de saúde: o toque --------------------------------------- */
+.pino-saude.pino-toque .pino-saude__disco {
+  animation: ck-toque 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* --- escola: chega girando, em onda ---------------------------------- */
+.pino-escola--surge .pino-escola__corpo {
+  animation: pino-escola-surge 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) var(--atraso, 0ms) both;
+}
+
+@keyframes pino-escola-surge {
+  0% {
+    opacity: 0;
+    transform: scale(0) rotate(-120deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.18) rotate(10deg);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pino-escola__corpo {
+  transition: scale 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.pino-escola:hover .pino-escola__corpo {
+  scale: 1.15;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pino-missao,
+  .pino-missao--surge .pino-missao__gota,
+  .pino-missao--surge .pino-missao__sombra,
+  .pino-missao__impacto,
+  .pino-missao--surge .pino-missao__selo,
+  .pino-missao__selo--prazo,
+  .pino-missao--acende .pino-missao__gota,
+  .pino-missao--acende .pino-missao__icone,
+  .pino-missao__estouro,
+  path.area-missao--nasce,
+  path.area-missao--ativa,
+  .area-nucleo__pulso,
+  .area-nucleo--nasce .area-nucleo__ponto,
+  .pino-toque > div:first-child,
+  .ck-radar,
+  .ck-agora::before,
+  .pino-saude.pino-toque .pino-saude__disco,
+  .pino-escola--surge .pino-escola__corpo {
+    animation: none !important;
+    transition: none !important;
+  }
+  .pino-missao__impacto,
+  .pino-missao__estouro,
+  .ck-radar {
+    display: none;
+  }
+}
